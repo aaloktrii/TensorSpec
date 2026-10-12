@@ -158,6 +158,8 @@ def parse_args():
     ap.add_argument("--nonmag", action="store_true")
     ap.add_argument("--nl", type=int, default=3)
     ap.add_argument("--nktab", type=int, default=250)
+    ap.add_argument("--vxc", default="VWN", choices=["VWN", "MJW", "VBH", "PBE", "PW92", "EV-GGA"],
+                    help="exchange-correlation: VWN/MJW/VBH = LDA, PBE/PW92/EV-GGA = GGA (default VWN, the historical setting)")
     ap.add_argument("--iq-surf", default="auto", help="'auto' (pick_surface_site) or an integer IQ")
     ap.add_argument("--hv", type=float, default=21.2)
     ap.add_argument("--pol", default="P", choices=["P", "S", "C+", "C-"])
@@ -279,7 +281,7 @@ def main() -> int:
 
     current_log = None
     try:
-        scf_params = ScfParams(nl=args.nl, nktab=args.nktab, nonmag=args.nonmag, dataset=formula)
+        scf_params = ScfParams(nl=args.nl, nktab=args.nktab, nonmag=args.nonmag, dataset=formula, vxc=args.vxc)
 
         pot_path: str
         if args.pot:

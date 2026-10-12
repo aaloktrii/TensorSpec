@@ -14,6 +14,83 @@ except ImportError:
 
 from tensorspec.core.arpes.one_step.chinook_arpes_kmesh import _grizzly_diagonalize_tb
 
+
+def _load_hr_rows(w90_filepath, data_start, num_wann, hop_tol, *, chunk_rows=2_000_000):
+    """Stream wannier90_hr.dat, keeping only rows that can survive the hop_tol filter.
+
+    Returns (hop, r_idx, n_total): `hop` is (M, 7) float64 of the surviving rows in
+    file order, `r_idx` the R-block index of each surviving row computed from its
+    ORIGINAL position, and `n_total` the number of data rows in the file.
+
+    Why: a 324-orbital spinor hr.dat is 324^2 * 1265 = 1.33e8 rows / 6.2 GB. The old
+    np.loadtxt over the whole file needed ~7.4 GB for the result array alone, plus
+    several times that transiently, and ran for hours. Typically ~99% of rows are
+    below hop_tol, so we filter per chunk and never hold more than chunk_rows at once.
+
+    Rows kept: |Re| > hop_tol or |Im| > hop_tol, PLUS every on-site row (R = 0 and
+    i == j) whatever its magnitude, because the caller shifts those by -E_F afterwards
+    and a tiny raw value there becomes a large one. Degeneracy weights are >= 1, so
+    dividing by them can only shrink |t|; the kept set is therefore a superset of what
+    the caller's own |t_ij| > hop_tol filter keeps, and the final result is identical
+    to reading the whole file at once.
+    """
+    n_block = int(num_wann) * int(num_wann)
+    kept, kept_r = [], []
+    state = {"row0": 0}
+
+    def _take(block):
+        block = np.asarray(block, dtype=np.float64)
+        if block.ndim == 1:
+            block = block.reshape(1, -1)
+        if block.size == 0:
+            return
+        if block.shape[1] < 7:
+            raise ValueError(f"Unexpected wannier90_hr.dat columns: {block.shape}")
+        idx = state["row0"] + np.arange(block.shape[0], dtype=np.int64)
+        state["row0"] += block.shape[0]
+        sel = (np.abs(block[:, 5]) > hop_tol) | (np.abs(block[:, 6]) > hop_tol)
+        sel |= (
+            (block[:, 0] == 0)
+            & (block[:, 1] == 0)
+            & (block[:, 2] == 0)
+            & (block[:, 3] == block[:, 4])
+        )
+        if sel.any():
+            kept.append(block[sel, :7])
+            kept_r.append(idx[sel] // n_block)
+
+    try:
+        import pandas as pd
+
+        # sep=r"\s+" is special-cased to the C whitespace tokenizer (fast, leading
+        # blanks handled); the file is 7 numeric columns with no header.
+        for chunk in pd.read_csv(
+            w90_filepath,
+            skiprows=data_start,
+            sep=r"\s+",
+            header=None,
+            usecols=range(7),
+            dtype=np.float64,
+            chunksize=chunk_rows,
+        ):
+            _take(chunk.to_numpy(dtype=np.float64))
+    except ImportError:
+        from itertools import islice
+
+        with open(w90_filepath, "r") as fh:
+            for _ in range(data_start):
+                fh.readline()
+            while True:
+                lines = list(islice(fh, chunk_rows))
+                if not lines:
+                    break
+                _take(np.loadtxt(lines))
+
+    n_total = state["row0"]
+    if not kept:
+        return np.empty((0, 7), dtype=np.float64), np.empty(0, dtype=np.int64), n_total
+    return np.vstack(kept), np.concatenate(kept_r), n_total
+
 class ChinookTightBindingEngine:
     """
     Core engine for Tight Binding calculations using the Chinook backend.
@@ -1127,12 +1204,15 @@ class ChinookTightBindingEngine:
             )
 
         data_start = 3 + deg_lines
-        # Columns: R_x R_y R_z i j Re(H) Im(H)  — bulk of file; vectorized
-        hop = np.loadtxt(w90_filepath, skiprows=data_start)
-        if hop.ndim == 1:
-            hop = hop.reshape(1, -1)
-        if hop.shape[1] < 7:
-            raise ValueError(f"Unexpected wannier90_hr.dat columns: {hop.shape}")
+        # Columns: R_x R_y R_z i j Re(H) Im(H) — streamed in chunks and pre-filtered,
+        # so a multi-GB spinor hr.dat does not have to fit in memory all at once.
+        hop, hop_r_idx, n_file_rows = _load_hr_rows(
+            w90_filepath, data_start, num_wann, hop_tol
+        )
+        if hop.shape[0] == 0:
+            raise ValueError(
+                f"wannier90_hr.dat has no hopping above |t|>{hop_tol:g}: {w90_filepath}"
+            )
 
         a_mat = self.crystal_structure.lattice.matrix
 
@@ -1268,12 +1348,11 @@ class ChinookTightBindingEngine:
         t_real = hop[:, 5].astype(np.float64, copy=True)
         t_imag = hop[:, 6].astype(np.float64)
 
-        n_block = num_wann * num_wann
-        r_idx = np.arange(hop.shape[0], dtype=np.int64) // n_block
-        if r_idx.size and int(r_idx[-1]) >= len(deg_weights):
+        r_idx = hop_r_idx
+        if r_idx.size and int(r_idx.max()) >= len(deg_weights):
             raise ValueError(
                 f"Hopping rows exceed degeneracy table "
-                f"(r_idx max={int(r_idx[-1])}, nrpts={len(deg_weights)})"
+                f"(r_idx max={int(r_idx.max())}, nrpts={len(deg_weights)})"
             )
         weights = deg_weights[r_idx]
 
@@ -1287,7 +1366,7 @@ class ChinookTightBindingEngine:
 
         t_ij = (t_real + 1j * t_imag) / weights
         keep = np.abs(t_ij) > hop_tol
-        n_raw = int(t_ij.shape[0])
+        n_raw = int(n_file_rows)
         n_keep = int(np.count_nonzero(keep))
         print(
             f"Hop filter |t|>{hop_tol:g}: kept {n_keep:,} / {n_raw:,} "

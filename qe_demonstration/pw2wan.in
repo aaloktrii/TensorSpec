@@ -1,0 +1,8 @@
+&inputpp
+  outdir = './out/'
+  prefix = 'tensorspec_run'
+  seedname = 'wannier90'
+  write_mmn = .true.
+  write_amn = .true.
+  write_unk = .false.
+/
