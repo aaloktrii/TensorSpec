@@ -51,6 +51,7 @@ class ARPESSuite(QWidget):
         
         # Use a QSplitter to separate the Fetcher list from the Viewer
         self.viewer_splitter = QSplitter(Qt.Horizontal)
+        self.viewer_splitter.setChildrenCollapsible(False)
         data_layout.addWidget(self.viewer_splitter)
         
         # --- LEFT SIDE: THE FETCHER ---
@@ -78,7 +79,8 @@ class ARPESSuite(QWidget):
         # --- RIGHT SIDE: THE VIEWER ---
         self.viewer_panel = DataViewerPanel()
         self.viewer_splitter.addWidget(self.viewer_panel)
-        
+        self.viewer_splitter.setStretchFactor(0, 0)
+        self.viewer_splitter.setStretchFactor(1, 1)
         # Set initial sizes (20% sidebar, 80% viewer)
         self.viewer_splitter.setSizes([200, 800])
         

@@ -306,11 +306,13 @@ class CrystalViewerSuite(QWidget):
         exf_layout.addWidget(self.btn_extract_bulk)
         layout.addWidget(exf_group)
 
-        self.scroll_area = QScrollArea(); self.scroll_area.setWidgetResizable(True)
-        self.scroll_container = QWidget(); self.scroll_layout = QVBoxLayout(self.scroll_container)
+        # Layer rows live in the outer tab scroll (no nested QScrollArea).
+        self.scroll_container = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_container)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll_layout.setAlignment(Qt.AlignTop)
-        self.scroll_area.setWidget(self.scroll_container)
-        layout.addWidget(self.scroll_area)
+        layout.addWidget(self.scroll_container)
+        self.scroll_area = self.scroll_container  # alias for older call sites
 
         btn_draw_stack = QPushButton("🧱 Render Heterostructure Stack")
         btn_draw_stack.setStyleSheet("background-color: #2b5c8f; color: white; font-weight: bold; padding: 6px;")

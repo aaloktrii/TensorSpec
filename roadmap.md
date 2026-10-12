@@ -23,6 +23,7 @@ Grand App
 	- [x] CDW Mode: Define atom shifts (dx, dy, dz) and propagate simulated distortions.
 	- [x] Brillouin Zone Engine: Bulk BZ, Cleaving surface BZ, kz slicing, and surface termination projections. (**BZ** tab: Wigner-Seitz cell, hovering surface plane, native export.)
 	- [x] View-panel de-crowding: Structure / Camera / Export sub-tabs + wider left splitter (avoids squeezed controls).
+	- [x] Stack tab: single outer scroll (no nested layer scrollbar).
 	- [ ] ML Interatomic Potential (MLIP) Relaxation: Fast real-space atomic force relaxation for stacked/cleaved heterostructures (CHGNet / M3GNet integration via matgl).
 - DFT Suite
 	- [x] Establish Data Pipeline: Pull crystal structure from `workspace.py` (drawn from Crystal Viewer Suite) to perform bulk band structure calculations.
@@ -77,6 +78,7 @@ Grand App
 	- [x] background subtraction (shared BG core) applied across stack / channels
 	- [x] XMCD sum-rule analysis for CP/CM (and related pairs)
 	- [x] Layout: left forms-only; right tabs Frame | BG | Sum Rule (previews no longer crowd left scroll)
+- [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/DFT/ARPES/Transport/ML (prevent drag-to-zero)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)
 	- [x] background subtraction + XMCD sum rule via **shared PEEM BG / sum-rule core** (no separate `xas_engine.py` yet)

@@ -85,10 +85,10 @@ class MLSuite(QWidget):
         splitter.addWidget(self.browser_panel)
         splitter.addWidget(mid_panel)
         splitter.addWidget(tabs)
+        splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 1)
-        splitter.setCollapsible(1, False)
         splitter.setSizes([260, 680, 560])
         layout.addWidget(splitter, 1)
 

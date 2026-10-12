@@ -41,6 +41,7 @@ class TransportSuite(QWidget):
         root.addWidget(header)
 
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
 
         left = QWidget()
@@ -123,6 +124,8 @@ class TransportSuite(QWidget):
         self.ax = self.fig.add_subplot(111)
         right_layout.addWidget(self.canvas)
         splitter.addWidget(right)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
         splitter.setSizes([340, 660])
 
     def _curve_kind(self) -> str:

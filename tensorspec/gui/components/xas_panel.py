@@ -38,6 +38,7 @@ class XasPanel(QWidget):
     def _setup_ui(self):
         root = QVBoxLayout(self)
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
 
         control_panel = QWidget()
@@ -163,6 +164,8 @@ class XasPanel(QWidget):
         self.main_ax = self.main_figure.add_subplot(111)
         view_layout.addWidget(self.main_canvas, stretch=1)
         splitter.addWidget(view_panel)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
         splitter.setSizes([380, 620])
 
         self._sync_bg_method_ui()

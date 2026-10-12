@@ -1027,6 +1027,7 @@ class DataViewerPanel(QWidget):
 
         # Root splitter for vertical rows
         self.v_splitter = QSplitter(Qt.Vertical)
+        self.v_splitter.setChildrenCollapsible(False)
         self.main_layout.addWidget(self.v_splitter)
         self.main_layout.setStretch(1, 1)
 
@@ -1237,10 +1238,12 @@ class DataViewerPanel(QWidget):
                     h_splitter.addWidget(spacer)
             
             # Distribute width evenly
+            h_splitter.setChildrenCollapsible(False)
             h_splitter.setSizes([1000] * (max_col + 1))
             self.v_splitter.addWidget(h_splitter)
-            
+
         # Distribute height evenly
+        self.v_splitter.setChildrenCollapsible(False)
         self.v_splitter.setSizes([1000] * self.v_splitter.count())
 
     @staticmethod

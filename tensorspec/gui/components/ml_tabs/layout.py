@@ -32,9 +32,9 @@ def split_panel(controls, canvas, sizes=(300, 460)):
     splitter = QSplitter(Qt.Orientation.Vertical)
     splitter.addWidget(scrollable(controls))
     splitter.addWidget(canvas_holder)
+    splitter.setChildrenCollapsible(False)
     splitter.setStretchFactor(0, 0)
     splitter.setStretchFactor(1, 1)
-    splitter.setCollapsible(1, False)
     splitter.setSizes(list(sizes))
 
     page = QWidget()

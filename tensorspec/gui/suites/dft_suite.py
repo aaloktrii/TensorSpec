@@ -319,9 +319,11 @@ class DFTSuite(QWidget):
 
         # Create the Draggable Splitter
         main_splitter = QSplitter(Qt.Horizontal)
+        main_splitter.setChildrenCollapsible(False)
         main_splitter.addWidget(scroll_area) # Add the scroll area instead of the raw panel
         main_splitter.addWidget(self.right_container)
-        
+        main_splitter.setStretchFactor(0, 0)
+        main_splitter.setStretchFactor(1, 1)
         # Set initial width ratio (380px for the left panel, the rest for the canvas)
         main_splitter.setSizes([380, 520]) 
         

@@ -126,6 +126,7 @@ class ARPESPanel(QWidget):
         # Use QSplitter instead of QHBoxLayout for resizable panels
         main_sim_layout = QVBoxLayout(self)
         self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
         main_sim_layout.addWidget(self.main_splitter)
         
         # --- LEFT PANEL: CONTROLS ---
@@ -782,7 +783,9 @@ class ARPESPanel(QWidget):
         self._sync_remote_ui()
         
         self.main_splitter.addWidget(plot_panel)
-        
+        self.main_splitter.setStretchFactor(0, 0)
+        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setStretchFactor(2, 1)
         # Set initial relative sizes for the splitter panels (e.g., 30% left, 35% middle, 35% right)
         self.main_splitter.setSizes([350, 400, 400])
         
