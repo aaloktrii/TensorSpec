@@ -165,8 +165,11 @@ class MatplotlibCrystalBackend:
         elif preset == 'iso': self.ax.view_init(elev=35, azim=45)
         self.canvas.draw_idle()
     
-    def draw_brillouin_zone(self, bz_points, bz_simplices, style_idx=0):
-        """Renders the BZ using Line3D collections to bypass Poly3DCollection projection crashes."""
+    def draw_brillouin_zone(self, bz_points, bz_simplices, style_idx=0, edges=None):
+        """Renders the BZ using Line3D collections to bypass Poly3DCollection projection crashes.
+
+        ``edges`` is accepted for API parity with the PyVista backend (unused here).
+        """
         from mpl_toolkits.mplot3d.art3d import Line3DCollection
         import numpy as np
 
