@@ -1,7 +1,11 @@
 TensorSpec_env/
 TensorSpec_Workspace/
 current_problem
-Pseudo
+# Pseudopotential UPF libraries (large; user-downloaded). Keep README tracked.
+Pseudo/*
+pseudo/*
+!Pseudo/README.md
+!pseudo/README.md
 qe_workspace
 tensorspec_v1
 .DS_Store

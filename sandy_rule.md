@@ -87,3 +87,5 @@ tensorspec/
 8. **ARPES Multi-Engine Protocol**: 
    When writing physics solvers under `core/arpes/`, never let solver-specific parameters bleed into the main UI. 
    The `arpes_engine.py` must act as a unified Factory Router. It receives a configuration dictionary from the GUI containing the model choice (A, B1, B2, B3) along with experimental variables, routes it to the designated submodule, and parses the output back into an xarray.DataTree structure under `/simulated` .
+
+9. **Public-clone privacy (GitHub safety):** Treat every commit as readable by a stranger who clones `TensorSpec_GUI` and runs it on **their** machine. **Never commit** personal information, lab/server hostnames, usernames, passwords, SSH keys/certs, MFA tokens, or maintainer-only absolute paths. Cluster configs stay local (`tensorspec_clusters.json` is gitignored). Docs/examples use placeholders only (e.g. `login.example.org`, `user`). External codes (Quantum ESPRESSO, SPR-KKR, GrizzlyME, …) and pseudopotential libraries are **user-installed**; do not vendor binaries or point at Sandy’s machines. Prefer env vars (`TENSORSPEC_PSEUDO_DIR`, …) over hardcoded home paths.

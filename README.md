@@ -22,6 +22,18 @@ pip install -r requirements.txt
 
 Optional remote GPU / GrizzlyME CUDA ARPES: configure a local cluster JSON (example kept in the maintainer-only local `docs/` tree, not shipped on GitHub).
 
+### External codes & data (you install)
+
+| Need | What to do |
+|------|------------|
+| Pseudopotentials (QE) | Download UPFs into `pseudo/` — see [`pseudo/README.md`](pseudo/README.md). Or set `TENSORSPEC_PSEUDO_DIR`. |
+| Quantum ESPRESSO / Wannier90 | Install binaries on your PATH (or remote cluster). |
+| SPR-KKR | Install locally or on your cluster; not vendored in this repo. |
+| GrizzlyME (optional CUDA ARPES) | Separate install; not required for core GUI. |
+| Cluster SSH | Create **your** local `tensorspec_clusters.json` (gitignored). Never commit passwords/hosts. |
+
+A fresh clone has **no** UPF library and **no** lab servers — that is intentional.
+
 ## Launch
 
 ```bash
