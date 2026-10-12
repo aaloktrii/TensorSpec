@@ -387,3 +387,249 @@ class CrystalEngine:
         up_vector = up_vector / np.linalg.norm(up_vector)
         
         return normal, up_vector
+
+    @staticmethod
+    def classify_stack_for_dft(layers: list[dict], twist_eps: float = 1e-6) -> str:
+        if not layers:
+            return "empty"
+        twists = [abs(float(l.get("twist", 0.0))) for l in layers]
+        any_twist = any(t > twist_eps for t in twists)
+        if any_twist and len(layers) != 2:
+            return "reject_multitwist"
+        if any_twist:
+            return "twist"
+        return "aligned"
+
+    @staticmethod
+    def isotropic_match_strain_percent(a_native: float, a_ref: float) -> float:
+        """Percent stretch of native a to match reference: (a_ref - a_native) / a_native * 100."""
+        if abs(a_native) < 1e-12:
+            raise ValueError("Degenerate native lattice parameter.")
+        return float((a_ref - a_native) / a_native * 100.0)
+
+    @staticmethod
+    def expected_commensurate_atom_count(moire: dict, layers: list[dict]) -> float:
+        """Expected atom count when tiling each layer into a commensurate moiré cell."""
+        ab = np.asarray(moire["matrix"], dtype=float)
+        area_m = abs(float(np.linalg.det(ab)))
+        total = 0.0
+        for layer in layers:
+            layer_ab = CrystalEngine._inplane_2x2(
+                layer["struct"], layer["sc_x"], layer["sc_y"]
+            )
+            area_l = abs(float(np.linalg.det(layer_ab)))
+            if area_l < 1e-12:
+                raise ValueError("Degenerate layer in-plane lattice for commensurate tiling.")
+            n_atoms = len(layer["struct"]) * int(layer["sc_x"]) * int(layer["sc_y"])
+            total += n_atoms * (area_m / area_l)
+        return total
+
+    @staticmethod
+    def inplane_strain_percent(ref_2x2: np.ndarray, other_2x2: np.ndarray) -> float:
+        ref = np.asarray(ref_2x2, dtype=float)
+        other = np.asarray(other_2x2, dtype=float)
+        denom = np.linalg.norm(ref, ord="fro")
+        if denom < 1e-12:
+            raise ValueError("Degenerate reference in-plane lattice.")
+        return float(100.0 * np.linalg.norm(other - ref, ord="fro") / denom)
+
+    @staticmethod
+    def _inplane_2x2(struct: Structure, sc_x: int = 1, sc_y: int = 1) -> np.ndarray:
+        m = struct.lattice.matrix.copy()
+        m[0] *= sc_x
+        m[1] *= sc_y
+        return m[:2, :2]
+
+    @staticmethod
+    def suggest_reference_layer(layers: list[dict]) -> tuple[int, list[float]]:
+        n = len(layers)
+        if n == 0:
+            raise ValueError("No layers for reference suggestion.")
+        strains = []
+        for r in range(n):
+            ref = CrystalEngine._inplane_2x2(layers[r]["struct"], layers[r]["sc_x"], layers[r]["sc_y"])
+            total = 0.0
+            for j in range(n):
+                if j == r:
+                    continue
+                other = CrystalEngine._inplane_2x2(layers[j]["struct"], layers[j]["sc_x"], layers[j]["sc_y"])
+                # relative twist: rotate other in-plane by (twist_j - twist_r)
+                dtheta = np.radians(float(layers[j]["twist"]) - float(layers[r]["twist"]))
+                c, s = np.cos(dtheta), np.sin(dtheta)
+                R = np.array([[c, -s], [s, c]])
+                other_rot = other @ R.T
+                total += CrystalEngine.inplane_strain_percent(ref, other_rot)
+            strains.append(total)
+        best = int(np.argmin(strains))
+        # tie-break within 0.1% relative -> layer 0 preference among ties
+        min_s = strains[best]
+        ties = [
+            i for i, s in enumerate(strains)
+            if min_s <= 0 or abs(s - min_s) / min_s <= 1e-3
+        ]
+        if 0 in ties:
+            best = 0
+        else:
+            best = ties[0]
+        return best, strains
+
+    @staticmethod
+    def aligned_needs_strain_dialog(layers: list[dict], ref_idx: int, tol_percent: float = 1.0) -> bool:
+        ref = CrystalEngine._inplane_2x2(layers[ref_idx]["struct"], layers[ref_idx]["sc_x"], layers[ref_idx]["sc_y"])
+        for j, layer in enumerate(layers):
+            if j == ref_idx:
+                continue
+            other = CrystalEngine._inplane_2x2(layer["struct"], layer["sc_x"], layer["sc_y"])
+            if CrystalEngine.inplane_strain_percent(ref, other) > tol_percent:
+                return True
+        return False
+
+    @staticmethod
+    def _finalize_slab_structure(ab_2x2, species, carts_xyz, tags, vacuum_ang: float) -> Structure:
+        """Build lattice from in-plane 2x2 + vacuum along c; center slab in c."""
+        carts = np.asarray(carts_xyz, dtype=float)
+        zmin, zmax = float(carts[:, 2].min()), float(carts[:, 2].max())
+        zspan = max(zmax - zmin, 0.0)
+        c = zspan + float(vacuum_ang)
+        z_center = 0.5 * (zmin + zmax)
+        carts[:, 2] = carts[:, 2] - z_center + 0.5 * c
+        matrix = np.zeros((3, 3), dtype=float)
+        matrix[:2, :2] = ab_2x2
+        matrix[2, 2] = c
+        lat = Lattice(matrix)
+        if lat.a >= 499.0:
+            raise ValueError(f"In-plane lattice too large for DFT cell: a={lat.a:.1f} Å")
+        return Structure(
+            lat, species, carts, coords_are_cartesian=True,
+            site_properties={"layer_tag": tags},
+        )
+
+    @staticmethod
+    def build_dft_aligned_stack(layers: list[dict], vacuum_ang: float, ref_idx: int = 0) -> Structure:
+        if not layers:
+            raise ValueError("No layers to build DFT stack.")
+        if ref_idx < 0 or ref_idx >= len(layers):
+            raise ValueError("ref_idx out of range.")
+        ab = CrystalEngine._inplane_2x2(
+            layers[ref_idx]["struct"], layers[ref_idx]["sc_x"], layers[ref_idx]["sc_y"]
+        )
+        species, carts, tags = [], [], []
+        for idx, l in enumerate(layers):
+            supercell = l["struct"] * (l["sc_x"], l["sc_y"], 1)
+            # Strain via fractional xy on the ref ab lattice. Do NOT center+wrap:
+            # independent PBC wrap after centering tears in-plane bonds (e.g. C–C ~3 Å).
+            z0 = float(l["z_shift"]) - 12.5
+            z_mean = float(np.mean(supercell.cart_coords[:, 2]))
+            for site in supercell:
+                frac_xy = np.asarray(site.frac_coords[:2], dtype=float)
+                frac_xy = frac_xy - np.floor(frac_xy + 1e-12)
+                xy_in_ref = frac_xy @ ab  # ab rows = lattice vectors
+                z = float(site.coords[2]) - z_mean + z0
+                species.append(site.specie.symbol)
+                carts.append([float(xy_in_ref[0]), float(xy_in_ref[1]), z])
+                tags.append(f"{site.specie.symbol}_L{idx + 1}")
+        return CrystalEngine._finalize_slab_structure(ab, species, carts, tags, vacuum_ang)
+
+    @staticmethod
+    def _place_layer_atoms(layer: dict, idx: int, apply_twist: bool) -> tuple[list, list, list]:
+        """Return species, cartesian coords, tags for one layer (xy centered, z from spinbox)."""
+        supercell = layer["struct"] * (layer["sc_x"], layer["sc_y"], 1)
+        coords = supercell.cart_coords.copy()
+        center_xy = np.mean(coords[:, :2], axis=0)
+        coords[:, :2] -= center_xy
+        if apply_twist:
+            theta = np.radians(float(layer["twist"]))
+            R = np.array([[np.cos(theta), -np.sin(theta), 0],
+                          [np.sin(theta),  np.cos(theta), 0],
+                          [0, 0, 1]])
+            coords = coords @ R.T
+        coords[:, 2] = coords[:, 2] - np.mean(coords[:, 2]) + (float(layer["z_shift"]) - 12.5)
+        species, carts, tags = [], [], []
+        for i, site in enumerate(supercell):
+            species.append(site.specie.symbol)
+            carts.append(coords[i].tolist())
+            tags.append(f"{site.specie.symbol}_L{idx + 1}")
+        return species, carts, tags
+
+    @staticmethod
+    def _supercell_shifts(moire_ab, layer_ab) -> list:
+        """Integer layer-lattice shifts for one moiré cell via rounded S = moiré @ inv(layer)."""
+        moire_ab = np.asarray(moire_ab, dtype=float)
+        layer_ab = np.asarray(layer_ab, dtype=float)
+        S = np.round(moire_ab @ np.linalg.inv(layer_ab))
+        det = int(abs(round(np.linalg.det(S))))
+        if det < 1:
+            return []
+        Sinv = np.linalg.inv(S)
+        n_max = int(np.max(np.abs(S))) + 3
+        shifts = []
+        for n1 in range(-2 * n_max, 2 * n_max + 1):
+            for n2 in range(-2 * n_max, 2 * n_max + 1):
+                u = Sinv @ np.array([n1, n2], dtype=float)
+                if np.all(u >= -1e-10) and np.all(u < 1.0 - 1e-10):
+                    shifts.append(n1 * layer_ab[0] + n2 * layer_ab[1])
+        return shifts
+
+    @staticmethod
+    def _tile_into_cell(moire_ab, layer_ab, species, carts, tags) -> tuple[list, list, list]:
+        """Replicate on layer lattice using rounded-S supercell; fold into moiré [0,1)."""
+        moire_ab = np.asarray(moire_ab, dtype=float)
+        layer_ab = np.asarray(layer_ab, dtype=float)
+        moire_inv_t = np.linalg.inv(moire_ab.T)
+        shifts = CrystalEngine._supercell_shifts(moire_ab, layer_ab)
+        if not shifts:
+            return [], [], []
+
+        out_s, out_c, out_t = [], [], []
+        seen = set()
+        for shift in shifts:
+            for s, c, t in zip(species, carts, tags):
+                xy = np.asarray(c[:2], dtype=float) + shift
+                frac = xy @ moire_inv_t
+                frac = frac - np.floor(frac + 1e-12)
+                frac = np.where(frac > 1.0 - 1e-10, 0.0, frac)
+                key = (round(float(frac[0]), 6), round(float(frac[1]), 6), s, t)
+                if key in seen:
+                    continue
+                seen.add(key)
+                xy_f = frac @ moire_ab.T
+                out_s.append(s)
+                out_c.append([float(xy_f[0]), float(xy_f[1]), float(c[2])])
+                out_t.append(t)
+        return out_s, out_c, out_t
+
+    @staticmethod
+    def build_dft_twist_stack(
+        layers: list[dict],
+        vacuum_ang: float,
+        ref_idx: int,
+        stacking: str = "AA",
+        max_cells: int = 217,
+        valley: str = "K",
+    ) -> tuple[Structure, dict]:
+        if len(layers) != 2:
+            raise ValueError("Twist DFT rebuild requires exactly 2 layers.")
+        for i, layer in enumerate(layers):
+            sc_x, sc_y = int(layer["sc_x"]), int(layer["sc_y"])
+            if sc_x != 1 or sc_y != 1:
+                raise ValueError(
+                    f"Twisted DFT cells require SC = 1×1 on every layer "
+                    f"(layer {i + 1} has {sc_x}×{sc_y}). "
+                    "Set supercell to 1×1 before Push; moiré tiling already expands the cell. "
+                    "Aligned (zero-twist) N-layer stacks may still use SC ≠ 1."
+                )
+        from tensorspec.core.bernevig_twist import build_bernevig_bilayer
+
+        theta = float(layers[1]["twist"]) - float(layers[0]["twist"])
+        struct, info = build_bernevig_bilayer(
+            layers[0]["struct"],
+            layers[1]["struct"],
+            theta_deg=theta,
+            stacking=stacking,
+            z_bottom=float(layers[0]["z_shift"]),
+            z_top=float(layers[1]["z_shift"]),
+            vacuum_ang=float(vacuum_ang),
+            max_cells=int(max_cells),
+            valley=valley,
+        )
+        return struct, info

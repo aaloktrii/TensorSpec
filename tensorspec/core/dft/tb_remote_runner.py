@@ -175,7 +175,7 @@ def _write_job_dir_cache_compat(
         return
     except ImportError:
         pass
-    # Uploaded runner can be newer than Einstein's installed tensorspec.
+    # Uploaded runner can be newer than the remote host's installed tensorspec.
     import pickle
 
     payload = {

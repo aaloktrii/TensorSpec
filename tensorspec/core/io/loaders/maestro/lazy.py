@@ -345,10 +345,23 @@ def _acquisition_motors(
     plan: ScanPlan,
     canonical_motors: list[ScanMotor],
 ) -> list[ScanMotor]:
-    """Return slow-to-fast motor order used by each kind's eager reshape."""
+    """Return acquisition (file) motor order matching each kind's eager reshape.
+
+    Lazy ``read_block(i)`` must hit the same spectrum as
+    ``eager.reshape(-1, ...)[i]``. That means acquisition order here must
+    match how the eager loader reshapes the points axis before transpose
+    to canonical axes.
+
+    - ``xy_fine_4d``: canonical (Y, X); eager asserts that order.
+    - ``focus_xy_fine_5d``: ``plan.motors_slow_to_fast()`` (Y, X, Defl).
+    - ``defl_x_line_4d`` (and default): flattened loop-motor list, same as
+      the eager loader's ``motors_in_order``.
+    """
     if kind == "xy_fine_4d":
         # XY mesh points are stored with X varying fastest.
         return canonical_motors
+    if kind == "focus_xy_fine_5d":
+        return list(plan.motors_slow_to_fast())
     return [
         motor
         for loop in plan.loops

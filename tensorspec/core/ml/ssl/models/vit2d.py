@@ -137,6 +137,33 @@ class ViT2D(nn.Module):
         x = self.norm(x)
         return x[:, 0], x[:, 1:]
 
+    def forward_visible(
+        self, x: torch.Tensor, hidden: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Encode visible patches only.
+
+        ``hidden`` is bool ``[B, N]`` with True on hidden patches. Every row
+        must hide the same count. Returns ``(tokens [B, V, D], vis_idx [B, V])``.
+        """
+        if hidden.dtype != torch.bool or hidden.shape != (x.shape[0], self.num_patches):
+            raise ValueError("hidden must be bool [B, N]")
+        tokens = self.patch_embed(x).flatten(2).transpose(1, 2)
+        tokens = tokens + self.pos_embed[:, 1:, :]
+        visible = ~hidden
+        counts = visible.sum(dim=1)
+        if int(counts.min()) < 1:
+            raise ValueError("encoder received no visible patches")
+        if not torch.all(counts == counts[0]):
+            raise ValueError("visible count must match across the batch")
+        n_vis = int(counts[0].item())
+        vis_idx = visible.nonzero(as_tuple=False)[:, 1].view(x.shape[0], n_vis)
+        gathered = torch.gather(
+            tokens, 1, vis_idx.unsqueeze(-1).expand(-1, -1, tokens.shape[-1])
+        )
+        for block in self.blocks:
+            gathered = block(gathered)
+        return self.norm(gathered), vis_idx
+
 
 def build_vit2d(spec: ModelSpec) -> ViT2D:
     cfg = _MODEL_CFG[spec.name]

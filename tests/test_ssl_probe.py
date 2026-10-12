@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -8,13 +10,22 @@ from tensorspec.core.ml.ssl.probe import (
     agreement_metrics,
     cluster_embeddings,
     extract_cls_embeddings,
+    extract_patch_mean_embeddings,
+    extract_patch_mean_from_backbone,
     filter_manifest_indices,
     labels_to_grid,
     load_dino_for_probe,
     probe,
+    probe_precomputed_embeddings,
     reference_to_binary,
     spatial_contiguity,
 )
+from tensorspec.core.ml.ssl.reference import (
+    FloorReference,
+    build_roi_dict,
+    save_floor_reference,
+)
+from tensorspec.core.ml.ssl.shards import ShardWriter, write_manifest
 from tensorspec.core.ml.ssl.spec import (
     AugmentSpec,
     DinoSpec,
@@ -23,6 +34,8 @@ from tensorspec.core.ml.ssl.spec import (
     RunConfig,
     to_jsonable,
 )
+
+PROBE_SOURCE_ID = "synthetic_probe.h5"
 
 
 def _tiny_ckpt(tmp_path):
@@ -65,6 +78,115 @@ def test_filter_manifest_indices_by_source():
     assert filter_manifest_indices(manifest, "missing.h5") == []
 
 
+def _mini_probe_shards(data_dir: Path) -> None:
+    """2x2 grid, 4 samples @ 32x32 float16; two intensity domains."""
+    writer = ShardWriter(str(data_dir), target_bytes=10_000_000)
+    coords = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    for y, x in coords:
+        level = 0.2 if x == 0 else 0.9
+        img = np.full((32, 32), level, dtype=np.float32)
+        writer.add(img, {"source_id": PROBE_SOURCE_ID, "index": {"y": y, "x": x}})
+    writer.add(
+        np.full((32, 32), 0.5, dtype=np.float32),
+        {"source_id": "other.h5", "index": {"y": 0, "x": 0}},
+    )
+    partial = writer.close()
+    manifest = {
+        **partial,
+        "preprocess": {"sample": {"mode": "disp2d", "index_roles": ["y", "x"]}},
+        "sources": [
+            {
+                "id": PROBE_SOURCE_ID,
+                "size": 1,
+                "sha256_head": "0" * 64,
+                "sha256_tail": "0" * 64,
+                "kind": "xy_fine_4d",
+                "shape": [2, 2, 32, 32],
+                "detector": {},
+                "dead_pixel": {},
+                "calibration": {
+                    "deg_per_raw_px": 0.048,
+                    "axis_source": "test",
+                },
+            },
+            {
+                "id": "other.h5",
+                "size": 1,
+                "sha256_head": "1" * 64,
+                "sha256_tail": "1" * 64,
+                "kind": "xy_fine_4d",
+                "shape": [1, 1, 32, 32],
+                "detector": {},
+                "dead_pixel": {},
+                "calibration": {
+                    "deg_per_raw_px": 0.048,
+                    "axis_source": "test",
+                },
+            },
+        ],
+    }
+    write_manifest(str(data_dir / "manifest.json"), manifest)
+
+
+def _mini_reference(path: Path) -> None:
+    map_ = np.array([[1.0, 10.0], [1.0, 10.0]], dtype=np.float32)
+    roi = build_roi_dict(
+        labels=["Y", "X", "Energy", "Angle"],
+        axes=[
+            np.arange(2.0),
+            np.arange(2.0),
+            np.linspace(0, 1, 8),
+            np.linspace(-1, 1, 6),
+        ],
+        coords={0: 0, 1: 0, 2: 3, 3: 2},
+        halfwidths={0: 0, 1: 0, 2: 1, 3: 1},
+        reduce_mode="sum",
+        source_id=PROBE_SOURCE_ID,
+        display_y_label="Y",
+        display_x_label="X",
+        saved_utc="2026-09-07T12:00:00Z",
+    )
+    save_floor_reference(
+        path,
+        FloorReference(
+            map=map_,
+            y_axis=np.arange(2.0),
+            x_axis=np.arange(2.0),
+            roi=roi,
+        ),
+    )
+
+
+def test_probe_patch_mean_records_embed(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    _mini_probe_shards(data)
+    ckpt, _ = _tiny_ckpt(tmp_path)
+    ref_path = tmp_path / "floor.npz"
+    _mini_reference(ref_path)
+    out = tmp_path / "probe_out"
+
+    metrics = probe(
+        ckpt=ckpt,
+        data_dir=data,
+        reference=ref_path,
+        out_dir=out,
+        config=ProbeConfig(
+            source_id=PROBE_SOURCE_ID,
+            embed="patch_mean",
+            k=2,
+            seed=0,
+            batch_size=2,
+        ),
+    )
+
+    assert metrics["embed"] == "patch_mean"
+    assert metrics["l2_normalize"] is True
+    assert metrics["roi_mode"] == "full"
+    emb = np.load(out / "embeddings.npy")
+    assert emb.shape == (4, 192)
+
+
 def test_probe_rejects_k_lt_2(tmp_path):
     import pytest
 
@@ -76,6 +198,43 @@ def test_probe_rejects_k_lt_2(tmp_path):
             out_dir=tmp_path / "out",
             config=ProbeConfig(source_id="x", k=1),
         )
+
+
+def test_probe_precomputed_writes_metrics(tmp_path):
+    import json
+
+    ny, nx, d = 4, 4, 8
+    emb = np.zeros((ny * nx, d), dtype=np.float32)
+    provenances = []
+    i = 0
+    for y in range(ny):
+        for x in range(nx):
+            emb[i, 0] = 0.0 if x < 2 else 10.0
+            provenances.append({"index": {"y": y, "x": x}})
+            i += 1
+    ref_map = np.zeros((ny, nx), dtype=np.float32)
+    ref_map[:, 2:] = 1.0
+    ref = FloorReference(
+        map=ref_map,
+        y_axis=np.arange(ny, dtype=np.float64),
+        x_axis=np.arange(nx, dtype=np.float64),
+        roi={"source_id": "toy", "saved_utc": "t"},
+    )
+    out = tmp_path / "out"
+    cfg = ProbeConfig(k=2, pca_dim=0, seed=0, source_id="toy")
+    metrics = probe_precomputed_embeddings(
+        embeddings=emb,
+        provenances=provenances,
+        reference=ref,
+        out_dir=out,
+        config=cfg,
+        meta={"arm": "unit"},
+    )
+    assert (out / "embeddings.npy").exists()
+    assert (out / "metrics.json").exists()
+    assert (out / "fig_overlay.png").exists()
+    assert metrics["ari"] > 0.5
+    assert json.loads((out / "metrics.json").read_text())["arm"] == "unit"
 
 
 def test_agreement_metrics_multiclass_ari():
@@ -99,6 +258,59 @@ def test_extract_cls_shape(tmp_path):
     assert emb.shape == (5, model.teacher.embed_dim)
 
 
+def test_extract_patch_mean_shape_and_l2(tmp_path):
+    path, cfg = _tiny_ckpt(tmp_path)
+    model, _ = load_dino_for_probe(path, device=torch.device("cpu"))
+    images = np.random.randn(5, 32, 32).astype(np.float32)
+    emb = extract_patch_mean_embeddings(
+        model,
+        images,
+        batch_size=2,
+        use_teacher=True,
+        device=torch.device("cpu"),
+        l2_normalize=True,
+    )
+    assert emb.shape == (5, model.teacher.embed_dim)
+    norms = np.linalg.norm(emb, axis=1)
+    assert np.allclose(norms, 1.0, atol=1e-5)
+
+
+def test_extract_patch_mean_no_l2_differs(tmp_path):
+    path, _ = _tiny_ckpt(tmp_path)
+    model, _ = load_dino_for_probe(path, device=torch.device("cpu"))
+    images = np.random.randn(3, 32, 32).astype(np.float32)
+    a = extract_patch_mean_embeddings(
+        model, images, batch_size=3, use_teacher=True,
+        device=torch.device("cpu"), l2_normalize=False,
+    )
+    b = extract_patch_mean_embeddings(
+        model, images, batch_size=3, use_teacher=True,
+        device=torch.device("cpu"), l2_normalize=True,
+    )
+    assert a.shape == b.shape
+    assert not np.allclose(a, b)
+
+
+def test_extract_patch_mean_from_backbone_matches_wrapper():
+    vit = build_vit2d(ModelSpec(name="vit_ti", img_size=128, patch_size=16, in_chans=1))
+
+    class Wrap:
+        def __init__(self, b):
+            self.teacher = b
+            self.student = b
+
+        def eval(self):
+            self.teacher.eval()
+
+    images = np.random.randn(4, 128, 128).astype(np.float32)
+    device = torch.device("cpu")
+    a = extract_patch_mean_from_backbone(vit, images, batch_size=2, device=device)
+    b = extract_patch_mean_embeddings(
+        Wrap(vit), images, batch_size=2, use_teacher=True, device=device
+    )
+    np.testing.assert_allclose(a, b, rtol=1e-5, atol=1e-5)
+
+
 def test_cluster_two_blobs():
     rng = np.random.default_rng(0)
     a = rng.normal(0, 0.1, size=(40, 8))
@@ -107,6 +319,16 @@ def test_cluster_two_blobs():
     labels = cluster_embeddings(emb, ProbeConfig(source_id="x", k=2, pca_dim=4, seed=0))
     assert set(labels.tolist()) == {0, 1}
     assert labels[:40].mean() != labels[40:].mean()  # separated
+
+
+def test_cluster_full_embedding_skips_pca():
+    rng = np.random.default_rng(1)
+    a = rng.normal(0, 0.1, size=(30, 16))
+    b = rng.normal(3, 0.1, size=(30, 16))
+    emb = np.vstack([a, b]).astype(np.float32)
+    labels = cluster_embeddings(emb, ProbeConfig(source_id="x", k=2, pca_dim=0, seed=0))
+    assert set(labels.tolist()) == {0, 1}
+    assert labels[:30].mean() != labels[30:].mean()
 
 
 
@@ -158,3 +380,37 @@ def test_reference_to_binary_two_level_map():
     right = np.unique(labels[:, 4:])
     assert left.size == 1 and right.size == 1
     assert left[0] != right[0]
+
+
+def test_roi_slices_and_mask():
+    from tensorspec.core.ml.ssl.probe import (
+        apply_roi_mask,
+        roi_slices_from_reference,
+    )
+
+    energy = np.linspace(-2.0, 0.5, 128)
+    slit = np.linspace(-5.0, 5.0, 128)
+    roi = {
+        "dims": [
+            {
+                "label": "Energy",
+                "physical_lo": float(energy[40]),
+                "physical_hi": float(energy[45]),
+            },
+            {
+                "label": "Angle",
+                "physical_lo": float(slit[10]),
+                "physical_hi": float(slit[20]),
+            },
+        ]
+    }
+    e_sl, s_sl = roi_slices_from_reference(roi, energy, slit)
+    assert e_sl.start <= 40 and e_sl.stop >= 45
+    assert s_sl.start <= 10 and s_sl.stop >= 20
+    images = np.ones((3, 128, 128), dtype=np.float32)
+    images[:, e_sl, s_sl] = 2.0
+    masked = apply_roi_mask(images, e_sl, s_sl, renormalize=True)
+    assert float(masked[:, 0, 0].sum()) == 0.0
+    ey = (e_sl.start + e_sl.stop) // 2
+    sx = (s_sl.start + s_sl.stop) // 2
+    assert float(masked[:, ey, sx].min()) > 0.0

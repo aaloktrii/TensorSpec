@@ -1,3 +1,4 @@
+"""DEPRECATED (2026-09-09): replaced by tensorspec.core.dft.sprkkr.workflow (native NT×NP grid). Kept for reference."""
 import os, sys, shutil, subprocess, time
 import numpy as np
 import concurrent.futures

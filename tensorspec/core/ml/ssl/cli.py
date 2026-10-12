@@ -68,6 +68,10 @@ def _parser() -> argparse.ArgumentParser:
         "--resume",
         help="checkpoint path to resume from",
     )
+    train_parser.add_argument(
+        "--pretrained",
+        help="override RunConfig.pretrained (e.g. dinov2_vits14)",
+    )
     probe_parser = subparsers.add_parser(
         "probe", help="floor metrics from ckpt + reference map"
     )
@@ -83,6 +87,27 @@ def _parser() -> argparse.ArgumentParser:
         "--student",
         action="store_true",
         help="use student CLS instead of teacher",
+    )
+    probe_parser.add_argument(
+        "--roi-mask",
+        action="store_true",
+        help="zero outside Energy/Angle ROI from reference; requires --axes",
+    )
+    probe_parser.add_argument(
+        "--axes",
+        help="npz with energy_axis/slit_axis for ROI mapping (roi-mask mode)",
+    )
+    probe_parser.add_argument(
+        "--embed",
+        choices=["cls", "patch_mean"],
+        default="cls",
+        help="CLS token or mean of all patch tokens",
+    )
+    probe_parser.add_argument(
+        "--pca-dim",
+        type=int,
+        default=50,
+        help="PCA dims before k-means; <=0 skips PCA (full embedding)",
     )
     return parser
 
@@ -152,8 +177,11 @@ def main(argv=None) -> int:
         )
         return 0
     if args.cmd == "train":
+        cfg = _run_config(args.config)
+        if args.pretrained:
+            cfg = replace(cfg, pretrained=args.pretrained)
         summary = train(
-            _run_config(args.config),
+            cfg,
             args.data,
             args.out,
             resume=args.resume,
@@ -172,6 +200,9 @@ def main(argv=None) -> int:
             seed=args.seed,
             batch_size=args.batch_size,
             use_teacher=not args.student,
+            roi_mode="mask" if args.roi_mask else "full",
+            embed=args.embed,
+            pca_dim=args.pca_dim,
         )
         metrics = probe(
             ckpt=args.ckpt,
@@ -179,11 +210,16 @@ def main(argv=None) -> int:
             reference=args.reference,
             out_dir=args.out,
             config=config,
+            axes_path=args.axes,
         )
+        iou = metrics["iou"]
+        iou_s = f"{iou:.4f}" if iou == iou else "nan"
         print(
             f"done probe: n_samples={metrics['n_samples']} "
+            f"embed={metrics.get('embed')} "
+            f"roi_mode={metrics.get('roi_mode')} "
             f"ari={metrics['ari']:.4f} nmi={metrics['nmi']:.4f} "
-            f"iou={metrics['iou']:.4f} contiguity={metrics['contiguity']:.4f}",
+            f"iou={iou_s} contiguity={metrics['contiguity']:.4f}",
             file=sys.stderr,
             flush=True,
         )

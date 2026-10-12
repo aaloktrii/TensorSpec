@@ -3,6 +3,40 @@ import re
 import shutil
 from pymatgen.core import Structure
 
+IF_POS_FREE = (1, 1, 1)
+IF_POS_FIXED = (0, 0, 0)
+
+
+def build_if_pos_mask(
+    structure: Structure,
+    mode: str,
+    *,
+    ref_layer: int = 1,
+    z_tol: float = 0.02,
+) -> list[tuple[int, int, int]] | None:
+    """Build QE selective-dynamics if_pos list (one triple per site).
+
+    mode: ``none`` | ``fix_reference`` | ``fix_bottom``
+    """
+    if mode in (None, "", "none"):
+        return None
+    if mode == "fix_bottom":
+        z_vals = [float(site.frac_coords[2]) for site in structure]
+        z_min = min(z_vals)
+        return [
+            IF_POS_FIXED if abs(z - z_min) <= z_tol else IF_POS_FREE for z in z_vals
+        ]
+    if mode == "fix_reference":
+        tags = structure.site_properties.get("layer_tag")
+        if not tags:
+            raise ValueError("Structure lacks layer_tag site properties.")
+        suffix = f"_L{ref_layer}"
+        return [
+            IF_POS_FIXED if str(tag).endswith(suffix) else IF_POS_FREE for tag in tags
+        ]
+    raise ValueError(f"Unknown if_pos mode: {mode!r}")
+
+
 class QEInputGenerator:
     """
     Core physics/math engine for generating Quantum Espresso (pw.x) and Wannier90 inputs.
@@ -11,8 +45,12 @@ class QEInputGenerator:
     def __init__(self, structure: Structure):
         self.structure = structure
         self.prefix = "tensorspec_run"
-        self.app_pseudo_dir = "./pseudo" 
-        
+        self.app_pseudo_dir = "./pseudo"
+
+    def apply_structure(self, structure: Structure) -> None:
+        """Replace the working structure (e.g. after ionic relaxation)."""
+        self.structure = structure
+
     def _generate_atomic_species(self, out_dir: str, use_soc: bool = False) -> str:
         """Extracts unique elements, finds their UPF files based on SOC toggle, and copies them to the run directory."""
         species = []
@@ -53,8 +91,10 @@ class QEInputGenerator:
                 if pseudo_name is None:
                     pseudo_name = element_files[0] # Fallback if only one exists
             
-            shutil.copy2(os.path.join(self.app_pseudo_dir, pseudo_name), 
-                         os.path.join(run_pseudo_dir, pseudo_name))
+            src = os.path.join(self.app_pseudo_dir, pseudo_name)
+            dst = os.path.join(run_pseudo_dir, pseudo_name)
+            if os.path.abspath(src) != os.path.abspath(dst):
+                shutil.copy2(src, dst)
                 
             species.append(f" {symbol}  {float(mass):.4f}  {pseudo_name}")
             
@@ -69,7 +109,11 @@ class QEInputGenerator:
                     kpts.append(f"  {x/kmesh[0]:.10f}  {y/kmesh[1]:.10f}  {z/kmesh[2]:.10f}")
         return kpts
 
-    def write_scf_input(self, out_dir: str, ecutwfc: float = 60.0, ecutrho: float = 240.0, kmesh: tuple = (6, 6, 6), use_soc: bool = False, use_gpu: bool = False):
+    def _vdw_system_flag(self, vdw_dft_d3: bool) -> str:
+        """Optional DFT-D3 correction for layered vdW systems."""
+        return "\n  vdw_corr = 'dft-d3'" if vdw_dft_d3 else ""
+
+    def write_scf_input(self, out_dir: str, ecutwfc: float = 60.0, ecutrho: float = 240.0, kmesh: tuple = (6, 6, 6), use_soc: bool = False, use_gpu: bool = False, vdw_dft_d3: bool = False):
         """Generates the main self-consistent field (SCF) input file."""
         os.makedirs(out_dir, exist_ok=True)
         scf_path = os.path.join(out_dir, "scf.in")
@@ -84,6 +128,7 @@ class QEInputGenerator:
         # Use the UI toggle to inject SOC / optional QE CUDA offload
         soc_flags = "\n  noncolin = .true.\n  lspinorb = .true." if use_soc else ""
         gpu_flags = "\n  use_gpu = .true." if use_gpu else ""
+        vdw_flags = self._vdw_system_flag(vdw_dft_d3)
 
         scf_content = f"""&CONTROL
   calculation = 'scf'
@@ -100,7 +145,7 @@ class QEInputGenerator:
   ecutrho = {ecutrho}
   occupations = 'smearing'
   smearing = 'marzari-vanderbilt'
-  degauss = 0.01{soc_flags}{gpu_flags}
+  degauss = 0.01{soc_flags}{gpu_flags}{vdw_flags}
 /
 &ELECTRONS
   conv_thr = 1.0d-8
@@ -120,7 +165,82 @@ K_POINTS {{automatic}}
             f.write(scf_content)
         return scf_path
 
-    def write_nscf_input(self, out_dir: str, ecutwfc: float = 60.0, ecutrho: float = 240.0, kmesh: tuple = (6, 6, 6), nbnd: int = 12, use_soc: bool = False, use_gpu: bool = False):
+    def write_relax_input(
+        self,
+        out_dir: str,
+        *,
+        ecutwfc: float = 60.0,
+        ecutrho: float = 240.0,
+        kmesh: tuple = (6, 6, 6),
+        use_soc: bool = False,
+        use_gpu: bool = False,
+        vdw_dft_d3: bool = False,
+        calculation: str = "relax",
+        if_pos=None,
+    ) -> str:
+        """Generates ionic or variable-cell relaxation input (relax.in)."""
+        os.makedirs(out_dir, exist_ok=True)
+        relax_path = os.path.join(out_dir, "relax.in")
+
+        ibrav = 0
+        nat = len(self.structure)
+        ntyp = len(self.structure.composition.elements)
+
+        atomic_species_str = self._generate_atomic_species(out_dir, use_soc)
+
+        soc_flags = "\n  noncolin = .true.\n  lspinorb = .true." if use_soc else ""
+        gpu_flags = "\n  use_gpu = .true." if use_gpu else ""
+        vdw_flags = self._vdw_system_flag(vdw_dft_d3)
+
+        cell_block = ""
+        if calculation == "vc-relax":
+            cell_block = """&CELL
+  cell_dynamics = 'bfgs'
+  press = 0.0
+/
+"""
+
+        # forc_conv_thr lives in &CONTROL (QE INPUT_PW), not &IONS.
+        relax_content = f"""&CONTROL
+  calculation = '{calculation}'
+  prefix = '{self.prefix}'
+  outdir = './out/'
+  pseudo_dir = './pseudo/'
+  wf_collect = .true.
+  forc_conv_thr = 1.0d-3
+/
+&SYSTEM
+  ibrav = {ibrav}
+  nat = {nat}
+  ntyp = {ntyp}
+  ecutwfc = {ecutwfc}
+  ecutrho = {ecutrho}
+  occupations = 'smearing'
+  smearing = 'marzari-vanderbilt'
+  degauss = 0.01{soc_flags}{gpu_flags}{vdw_flags}
+/
+&ELECTRONS
+  conv_thr = 1.0d-8
+  mixing_beta = 0.7
+/
+&IONS
+  ion_dynamics = 'bfgs'
+/
+{cell_block}ATOMIC_SPECIES
+{atomic_species_str}
+
+{self._generate_cell_parameters()}
+
+{self._generate_atomic_positions(if_pos=if_pos)}
+
+K_POINTS {{automatic}}
+  {kmesh[0]} {kmesh[1]} {kmesh[2]}  0 0 0
+"""
+        with open(relax_path, "w") as f:
+            f.write(relax_content)
+        return relax_path
+
+    def write_nscf_input(self, out_dir: str, ecutwfc: float = 60.0, ecutrho: float = 240.0, kmesh: tuple = (6, 6, 6), nbnd: int = 12, use_soc: bool = False, use_gpu: bool = False, vdw_dft_d3: bool = False):
         """Generates the non-self-consistent field (NSCF) input file with explicit k-points."""
         nscf_path = os.path.join(out_dir, "nscf.in")
         abs_out = os.path.abspath(os.path.join(out_dir, "out")) + "/"
@@ -137,6 +257,7 @@ K_POINTS {{automatic}}
         # Use the UI toggle to inject SOC / optional QE CUDA offload
         soc_flags = "\n  noncolin = .true.\n  lspinorb = .true." if use_soc else ""
         gpu_flags = "\n  use_gpu = .true." if use_gpu else ""
+        vdw_flags = self._vdw_system_flag(vdw_dft_d3)
 
         nscf_content = f"""&CONTROL
   calculation = 'nscf'
@@ -156,7 +277,7 @@ K_POINTS {{automatic}}
   ecutrho = {ecutrho}
   occupations = 'smearing'
   smearing = 'marzari-vanderbilt'
-  degauss = 0.01{soc_flags}{gpu_flags}
+  degauss = 0.01{soc_flags}{gpu_flags}{vdw_flags}
 /
 &ELECTRONS
   conv_thr = 1.0d-8
@@ -276,14 +397,28 @@ end kpoints
             params.append("  " + "  ".join([f"{v:.6f}" for v in row]))
         return "\n".join(params)
 
-    def _generate_atomic_positions(self) -> str:
-        """Converts PyMatgen fractional coordinates to QE format."""
+    def _generate_atomic_positions(self, if_pos=None) -> str:
+        """Converts PyMatgen fractional coordinates to QE format.
+
+        When ``if_pos`` is provided, append QE selective-dynamics flags per site
+        (0 = fixed, 1 = free along each axis).
+        """
         positions = ["ATOMIC_POSITIONS {crystal}"]
-        for site in self.structure:
+        for i, site in enumerate(self.structure):
             coords = "  ".join([f"{c:.6f}" for c in site.frac_coords])
             # Use pure element symbol (e.g. 'Te') instead of string with oxidation state (e.g. 'Te2-')
-            positions.append(f" {site.specie.symbol}  {coords}")
+            line = f" {site.specie.symbol}  {coords}"
+            if if_pos is not None:
+                flags = if_pos[i]
+                line += f"  {flags[0]}  {flags[1]}  {flags[2]}"
+            positions.append(line)
         return "\n".join(positions)
+
+    def resolve_if_pos(self, mode: str, *, ref_layer: int = 1, z_tol: float = 0.02):
+        """Convenience wrapper around :func:`build_if_pos_mask` for this structure."""
+        return build_if_pos_mask(
+            self.structure, mode, ref_layer=ref_layer, z_tol=z_tol
+        )
     
     def _detect_soc(self) -> bool:
         """Detects if any provided pseudopotential is fully relativistic (SOC)."""

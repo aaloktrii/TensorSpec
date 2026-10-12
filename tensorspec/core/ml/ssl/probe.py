@@ -22,6 +22,9 @@ class ProbeConfig:
     seed: int = 0
     batch_size: int = 64
     use_teacher: bool = True
+    roi_mode: str = "full"
+    embed: str = "cls"
+    l2_normalize: bool = True
 
 
 def filter_manifest_indices(manifest: dict, source_id: str) -> list[int]:
@@ -30,6 +33,84 @@ def filter_manifest_indices(manifest: dict, source_id: str) -> list[int]:
         for i, sample in enumerate(manifest["samples"])
         if sample.get("source_id") == source_id
     ]
+
+
+def roi_slices_from_reference(
+    roi: dict,
+    energy_axis: np.ndarray,
+    slit_axis: np.ndarray,
+) -> tuple[slice, slice]:
+    """Map floor-reference Energy/Angle physical window onto resampled (E, slit) grid."""
+    energy_axis = np.asarray(energy_axis, dtype=np.float64)
+    slit_axis = np.asarray(slit_axis, dtype=np.float64)
+    dims = {d["label"]: d for d in roi.get("dims", [])}
+    if "Energy" not in dims:
+        raise ValueError("ROI missing Energy dim")
+    angle = dims.get("Angle") or dims.get("Slit")
+    if angle is None:
+        raise ValueError("ROI missing Angle/Slit dim")
+    e = dims["Energy"]
+
+    def _bounds(axis: np.ndarray, lo: float, hi: float) -> slice:
+        a_lo, a_hi = float(np.min(axis)), float(np.max(axis))
+        lo_c = min(max(float(lo), a_lo), a_hi)
+        hi_c = min(max(float(hi), a_lo), a_hi)
+        if hi_c < lo_c:
+            lo_c, hi_c = hi_c, lo_c
+        i0 = int(np.searchsorted(axis, lo_c, side="left"))
+        i1 = int(np.searchsorted(axis, hi_c, side="right"))
+        i0 = max(0, min(i0, axis.size - 1))
+        i1 = max(i0 + 1, min(i1, axis.size))
+        return slice(i0, i1)
+
+    return _bounds(energy_axis, e["physical_lo"], e["physical_hi"]), _bounds(
+        slit_axis, angle["physical_lo"], angle["physical_hi"]
+    )
+
+
+def apply_roi_mask(
+    images: np.ndarray,
+    energy_slice: slice,
+    slit_slice: slice,
+    *,
+    renormalize: bool = True,
+) -> np.ndarray:
+    """Zero outside ROI; optional per-sample min-max on the kept window."""
+    x = np.asarray(images, dtype=np.float32)
+    if x.ndim != 3:
+        raise ValueError("images must be (N,H,W) with H=energy, W=slit")
+    out = np.zeros_like(x)
+    patch = x[:, energy_slice, slit_slice]
+    if patch.size == 0:
+        raise ValueError("ROI slice is empty")
+    if renormalize:
+        flat = patch.reshape(patch.shape[0], -1)
+        lo = flat.min(axis=1, keepdims=True)
+        hi = flat.max(axis=1, keepdims=True)
+        scale = hi - lo
+        flat_n = np.where(scale > 1e-6, (flat - lo) / np.maximum(scale, 1e-6), 1.0)
+        patch = flat_n.reshape(patch.shape)
+    out[:, energy_slice, slit_slice] = patch
+    return out
+
+
+def load_disp2d_axes(path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+    payload = np.load(path)
+    return np.asarray(payload["energy_axis"]), np.asarray(payload["slit_axis"])
+
+
+def load_mae_encoder_for_probe(ckpt, *, device):
+    """Load the ViT2D encoder stored under the checkpoint key ``encoder``."""
+    path = Path(ckpt)
+    payload = torch.load(path, map_location=device, weights_only=False)
+    if not isinstance(payload, dict) or "encoder" not in payload:
+        raise ValueError("checkpoint is missing encoder")
+    cfg = run_config_from_dict(payload["config"])
+    encoder = build_vit2d(cfg.model)
+    encoder.load_state_dict(payload["encoder"])
+    encoder.to(device)
+    encoder.eval()
+    return encoder
 
 
 def load_dino_for_probe(ckpt, *, device):
@@ -60,15 +141,55 @@ def extract_cls_embeddings(model, images, *, batch_size, use_teacher, device):
     return np.concatenate(outs, axis=0)
 
 
+@torch.no_grad()
+def extract_patch_mean_from_backbone(
+    backbone, images, *, batch_size, device, l2_normalize=True
+):
+    backbone.eval()
+    outs = []
+    x_all = torch.from_numpy(np.asarray(images, dtype=np.float32))
+    if x_all.ndim != 3:
+        raise ValueError("images must be (N,H,W)")
+    for i in range(0, len(x_all), batch_size):
+        batch = x_all[i : i + batch_size].unsqueeze(1).to(device)
+        _, patches = backbone.forward_features(batch)
+        vec = patches.float().mean(dim=1)
+        if l2_normalize:
+            vec = torch.nn.functional.normalize(vec, dim=-1)
+        outs.append(vec.cpu().numpy())
+    return np.concatenate(outs, axis=0)
+
+
+@torch.no_grad()
+def extract_patch_mean_embeddings(
+    model, images, *, batch_size, use_teacher, device, l2_normalize=True
+):
+    model.eval()
+    backbone = model.teacher if use_teacher else model.student
+    return extract_patch_mean_from_backbone(
+        backbone,
+        images,
+        batch_size=batch_size,
+        device=device,
+        l2_normalize=l2_normalize,
+    )
+
+
 def cluster_embeddings(emb, cfg: ProbeConfig):
+    """K-means on embeddings. ``pca_dim <= 0`` skips PCA (full embedding space)."""
     from sklearn.cluster import KMeans
     from sklearn.decomposition import PCA
 
+    emb = np.asarray(emb)
     n = emb.shape[0]
-    dim = min(cfg.pca_dim, n - 1, emb.shape[1])
-    if dim < 1:
-        raise ValueError("not enough samples for PCA")
-    z = PCA(n_components=dim, random_state=cfg.seed).fit_transform(emb)
+    # pca_dim <= 0: use full D-dimensional embedding (no PCA / no whitening).
+    if cfg.pca_dim <= 0:
+        z = emb
+    else:
+        dim = min(cfg.pca_dim, n - 1, emb.shape[1])
+        if dim < 1:
+            raise ValueError("not enough samples for PCA")
+        z = PCA(n_components=dim, random_state=cfg.seed).fit_transform(emb)
     return KMeans(n_clusters=cfg.k, random_state=cfg.seed, n_init=10).fit_predict(z).astype(
         np.int32
     )
@@ -253,9 +374,21 @@ def _save_overlay_pngs(out: Path, ref_map, ssl_map, ref_lab) -> None:
     plt.close(fig)
 
 
-def probe(*, ckpt, data_dir, reference, out_dir, config: ProbeConfig) -> dict:
+def probe(
+    *,
+    ckpt,
+    data_dir,
+    reference,
+    out_dir,
+    config: ProbeConfig,
+    axes_path: str | Path | None = None,
+) -> dict:
     if config.k < 2:
         raise ValueError(f"probe requires k>=2 (got k={config.k})")
+    if config.roi_mode not in ("full", "mask"):
+        raise ValueError(f"unknown roi_mode={config.roi_mode!r}")
+    if config.embed not in ("cls", "patch_mean"):
+        raise ValueError(f"unknown embed={config.embed!r}")
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     ref = load_floor_reference(reference)
@@ -271,15 +404,55 @@ def probe(*, ckpt, data_dir, reference, out_dir, config: ProbeConfig) -> dict:
         images.append(np.asarray(sample, dtype=np.float32))
         provenances.append(prov)
     images = np.stack(images, axis=0)
+    roi_meta: dict = {"roi_mode": config.roi_mode}
+    if config.roi_mode == "mask":
+        if axes_path is None:
+            raise ValueError("axes_path required when roi_mode='mask'")
+        energy_axis, slit_axis = load_disp2d_axes(axes_path)
+        e_sl, s_sl = roi_slices_from_reference(ref.roi, energy_axis, slit_axis)
+        images = apply_roi_mask(images, e_sl, s_sl, renormalize=True)
+        roi_meta.update(
+            {
+                "energy_slice": [e_sl.start, e_sl.stop],
+                "slit_slice": [s_sl.start, s_sl.stop],
+                "axes_path": str(axes_path),
+            }
+        )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, _run_cfg = load_dino_for_probe(ckpt, device=device)
-    emb = extract_cls_embeddings(
-        model,
-        images,
-        batch_size=config.batch_size,
-        use_teacher=config.use_teacher,
-        device=device,
+    header = torch.load(ckpt, map_location="cpu", weights_only=False)
+    mae_ckpt = (
+        isinstance(header, dict) and "encoder" in header and "model" not in header
     )
+    if mae_ckpt:
+        if config.embed != "patch_mean":
+            raise ValueError("MAE probe requires embed=patch_mean")
+        encoder = load_mae_encoder_for_probe(ckpt, device=device)
+        emb = extract_patch_mean_from_backbone(
+            encoder,
+            images,
+            batch_size=config.batch_size,
+            device=device,
+            l2_normalize=config.l2_normalize,
+        )
+    else:
+        model, _run_cfg = load_dino_for_probe(ckpt, device=device)
+        if config.embed == "cls":
+            emb = extract_cls_embeddings(
+                model,
+                images,
+                batch_size=config.batch_size,
+                use_teacher=config.use_teacher,
+                device=device,
+            )
+        else:
+            emb = extract_patch_mean_embeddings(
+                model,
+                images,
+                batch_size=config.batch_size,
+                use_teacher=config.use_teacher,
+                device=device,
+                l2_normalize=config.l2_normalize,
+            )
     np.save(out / "embeddings.npy", emb)
     assigns = cluster_embeddings(emb, config)
     ny, nx = ref.map.shape
@@ -293,14 +466,61 @@ def probe(*, ckpt, data_dir, reference, out_dir, config: ProbeConfig) -> dict:
             "pca_dim": config.pca_dim,
             "seed": config.seed,
             "use_teacher": config.use_teacher,
+            "embed": config.embed,
+            "l2_normalize": bool(config.l2_normalize)
+            if config.embed == "patch_mean"
+            else False,
             "n_samples": int(len(idxs)),
             "ckpt": str(ckpt),
             "reference_roi_source_id": ref.roi.get("source_id"),
             "reference_saved_utc": ref.roi.get("saved_utc"),
+            **roi_meta,
         }
     )
     (out / "metrics.json").write_text(
         json.dumps(metrics, indent=2), encoding="utf-8"
     )
+    _save_overlay_pngs(out, ref.map, ssl_map, ref_lab)
+    return metrics
+
+
+def probe_precomputed_embeddings(
+    *,
+    embeddings,
+    provenances,
+    reference,
+    out_dir,
+    config: ProbeConfig,
+    meta: dict | None = None,
+) -> dict:
+    """Cluster + metrics + overlay from precomputed XY embeddings (no ckpt/shards)."""
+    if config.k < 2:
+        raise ValueError(f"probe requires k>=2 (got k={config.k})")
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    emb = np.asarray(embeddings, dtype=np.float32)
+    if emb.ndim != 2:
+        raise ValueError("embeddings must be (N, D)")
+    if len(provenances) != emb.shape[0]:
+        raise ValueError("provenances length mismatch")
+    ref = reference if hasattr(reference, "map") else load_floor_reference(reference)
+    np.save(out / "embeddings.npy", emb)
+    assigns = cluster_embeddings(emb, config)
+    ny, nx = ref.map.shape
+    ssl_map = labels_to_grid(assigns, provenances, ny=ny, nx=nx)
+    ref_lab = reference_to_binary(ref.map, seed=config.seed)
+    metrics = agreement_metrics(ssl_map, ref_lab)
+    metrics.update(
+        {
+            "source_id": config.source_id,
+            "k": config.k,
+            "pca_dim": config.pca_dim,
+            "seed": config.seed,
+            "embed": "patch_mean",
+            "n_samples": int(emb.shape[0]),
+            **(meta or {}),
+        }
+    )
+    (out / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     _save_overlay_pngs(out, ref.map, ssl_map, ref_lab)
     return metrics

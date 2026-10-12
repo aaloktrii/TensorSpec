@@ -1,15 +1,47 @@
+import json
 import os
 import subprocess
+import sys
 import stat as statmod
+from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (QWidget, QFormLayout, QGroupBox, QComboBox, 
                                QSpinBox, QHBoxLayout, QLineEdit, QPushButton, 
                                QMessageBox, QPlainTextEdit, QVBoxLayout, QCheckBox, QLabel,
                                QProgressDialog, QApplication)
 
-from tensorspec.core.dft.qe_generator import QEInputGenerator
+from pymatgen.core import Structure
+
+from tensorspec.core.dft.qe_generator import QEInputGenerator, build_if_pos_mask
 from tensorspec.core.compute import cluster_paths as cp
-from tensorspec.gui.services.nersc_auth import refresh_sshproxy_login
+from tensorspec.core.workspace import global_workspace
+from tensorspec.gui.services.sshproxy_auth import refresh_sshproxy_login
+
+RELAXED_CIF = "relaxed_structure.cif"
+_LOCAL_REPO_ROOT = str(Path(__file__).resolve().parents[3])
+
+
+def pipeline_python_env(cluster=None) -> tuple[str, str]:
+    """Return (bash_exports, powershell_assigns) for PYTHON + PYTHONPATH.
+
+    Remote: cluster ``python`` / ``repo_root``. Local: this interpreter + checkout.
+    Needed so ``"$PYTHON" -m tensorspec.core.dft.sync_after_relax`` works in pipelines.
+    """
+    if cluster:
+        py = cp.python_bin(cluster)
+        root = cp.repo_root(cluster)
+    else:
+        py = sys.executable
+        root = _LOCAL_REPO_ROOT
+    bash = (
+        f'export PYTHON="{py}"\n'
+        f'export PYTHONPATH="{root}:${{PYTHONPATH}}"\n'
+    )
+    ps = (
+        f"$env:PYTHON='{py}'\n"
+        f"$env:PYTHONPATH='{root};' + $env:PYTHONPATH\n"
+    )
+    return bash, ps
 
 
 class QEFetchThread(QThread):
@@ -113,7 +145,7 @@ class QERunnerThread(QThread):
                 
                 # Upload only necessary input files to avoid uploading 10GB+ of old data!
                 self.log_signal.emit(f"Uploading input files to {remote_dir}...")
-                allowed_exts = ['.in', '.win', '.sh', '.ps1']
+                allowed_exts = ['.in', '.win', '.sh', '.ps1', '.cif', '.json']
                 for file_name in os.listdir(self.out_dir):
                     local_f = os.path.join(self.out_dir, file_name)
                     if os.path.isfile(local_f) and any(file_name.endswith(ext) for ext in allowed_exts):
@@ -252,6 +284,34 @@ class QEGeneratorPanel(QWidget):
         kmesh_layout.addWidget(self.spin_kx); kmesh_layout.addWidget(self.spin_ky); kmesh_layout.addWidget(self.spin_kz)
         qe_form.addRow("k-Mesh Grid:", kmesh_layout)
 
+        self.combo_geometry = QComboBox()
+        self.combo_geometry.addItem("Relax ions (fixed cell)", "relax_ions")
+        self.combo_geometry.addItem("SCF only (no relax)", "scf_only")
+        self.combo_geometry.addItem("vc-relax (advanced)", "vc_relax")
+        self.combo_geometry.setToolTip(
+            "Relax ions: fixed cell (default for 2D stacks).\n"
+            "vc-relax: also relaxes cell vectors — sync_after_relax currently\n"
+            "updates ionic positions only (cell from template until CELL parse lands)."
+        )
+        qe_form.addRow("Geometry:", self.combo_geometry)
+
+        self.combo_selective = QComboBox()
+        self.combo_selective.addItem("None", "none")
+        self.combo_selective.addItem("Fix stack layer 1 (_L1)", "fix_reference")
+        self.combo_selective.addItem("Fix bottom layer (min z)", "fix_bottom")
+        self.combo_selective.setToolTip(
+            "Hold selected atoms fixed during ionic relax (QE if_pos).\n"
+            "Stack layer 1: sites tagged _L1 (first layer in Push stack order,\n"
+            "not necessarily the Push dialog reference lattice).\n"
+            "Bottom layer: all sites at minimum fractional z."
+        )
+        qe_form.addRow("Fix atoms during relax:", self.combo_selective)
+        self.combo_geometry.currentIndexChanged.connect(self._sync_selective_dynamics_ui)
+
+        self.chk_vdw = QCheckBox("vdW DFT-D3 (recommended for 2D stacks)")
+        self.chk_vdw.setChecked(False)
+        qe_form.addRow("Dispersion:", self.chk_vdw)
+
         self.line_outdir = QLineEdit("./qe_workspace")
         qe_form.addRow("Output Directory:", self.line_outdir)
 
@@ -261,14 +321,17 @@ class QEGeneratorPanel(QWidget):
         self.chk_mpi.setChecked(True)
         self.spin_pw_cores = QSpinBox()
         self.spin_pw_cores.setRange(1, 256)
-        self.spin_pw_cores.setValue(128)
-        self.spin_pw_cores.setToolTip("MPI ranks for pw.x (scf + nscf). HPC CPU nodes: often up to 128 ranks.")
+        self.spin_pw_cores.setValue(8)
+        self.spin_pw_cores.setToolTip(
+            "MPI ranks for pw.x (scf + nscf). Workstation / Daemon: start ~8. "
+            "Large HPC CPU nodes: often up to 128 (auto when Compute Target=SLURM)."
+        )
         self.spin_wannier_cores = QSpinBox()
         self.spin_wannier_cores.setRange(1, 256)
-        self.spin_wannier_cores.setValue(36)
+        self.spin_wannier_cores.setValue(8)
         self.spin_wannier_cores.setToolTip(
-            "MPI ranks for pw2wannier90.x only. Must not exceed smallest FFT dimension "
-            "(often ≤36 for this cell). wannier90.x stays serial."
+            "MPI ranks for pw2wannier90.x only. Must not exceed smallest FFT dimension. "
+            "Workstation: keep ≤8–16. HPC nodes often ≤36. wannier90.x stays serial."
         )
         parallel_layout.addWidget(self.chk_mpi)
         parallel_layout.addWidget(QLabel("pw.x"))
@@ -337,11 +400,11 @@ class QEGeneratorPanel(QWidget):
         qe_form.addRow(self.btn_run_qe)
 
         fetch_row = QHBoxLayout()
-        self.btn_nersc_login = QPushButton("🔑 Refresh NERSC Login")
-        self.btn_nersc_login.setToolTip(
-            "Run sshproxy for NERSC MFA. Hidden for Daemon / local."
+        self.btn_sshproxy_login = QPushButton("🔑 Refresh sshproxy Login")
+        self.btn_sshproxy_login.setToolTip(
+            "Run sshproxy (MFA) for auth: sshproxy clusters. Hidden for Daemon / local."
         )
-        self.btn_nersc_login.clicked.connect(self.refresh_nersc_login)
+        self.btn_sshproxy_login.clicked.connect(self.refresh_sshproxy_login)
         self.btn_fetch_wan = QPushButton("📥 Fetch ARPES Package")
         self.btn_fetch_wan.setStyleSheet("""
             QPushButton { background-color: #17a2b8; color: white; font-weight: bold; padding: 5px; }
@@ -352,9 +415,17 @@ class QEGeneratorPanel(QWidget):
             "Skips .mmn/.amn/wavefunctions."
         )
         self.btn_fetch_wan.clicked.connect(self.fetch_remote_outputs)
-        fetch_row.addWidget(self.btn_nersc_login)
+        fetch_row.addWidget(self.btn_sshproxy_login)
         fetch_row.addWidget(self.btn_fetch_wan)
         qe_form.addRow(fetch_row)
+
+        self.btn_push_relaxed = QPushButton("Push relaxed structure to workspace")
+        self.btn_push_relaxed.setEnabled(False)
+        self.btn_push_relaxed.setToolTip(
+            "Load relaxed_structure.cif from the output directory into Global Workspace."
+        )
+        self.btn_push_relaxed.clicked.connect(self.push_relaxed_to_workspace)
+        qe_form.addRow(self.btn_push_relaxed)
 
         self.main_layout.addWidget(qe_group)
 
@@ -377,18 +448,36 @@ class QEGeneratorPanel(QWidget):
         self.btn_run_qe.clicked.connect(self.run_qe_script)
         self.chk_mpi.stateChanged.connect(self._sync_mpi_spinboxes)
         self.combo_cluster.currentIndexChanged.connect(self._on_cluster_changed)
+        self.line_outdir.textChanged.connect(self._update_push_relaxed_button)
         self._sync_mpi_spinboxes()
         self._on_cluster_changed()
+        self._sync_selective_dynamics_ui()
+        self._update_push_relaxed_button()
 
     def _on_cluster_changed(self, _index=None):
         self._adapt_script_to_cluster()
         cluster = self.get_selected_cluster()
-        self.btn_nersc_login.setVisible(cp.uses_sshproxy(cluster))
-
-    def refresh_nersc_login(self):
+        self.btn_sshproxy_login.setVisible(cp.uses_sshproxy(cluster))
+        # Workstation / Mac daemon: HPC-node 128/36 ranks break FFT (nnr) and OOM.
+        # Auto-suggest small ranks when switching to non-SLURM (user can still edit).
+        if cluster is None or not cp.is_slurm(cluster):
+            if self.spin_pw_cores.value() >= 64:
+                self.spin_pw_cores.setValue(8)
+            if self.spin_wannier_cores.value() >= 32:
+                self.spin_wannier_cores.setValue(8)
+            # Daemon pw.x is usually a CPU conda build — leave GPU mode off when leaving SLURM.
+            if self.combo_pw_backend.currentData() == "gpu":
+                self.combo_pw_backend.setCurrentIndex(0)
+        else:
+            if self.spin_pw_cores.value() <= 16:
+                self.spin_pw_cores.setValue(128)
+            if self.spin_wannier_cores.value() <= 16:
+                self.spin_wannier_cores.setValue(36)
+        self._adapt_script_to_cluster()
+    def refresh_sshproxy_login(self):
         cluster = self.get_selected_cluster()
         if not cluster:
-            QMessageBox.information(self, "Info", "Select a NERSC / sshproxy cluster as Compute Target.")
+            QMessageBox.information(self, "Info", "Select an sshproxy cluster as Compute Target.")
             return
         refresh_sshproxy_login(self, cluster)
 
@@ -397,6 +486,26 @@ class QEGeneratorPanel(QWidget):
         enabled = self.chk_mpi.isChecked()
         self.spin_pw_cores.setEnabled(enabled)
         self.spin_wannier_cores.setEnabled(enabled)
+
+    def _sync_selective_dynamics_ui(self, *_args) -> None:
+        geometry = self.combo_geometry.currentData()
+        relax_enabled = geometry in ("relax_ions", "vc_relax")
+        self.combo_selective.setEnabled(relax_enabled)
+
+        has_tags = bool(
+            self.engine.crystal_structure is not None
+            and "layer_tag" in self.engine.crystal_structure.site_properties
+        )
+        ref_item = self.combo_selective.model().item(1)
+        if ref_item is not None:
+            ref_item.setEnabled(has_tags)
+            ref_item.setToolTip(
+                "Requires layer_tag from Crystal Push stack rebuild."
+                if not has_tags
+                else "Fix substrate (_L1 tags); relax upper layer(s)."
+            )
+        if not has_tags and self.combo_selective.currentData() == "fix_reference":
+            self.combo_selective.setCurrentIndex(0)
 
     def _sync_pw_backend_ui(self, _index=None):
         use_gpu = self.combo_pw_backend.currentData() == "gpu"
@@ -427,14 +536,13 @@ class QEGeneratorPanel(QWidget):
         gpu_ranks = dev.count(",") + 1
         return True, dev, gpu_ranks, gpu_ranks, gpu_ranks
 
-    def _pipeline_env_header(self, use_gpu: bool, cuda_devices: str) -> str:
-        if not use_gpu:
-            return "export OMP_NUM_THREADS=1\n\n"
-        return (
-            "export OMP_NUM_THREADS=1\n"
-            f"export CUDA_VISIBLE_DEVICES={cuda_devices}\n"
-            "# QE GPU: pw.x must be CUDA build; MPI ranks ≈ number of GPUs\n\n"
-        )
+    def _pipeline_env_header(self, use_gpu: bool, cuda_devices: str, cluster=None) -> str:
+        py_bash, _ = pipeline_python_env(cluster)
+        lines = ["export OMP_NUM_THREADS=1", py_bash.rstrip()]
+        if use_gpu:
+            lines.append(f"export CUDA_VISIBLE_DEVICES={cuda_devices}")
+            lines.append("# QE GPU: pw.x must be CUDA build; MPI ranks ≈ number of GPUs")
+        return "\n".join(lines) + "\n\n"
 
     def _adapt_script_to_cluster(self, _index=None):
         """Rewrite MPI launcher in Pipeline Script for current Compute Target."""
@@ -493,9 +601,9 @@ class QEGeneratorPanel(QWidget):
         if cp.uses_sshproxy(cluster):
             reply = QMessageBox.question(
                 self,
-                "NERSC Auth",
-                "Fetch needs a valid NERSC key.\n\n"
-                "Refresh NERSC Login first if you have not today.\n\n"
+                "sshproxy Auth",
+                "Fetch needs a valid sshproxy key.\n\n"
+                "Refresh sshproxy Login first if you have not today.\n\n"
                 "Continue fetch now?",
                 QMessageBox.Yes | QMessageBox.No,
             )
@@ -527,9 +635,185 @@ class QEGeneratorPanel(QWidget):
             self._fetch_progress.close()
             self._fetch_progress = None
         if success:
+            self._update_push_relaxed_button()
             QMessageBox.information(self, "Success", message)
         else:
             QMessageBox.critical(self, "Fetch Failed", message)
+
+    def _relaxed_cif_path(self) -> str:
+        out_dir = self.line_outdir.text().strip() or "./qe_workspace"
+        return os.path.join(out_dir, RELAXED_CIF)
+
+    def _update_push_relaxed_button(self, *_args) -> None:
+        self.btn_push_relaxed.setEnabled(os.path.isfile(self._relaxed_cif_path()))
+
+    def push_relaxed_to_workspace(self) -> None:
+        cif_path = self._relaxed_cif_path()
+        if not os.path.isfile(cif_path):
+            QMessageBox.warning(
+                self,
+                "Missing relaxed structure",
+                f"No {RELAXED_CIF} in the output directory.\n\n"
+                "Run relax + sync on the cluster, then Fetch ARPES Package.",
+            )
+            self._update_push_relaxed_button()
+            return
+        try:
+            struct = Structure.from_file(cif_path)
+            out_dir = self.line_outdir.text().strip() or "./qe_workspace"
+            basename = os.path.basename(os.path.normpath(out_dir)) or "qe_workspace"
+            name = f"qe_relaxed_{basename}"
+            global_workspace.push_crystal_structure(name, struct)
+            a, b, c = struct.lattice.a, struct.lattice.b, struct.lattice.c
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Pushed '{name}' to Global Workspace.\n"
+                f"Cell a={a:.3f} Å, b={b:.3f} Å, c={c:.3f} Å.\n"
+                "Load it from the Crystal or DFT suite browser.",
+            )
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Push failed",
+                f"Could not load or push {RELAXED_CIF}:\n{exc}",
+            )
+    def _write_relax_sidecar_files(
+        self,
+        out_dir: str,
+        *,
+        ecut: float,
+        kmesh: tuple,
+        nbnd: int,
+        is_soc_enabled: bool,
+        use_gpu: bool,
+        vdw_dft_d3: bool,
+        is_mlwf: bool,
+        geometry: str,
+    ) -> None:
+        """Write structure_template.cif + tensorspec_relax_meta.json for remote pipeline."""
+        os.makedirs(out_dir, exist_ok=True)
+        template_cif = os.path.join(out_dir, "structure_template.cif")
+        self.engine.crystal_structure.to(filename=template_cif, fmt="cif")
+
+        calc_map = {
+            "relax_ions": "relax",
+            "vc_relax": "vc-relax",
+            "scf_only": "scf",
+        }
+        meta = {
+            "ecutwfc": ecut,
+            "ecutrho": 4 * ecut,
+            "kmesh": list(kmesh),
+            "nbnd": nbnd,
+            "use_soc": is_soc_enabled,
+            "use_gpu": use_gpu,
+            "vdw_dft_d3": vdw_dft_d3,
+            "mlwf": is_mlwf,
+            "calculation": calc_map.get(geometry, "scf"),
+        }
+        meta_path = os.path.join(out_dir, "tensorspec_relax_meta.json")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
+    def _build_pipeline_script(
+        self,
+        *,
+        kmesh: tuple,
+        pw_mpi_cmd: str,
+        pw_exec: str,
+        wan_mpi_cmd: str,
+        wan_exec: str,
+        pw2wan_exec: str,
+        pw_ranks: int,
+        wan_ranks: int,
+        env_header: str,
+        use_gpu: bool,
+        cuda_devices: str,
+        relax_enabled: bool,
+    ) -> str:
+        if os.name == "nt":
+            sync_cmd = (
+                "& $env:PYTHON -m tensorspec.core.dft.sync_after_relax "
+                "--out-dir . --template-cif structure_template.cif"
+            )
+        else:
+            sync_cmd = (
+                '"$PYTHON" -m tensorspec.core.dft.sync_after_relax '
+                "--out-dir . --template-cif structure_template.cif"
+            )
+        if os.name == "nt":
+            _, py_ps = pipeline_python_env(None)
+            hse_block = (
+                "# ==================================================================\n"
+                "# ADVANCED: HSE HYBRID FUNCTIONAL SWITCH\n"
+                "# By default, this script runs a standard PBE calculation.\n"
+                "# To run HSE, remove the '#' from the two replacement commands below.\n"
+                "# ==================================================================\n"
+                f"# (Get-Content scf.in) -replace '&SYSTEM', \"&SYSTEM`n    input_dft = 'hse',`n    nqx1 = {kmesh[0]}, nqx2 = {kmesh[1]}, nqx3 = {kmesh[2]},\" | Set-Content scf.in\n"
+                f"# (Get-Content nscf.in) -replace '&SYSTEM', \"&SYSTEM`n    input_dft = 'hse',`n    nqx1 = {kmesh[0]}, nqx2 = {kmesh[1]}, nqx3 = {kmesh[2]},\" | Set-Content nscf.in\n\n"
+            )
+            gpu_line = (
+                f"$env:CUDA_VISIBLE_DEVICES='{cuda_devices}'\n" if use_gpu else ""
+            )
+            relax_block = ""
+            if relax_enabled:
+                relax_block = (
+                    "Write-Host '=== RELAX ==='\n"
+                    f"{pw_mpi_cmd}{pw_exec} -in relax.in | Tee-Object -FilePath relax.out\n"
+                    f"{sync_cmd}\n"
+                    "Write-Host '=== SCF ==='\n"
+                )
+            return (
+                "$env:OMP_NUM_THREADS=1\n"
+                + py_ps
+                + gpu_line
+                + "\n"
+                + hse_block
+                + "mkdir -p out tmp\n"
+                + "export TMPDIR=$(pwd)/tmp\n"
+                + "# Edit this script to run specific parts of the pipeline\n"
+                + relax_block
+                + f"{pw_mpi_cmd}{pw_exec} -in scf.in | Tee-Object -FilePath scf.out\n"
+                + f"{pw_mpi_cmd}{pw_exec} -in nscf.in | Tee-Object -FilePath nscf.out\n"
+                + f"{wan_exec} -pp wannier90\n"
+                + f"{wan_mpi_cmd}{pw2wan_exec} -in pw2wan.in | Tee-Object -FilePath pw2wan.out\n"
+                + f"{wan_exec} wannier90\n"
+            )
+
+        hse_block = (
+            "# ==================================================================\n"
+            "# ADVANCED: HSE HYBRID FUNCTIONAL SWITCH\n"
+            "# By default, this script runs a standard PBE calculation.\n"
+            "# To run HSE, just uncomment (remove the '#') from the python command below.\n"
+            "# ==================================================================\n"
+            f"# python -c \"for f in ['scf.in','nscf.in']: d=open(f).read(); open(f,'w').write(d.replace('&SYSTEM','&SYSTEM\\n    input_dft=\\'hse\\',\\n    nqx1={kmesh[0]}, nqx2={kmesh[1]}, nqx3={kmesh[2]},'))\"\n\n"
+        )
+        relax_block = ""
+        if relax_enabled:
+            relax_block = (
+                "echo \"=== RELAX ===\"\n"
+                f"{pw_mpi_cmd}{pw_exec} -in relax.in | tee relax.out\n"
+                f"{sync_cmd}\n"
+                "echo \"=== SCF ===\"\n"
+            )
+        return (
+            "#!/bin/bash\n"
+            "set -e\n"
+            + env_header
+            + hse_block
+            + "mkdir -p out tmp\n"
+            + "export TMPDIR=$(pwd)/tmp\n"
+            + "# Edit this script to run specific parts of the pipeline\n"
+            + f"# pw.x ranks={pw_ranks}; pw2wannier90 ranks={wan_ranks}\n"
+            + relax_block
+            + f"{pw_mpi_cmd}{pw_exec} -in scf.in | tee scf.out\n"
+            + f"{pw_mpi_cmd}{pw_exec} -in nscf.in | tee nscf.out\n"
+            + f"{wan_exec} -pp wannier90\n"
+            + f"{wan_mpi_cmd}{pw2wan_exec} -in pw2wan.in | tee pw2wan.out\n"
+            + f"{wan_exec} wannier90\n"
+        )
+
     def generate_qe_files(self):
         if not self.engine.crystal_structure:
             QMessageBox.warning(self, "Warning", "Please load a structure from the workspace first.")
@@ -539,11 +823,21 @@ class QEGeneratorPanel(QWidget):
         kmesh = (self.spin_kx.value(), self.spin_ky.value(), self.spin_kz.value())
         ecut = float(self.spin_ecut.value())
         nbnd = self.spin_nbnd.value()
+        geometry = self.combo_geometry.currentData()
+        vdw_dft_d3 = self.chk_vdw.isChecked()
+        relax_enabled = geometry in ("relax_ions", "vc_relax")
+
+        if relax_enabled and not vdw_dft_d3:
+            QMessageBox.warning(
+                self,
+                "vdW recommended",
+                "Layered or vdW-bound systems usually need DFT-D3 for realistic "
+                "interlayer spacing. Consider enabling vdW DFT-D3 before relaxing.",
+            )
 
         qe_gen = QEInputGenerator(self.engine.crystal_structure)
-        
+
         try:
-            # Grab the SOC state directly from this QE panel!
             is_soc_enabled = self.chk_soc.isChecked()
             use_gpu, cuda_devices, pw_ranks, wan_ranks, _slurm_ntasks = self._pw_backend_flags()
             if use_gpu and is_soc_enabled:
@@ -554,9 +848,27 @@ class QEGeneratorPanel(QWidget):
                     "Verify on your cluster before long runs.",
                 )
 
-            # Generate all 4 configuration files, passing the SOC state
+            is_mlwf = self.combo_wannier_mode.currentIndex() == 1
+
+            self._write_relax_sidecar_files(
+                out_dir,
+                ecut=ecut,
+                kmesh=kmesh,
+                nbnd=nbnd,
+                is_soc_enabled=is_soc_enabled,
+                use_gpu=use_gpu,
+                vdw_dft_d3=vdw_dft_d3,
+                is_mlwf=is_mlwf,
+                geometry=geometry,
+            )
+
             qe_gen.write_scf_input(
-                out_dir, ecutwfc=ecut, kmesh=kmesh, use_soc=is_soc_enabled, use_gpu=use_gpu
+                out_dir,
+                ecutwfc=ecut,
+                kmesh=kmesh,
+                use_soc=is_soc_enabled,
+                use_gpu=use_gpu,
+                vdw_dft_d3=vdw_dft_d3,
             )
             qe_gen.write_nscf_input(
                 out_dir,
@@ -565,19 +877,35 @@ class QEGeneratorPanel(QWidget):
                 nbnd=nbnd,
                 use_soc=is_soc_enabled,
                 use_gpu=use_gpu,
+                vdw_dft_d3=vdw_dft_d3,
             )
-            
-            # Pass the MLWF mode toggle 
-            is_mlwf = (self.combo_wannier_mode.currentIndex() == 1)
-            qe_gen.write_wannier90_input(out_dir, kmesh=kmesh, num_wann=nbnd, use_soc=is_soc_enabled, mlwf_mode=is_mlwf)
-            
+
+            if relax_enabled:
+                relax_calc = "relax" if geometry == "relax_ions" else "vc-relax"
+                selective_mode = self.combo_selective.currentData()
+                if_pos = build_if_pos_mask(
+                    self.engine.crystal_structure, selective_mode
+                )
+                qe_gen.write_relax_input(
+                    out_dir,
+                    ecutwfc=ecut,
+                    kmesh=kmesh,
+                    use_soc=is_soc_enabled,
+                    use_gpu=use_gpu,
+                    vdw_dft_d3=vdw_dft_d3,
+                    calculation=relax_calc,
+                    if_pos=if_pos,
+                )
+
+            qe_gen.write_wannier90_input(
+                out_dir, kmesh=kmesh, num_wann=nbnd, use_soc=is_soc_enabled, mlwf_mode=is_mlwf
+            )
             qe_gen.write_pw2wan_input(out_dir)
-            
-            # Extract Commands
+
             pw_exec = self.line_pw_cmd.text().strip()
             wan_exec = self.line_wan_cmd.text().strip()
             pw2wan_exec = self.line_pw2wan_cmd.text().strip()
-            
+
             cluster = self.get_selected_cluster()
             pw_mpi_cmd = cp.mpi_launch_prefix(
                 cluster,
@@ -589,60 +917,25 @@ class QEGeneratorPanel(QWidget):
                 wan_ranks,
                 use_mpi=self.chk_mpi.isChecked(),
             )
-            env_header = self._pipeline_env_header(use_gpu, cuda_devices)
-            
-            # Auto-populate portable script with exact commands based on Operating System
-            if os.name == 'nt':
-                # Windows native PowerShell formatting
-                script_text = (
-                    "$env:OMP_NUM_THREADS=1\n"
-                    + (
-                        f"$env:CUDA_VISIBLE_DEVICES='{cuda_devices}'\n"
-                        if use_gpu
-                        else ""
-                    )
-                    + "\n"
-                    "# ==================================================================\n"
-                    "# ADVANCED: HSE HYBRID FUNCTIONAL SWITCH\n"
-                    "# By default, this script runs a standard PBE calculation.\n"
-                    "# To run HSE, remove the '#' from the two replacement commands below.\n"
-                    "# ==================================================================\n"
-                    f"# (Get-Content scf.in) -replace '&SYSTEM', \"&SYSTEM`n    input_dft = 'hse',`n    nqx1 = {kmesh[0]}, nqx2 = {kmesh[1]}, nqx3 = {kmesh[2]},\" | Set-Content scf.in\n"
-                    f"# (Get-Content nscf.in) -replace '&SYSTEM', \"&SYSTEM`n    input_dft = 'hse',`n    nqx1 = {kmesh[0]}, nqx2 = {kmesh[1]}, nqx3 = {kmesh[2]},\" | Set-Content nscf.in\n\n"
-                    "mkdir -p out tmp\n" 
-                    "export TMPDIR=$(pwd)/tmp\n" 
-                    "# Edit this script to run specific parts of the pipeline\n"
-                    f"{pw_mpi_cmd}{pw_exec} -in scf.in | Tee-Object -FilePath scf.out\n"
-                    f"{pw_mpi_cmd}{pw_exec} -in nscf.in | Tee-Object -FilePath nscf.out\n"
-                    f"{wan_exec} -pp wannier90\n"
-                    f"{wan_mpi_cmd}{pw2wan_exec} -in pw2wan.in | Tee-Object -FilePath pw2wan.out\n"
-                    f"{wan_exec} wannier90\n"
-                )
-            else:
-                # Mac / Linux native Bash formatting using a robust Python one-liner!
-                script_text = (
-                    "#!/bin/bash\n"
-                    "set -e\n"
-                    + env_header
-                    + "# ==================================================================\n"
-                    + "# ADVANCED: HSE HYBRID FUNCTIONAL SWITCH\n"
-                    + "# By default, this script runs a standard PBE calculation.\n"
-                    + "# To run HSE, just uncomment (remove the '#') from the python command below.\n"
-                    + "# ==================================================================\n"
-                    + f"# python -c \"for f in ['scf.in','nscf.in']: d=open(f).read(); open(f,'w').write(d.replace('&SYSTEM','&SYSTEM\\n    input_dft=\\'hse\\',\\n    nqx1={kmesh[0]}, nqx2={kmesh[1]}, nqx3={kmesh[2]},'))\"\n\n"
-                    + "mkdir -p out tmp\n"
-                    + "export TMPDIR=$(pwd)/tmp\n"
-                    + "# Edit this script to run specific parts of the pipeline\n"
-                    + f"# pw.x ranks={pw_ranks}; pw2wannier90 ranks={wan_ranks}\n"
-                    + f"{pw_mpi_cmd}{pw_exec} -in scf.in | tee scf.out\n"
-                    + f"{pw_mpi_cmd}{pw_exec} -in nscf.in | tee nscf.out\n"
-                    + f"{wan_exec} -pp wannier90\n"
-                    + f"{wan_mpi_cmd}{pw2wan_exec} -in pw2wan.in | tee pw2wan.out\n"
-                    + f"{wan_exec} wannier90\n"
-                )
-            
+            env_header = self._pipeline_env_header(use_gpu, cuda_devices, cluster)
+
+            script_text = self._build_pipeline_script(
+                kmesh=kmesh,
+                pw_mpi_cmd=pw_mpi_cmd,
+                pw_exec=pw_exec,
+                wan_mpi_cmd=wan_mpi_cmd,
+                wan_exec=wan_exec,
+                pw2wan_exec=pw2wan_exec,
+                pw_ranks=pw_ranks,
+                wan_ranks=wan_ranks,
+                env_header=env_header,
+                use_gpu=use_gpu,
+                cuda_devices=cuda_devices,
+                relax_enabled=relax_enabled,
+            )
+
             self.script_editor.setPlainText(script_text)
-            
+
             QMessageBox.information(self, "Success", f"Inputs generated in {out_dir}.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to generate files:\n{str(e)}")
@@ -701,6 +994,7 @@ class QEGeneratorPanel(QWidget):
     def calculation_finished(self, success, message):
         self.btn_run_qe.setEnabled(True)
         if success:
+            self._update_push_relaxed_button()
             self.log_display.appendPlainText(f"\n--- SUCCESS: {message} ---")
         else:
             self.log_display.appendPlainText(f"\n--- ERROR: {message} ---")

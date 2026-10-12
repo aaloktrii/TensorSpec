@@ -48,6 +48,43 @@ def test_build_floor_reference_integrates_yx(qapp):
     np.testing.assert_array_equal(ref.x_axis, td.axes[1])
 
 
+def test_build_floor_reference_keeps_slit_defl_axis(qapp):
+    """5D cubes have Slit Defl. plus detector Angle; both must stay distinct."""
+    rng = np.random.default_rng(1)
+    shape = (3, 4, 5, 6, 7)
+    td = TensorData(
+        value=rng.random(shape, dtype=np.float32),
+        axes=[np.arange(n, dtype=np.float64) for n in shape],
+        labels=["Y", "X", "Slit Defl.", "Energy", "Angle"],
+        units=["mm", "mm", "deg", "eV", "deg"],
+        data_type="ARPES",
+        metadata={"source_path": "/tmp/20260630_00742.h5"},
+    )
+    panel = DataViewerPanel()
+    panel.tensor_data = td
+    panel.global_coords = {0: 0, 1: 0, 2: 2, 3: 3, 4: 1}
+    panel.global_halfwidths = {0: 0, 1: 0, 2: 1, 3: 0, 4: 0}
+
+    ref = panel.build_floor_reference(
+        y_label="Y",
+        x_label="X",
+        source_id="20260630_00742.h5",
+        reduce_mode="sum",
+    )
+    expect = td.value[:, :, 1:4, 3:4, 1:2].sum(axis=(2, 3, 4))
+    assert ref.map.shape == (3, 4)
+    np.testing.assert_allclose(ref.map, expect, rtol=1e-5)
+    labels = [d["label"] for d in ref.roi["dims"]]
+    assert labels == ["Slit Defl.", "Energy", "Angle"]
+    assert DataViewerPanel._canonicalize_ssl_labels(td.labels) == [
+        "Y",
+        "X",
+        "Slit Defl.",
+        "Energy",
+        "Angle",
+    ]
+
+
 def test_build_floor_reference_accepts_slit_alias(qapp):
     td = _make_tensor(labels=("Y", "X", "Energy", "Slit Angle"))
     panel = DataViewerPanel()

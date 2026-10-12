@@ -91,8 +91,8 @@ def test_slurm_helpers_and_batch():
 
 def test_adapt_pipeline_mpi_launcher_slurm_vs_daemon():
     script = (
-        "mpirun --use-hwthread-cpus --oversubscribe -np 128 pw.x -in scf.in\n"
-        "mpirun --use-hwthread-cpus --oversubscribe -np 36 pw2wannier90.x -in pw2wan.in\n"
+        "mpirun -np 128 pw.x -in scf.in\n"
+        "mpirun -np 36 pw2wannier90.x -in pw2wan.in\n"
     )
     slurm = {"mode": "SLURM", "paths": {"slurm": {"account": "als"}}}
     adapted = adapt_pipeline_mpi_launcher(script, slurm)
@@ -102,33 +102,54 @@ def test_adapt_pipeline_mpi_launcher_slurm_vs_daemon():
 
     daemon = {"mode": "Daemon"}
     back = adapt_pipeline_mpi_launcher(adapted, daemon)
-    assert "mpirun --use-hwthread-cpus --oversubscribe -np 128 pw.x" in back
-    assert "mpirun --use-hwthread-cpus --oversubscribe -np 36 pw2wannier90.x" in back
+    assert "mpirun -np 128 pw.x" in back
+    assert "mpirun -np 36 pw2wannier90.x" in back
+    assert "--oversubscribe" not in back
+    assert "--use-hwthread-cpus" not in back
     assert "srun" not in back
 
+    # Legacy oversubscribe scripts still rewrite cleanly
+    legacy = (
+        "mpirun --use-hwthread-cpus --oversubscribe -np 16 pw.x -in scf.in\n"
+    )
+    cleaned = adapt_pipeline_mpi_launcher(legacy, daemon)
+    assert cleaned.strip() == "mpirun -np 16 pw.x -in scf.in"
+
     local = adapt_pipeline_mpi_launcher(adapted, None)
-    assert "mpirun" in local
+    assert "mpirun -np" in local
     assert "srun" not in local
 
 
-def test_load_private_key_nersc_rsa_pem():
-    key_path = os.path.expanduser("~/.ssh/nersc")
-    if not os.path.isfile(key_path):
-        pytest.skip("~/.ssh/nersc not present")
+def test_mpi_launch_prefix_daemon_is_plain():
+    assert mpi_launch_prefix({"mode": "Daemon"}, 8) == "mpirun -np 8 "
+    assert "--oversubscribe" not in mpi_launch_prefix(None, 4)
+
+
+def test_load_private_key_sshproxy_rsa_pem():
+    # Point TENSORSPEC_TEST_SSHPROXY_KEY at a real sshproxy key to exercise this.
+    key_path = os.path.expanduser(os.environ.get("TENSORSPEC_TEST_SSHPROXY_KEY", ""))
+    if not key_path or not os.path.isfile(key_path):
+        pytest.skip("TENSORSPEC_TEST_SSHPROXY_KEY not set / key not present")
     pkey = load_private_key(key_path)
     assert pkey is not None
 
 
 def test_uses_sshproxy_and_arpes_fetch_filter():
-    assert uses_sshproxy({"host": "login.nersc.gov", "user": "u"})
+    # Opt-in only: no host-name detection.
+    assert not uses_sshproxy({"host": "login.hpc.example.org", "user": "u"})
     assert uses_sshproxy({"host": "gpu.example.edu", "auth": "sshproxy"})
     assert not uses_sshproxy({"host": "gpu.example.edu", "mode": "Daemon"})
-    assert not uses_sshproxy({"host": "login.nersc.gov", "auth": "password"})
+    assert not uses_sshproxy({"host": "login.hpc.example.org", "auth": "password"})
 
     assert is_arpes_fetch_candidate("wannier90_hr.dat")
     assert is_arpes_fetch_candidate("scf.out")
+    assert is_arpes_fetch_candidate("relax.out")
+    assert is_arpes_fetch_candidate("relaxed_structure.cif")
+    assert is_arpes_fetch_candidate("structure_template.cif")
+    assert is_arpes_fetch_candidate("tensorspec_relax_meta.json")
     assert is_arpes_fetch_candidate("sys.out.full")
     assert is_arpes_fetch_candidate("scf.in")
+    assert is_arpes_fetch_candidate("FERMI_ENERGY.txt")
     assert not is_arpes_fetch_candidate("wannier90.mmn")
     assert not is_arpes_fetch_candidate("wannier90.amn")
     assert not is_arpes_fetch_candidate("wannier90.eig")

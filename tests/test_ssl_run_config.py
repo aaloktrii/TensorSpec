@@ -20,6 +20,14 @@ def test_run_config_defaults_and_round_trip(tmp_path):
     assert loaded.dino.gram_enabled is False
 
 
+def test_run_config_pretrained_roundtrip():
+    cfg = RunConfig(pretrained="dinov2_vits14")
+    payload = to_jsonable(cfg)
+    assert payload["pretrained"] == "dinov2_vits14"
+    loaded = run_config_from_dict(payload)
+    assert loaded.pretrained == "dinov2_vits14"
+
+
 def test_run_config_rejects_unknown_arm():
     import pytest
 

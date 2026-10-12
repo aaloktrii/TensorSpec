@@ -616,6 +616,13 @@ def build_arg_parser():
     parser.add_argument("--e_min", type=float, default=-2.0)
     parser.add_argument("--e_max", type=float, default=0.5)
     parser.add_argument("--ne", type=int, default=100)
+    parser.add_argument(
+        "--e_pad", type=float, default=-1.0,
+        help="eV added below e_min and above e_max for the calculation, cropped before "
+             "saving. States outside the window still leak Lorentzian tails (se_width) "
+             "into it; without padding they switch on/off as bands cross the edge and "
+             "the cube jumps between neighbouring k. -1 = auto (10*se_width), 0 = off.",
+    )
     parser.add_argument("--hv", type=float, default=90.0)
     parser.add_argument("--hv_start", type=float, default=None)
     parser.add_argument("--hv_finish", type=float, default=None)
@@ -830,6 +837,18 @@ def main():
     args.nphi = len(phis)
     args.ne = len(e_axis)
 
+    # Pad the energy axis at the same step; cropped back to e_axis_out before saving.
+    e_axis_out = e_axis
+    n_pad = 0
+    if len(e_axis) > 1:
+        e_pad = args.e_pad if args.e_pad >= 0 else 10.0 * float(physics.get("se_width", 0.05))
+        de = float(e_axis[1] - e_axis[0])
+        n_pad = int(np.ceil(e_pad / de)) if e_pad > 0 else 0
+        if n_pad:
+            e_axis = np.linspace(e_axis[0] - n_pad * de, e_axis[-1] + n_pad * de, len(e_axis) + 2 * n_pad)
+            args.ne = len(e_axis)
+            print(f"Energy padding: {n_pad} steps ({n_pad * de:.3f} eV) each side, cropped before save.", flush=True)
+
     num_hoppings = len(indices)
     del data
     import gc
@@ -999,6 +1018,10 @@ def main():
     cube_to_save, hv_axis = _run_hv_loop(hv_values, _compute_one_hv)
     wall_s = float(time.perf_counter() - t_compute)
     used_theta_chunk = used_theta_chunks[-1] if used_theta_chunks else 0
+    if n_pad:
+        cube_to_save = cube_to_save[..., n_pad:n_pad + len(e_axis_out)]
+        e_axis = e_axis_out
+        args.ne = len(e_axis)
 
     print(f"Saving ARPES intensity cube to {args.out_file}...", flush=True)
     save_payload = {

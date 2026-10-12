@@ -74,6 +74,7 @@ def _resolve_latest_log(
         if inferred:
             jobs = [inferred]
 
+    find_dirs: List[str] = []
     for job in jobs:
         run_dir = job_dir(cluster, job)
         candidates.extend(
@@ -82,11 +83,22 @@ def _resolve_latest_log(
                 f"{run_dir}/sys.out",
             ]
         )
+        if job == "sprkkr":
+            # New SPR-KKR runs (core/dft/sprkkr.workflow) live in per-run subdirs:
+            # sprkkr_gui_run/{scf_<ts>,arpes_<ts>,e2e_<ts>/scf,...}/<dataset>_{SCF,ARPES_SPEC}.out
+            find_dirs.append(run_dir)
 
-    if candidates:
+    if candidates or find_dirs:
         quoted = " ".join(f'"{p}"' for p in candidates)
+        find_expr = ""
+        if find_dirs:
+            fd = " ".join(f'"{d}"' for d in find_dirs)
+            find_expr = (
+                f" $(find {fd} -maxdepth 3 -type f "
+                f"\( -name '*_SCF.out' -o -name '*_SPEC.out' -o -name '*.log' \) 2>/dev/null)"
+            )
         _, stdout, _ = ssh.exec_command(
-            f"ls -t {quoted} 2>/dev/null | head -n 1",
+            f"ls -t {quoted}{find_expr} 2>/dev/null | head -n 1",
             timeout=8,
         )
         picked = stdout.read().decode(errors="replace").strip()

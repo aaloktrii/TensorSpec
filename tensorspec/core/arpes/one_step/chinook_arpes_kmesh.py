@@ -21,7 +21,7 @@ try:
     from tensorspec.core.arpes.one_step.fresnel import apply_fresnel_to_A_lab
     from tensorspec.core.arpes.one_step.photon_momentum import photon_q_lab
 except ImportError:
-    # Remote Einstein jobs upload flat .py files beside this module (no package).
+    # Remote jobs upload flat .py files beside this module (no package).
     def _load_co_uploaded(name: str):
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{name}.py")
         if name in sys.modules:
@@ -1029,6 +1029,43 @@ def run_chinook_arpes(
     return _intensity_with_kz_broaden(physics, _once)
 
 
+def _spinor_masks(exp, spinor_basis: str):
+    """(up, down) boolean masks over the TB basis, or None for a spinless model.
+
+    Wannier90 spinor hr.dat carries spin inside H, with every orbital tag spin=+1
+    (GrizzlyME is spinless). Its single matrix-element row then adds the up and
+    down spinor components COHERENTLY, but the photoelectron's up and down
+    channels are orthogonal and must add in intensity. ``spinor_basis`` says how
+    the components are ordered: 'interleaved' (orb0 up, orb0 down, orb1 up, ...;
+    Wannier90 spinors=true) or 'blocked' (all up, then all down).
+    """
+    n = len(exp.basis)
+    labels = [getattr(o, "label", None) for o in exp.basis]
+    if spinor_basis in ("", "none", None):
+        if n % 2 == 0 and n > 0 and labels[0::2] == labels[1::2]:
+            print(
+                "WARNING: basis labels come in identical pairs (looks like a Wannier "
+                "spinor model) but physics['spinor_basis'] is 'none' — up/down will "
+                "add coherently. Set spinor_basis='interleaved' if this is a spinor hr.dat.",
+                flush=True,
+            )
+        return None
+    if n % 2:
+        raise ValueError(f"spinor_basis={spinor_basis!r} needs an even basis, got {n}")
+    idx = np.arange(n)
+    if spinor_basis == "interleaved":
+        if labels[0::2] != labels[1::2]:
+            raise ValueError("spinor_basis='interleaved' but labels are not paired (2i, 2i+1)")
+        up = idx % 2 == 0
+    elif spinor_basis == "blocked":
+        if labels[: n // 2] != labels[n // 2 :]:
+            raise ValueError("spinor_basis='blocked' but the two halves have different labels")
+        up = idx < n // 2
+    else:
+        raise ValueError(f"unknown spinor_basis {spinor_basis!r}")
+    return up, ~up
+
+
 def run_grizzly_arpes(
     tb_model,
     k_bounds: Mapping[str, list],
@@ -1110,7 +1147,19 @@ def run_grizzly_arpes(
                 (ctx["num_x"], ctx["num_y"], ctx["num_e"]), dtype=float
             )
 
-        exp.Mk = compute_all_Mk(exp, device=str(device))
+        masks = _spinor_masks(exp, str(physics.get("spinor_basis", "none")))
+        if masks is None:
+            exp.Mk = compute_all_Mk(exp, device=str(device))
+        else:
+            # Row 0 = up channel, row 1 = down channel; spectral() sums |pol.M|^2
+            # over rows, i.e. the two spin channels add incoherently.
+            ev_full = exp.Ev
+            rows = []
+            for m in masks:
+                exp.Ev = ev_full * m[None, :, None]
+                rows.append(np.asarray(compute_all_Mk(exp, device=str(device)))[:, 0, :])
+            exp.Ev = ev_full
+            exp.Mk = np.stack(rows, axis=1)
         t_mk = time.perf_counter()
 
         if use_grizzly_spectral:

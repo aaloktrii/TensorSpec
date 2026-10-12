@@ -181,6 +181,8 @@ def test_cli_probe_writes_metrics_and_figures(tmp_path: Path) -> None:
     assert metrics["n_samples"] == 4
     assert metrics["k"] == 2
     assert metrics["use_teacher"] is True
+    assert metrics["embed"] == "cls"
+    assert metrics["l2_normalize"] is False
     for key in ("ari", "nmi", "iou", "contiguity"):
         assert key in metrics
     assert (out / "embeddings.npy").exists()
@@ -189,3 +191,45 @@ def test_cli_probe_writes_metrics_and_figures(tmp_path: Path) -> None:
     for name in ("fig_ref.png", "fig_ssl.png", "fig_overlay.png"):
         assert (out / name).exists()
         assert (out / name).stat().st_size > 0
+
+
+def test_cli_probe_embed_patch_mean(tmp_path: Path) -> None:
+    data = tmp_path / "data"
+    data.mkdir()
+    _mini_probe_shards(data)
+    ckpt = _tiny_ckpt(tmp_path)
+    ref_path = tmp_path / "floor.npz"
+    _mini_reference(ref_path)
+    out = tmp_path / "probe_out"
+
+    result = main(
+        [
+            "probe",
+            "--ckpt",
+            str(ckpt),
+            "--data",
+            str(data),
+            "--reference",
+            str(ref_path),
+            "--out",
+            str(out),
+            "--source-id",
+            SOURCE_ID,
+            "--embed",
+            "patch_mean",
+            "--k",
+            "2",
+            "--seed",
+            "0",
+            "--batch-size",
+            "2",
+        ]
+    )
+
+    assert result == 0
+    metrics = json.loads((out / "metrics.json").read_text(encoding="utf-8"))
+    assert metrics["embed"] == "patch_mean"
+    assert metrics["l2_normalize"] is True
+    assert metrics["roi_mode"] == "full"
+    emb = np.load(out / "embeddings.npy")
+    assert emb.shape == (4, 192)

@@ -1,3 +1,4 @@
+# --- Core scientific stack ---
 certifi==2026.5.20
 charset-normalizer==3.4.7
 contourpy==1.3.0
@@ -25,54 +26,60 @@ pooch==1.9.0
 pybtex==0.26.1
 pymatgen==2024.8.9
 pyparsing==3.3.2
-PyQt6-Qt6==6.10.2
-PyQt6_sip==13.10.2
-PySide6<6.10.0
-PySide6_Addons<6.10.0
-PySide6_Essentials<6.10.0
-shiboken6<6.10.0
 python-dateutil==2.9.0.post0
 pytz==2026.2
-pyvista==0.46.5
-pyvistaqt==0.11.3
 PyYAML==6.0.3
-QtPy==2.4.3
 requests==2.32.5
 ruamel.yaml==0.19.1
 scipy==1.13.1
 scooby==0.11.0
+setuptools<70.0.0
 six==1.17.0
 spglib==2.7.0
 sympy==1.14.0
 tabulate==0.9.0
-tifffile==2026.3.3
 tqdm==4.67.3
 typing_extensions==4.15.0
 tzdata==2026.2
 uncertainties==3.2.3
 urllib3==2.6.3
-vtk==9.3.0
 zipp==3.23.1
-setuptools<70.0.0
 h5py>=3.10.0
-xarray
+xarray>=2024.0
+pydantic>=2.0
+
+# --- Qt GUI (PySide6; do not add PyQt6) ---
+PySide6<6.10.0
+PySide6_Addons<6.10.0
+PySide6_Essentials<6.10.0
+shiboken6<6.10.0
+QtPy==2.4.3
+pyvista==0.46.5
+pyvistaqt==0.11.3
+vtk==9.3.0
+psutil==5.9.8
+
+# --- PEEM / imaging ---
+tifffile==2026.3.3
+
+# --- ML suite ---
 umap-learn>=0.5.12
 hdbscan>=0.8.44
 scikit-learn>=1.9.0
-pydantic>=2.0
-
-# --- ARPES SIMULATION ENGINES ---
-chinook==1.1.3
-oscarpes==3.1.1
-psutil==5.9.8
-# GrizzlyME: prefer PyPI/wheel; local editable OK: pip install -e GrizzlyME
-grizzlyme>=0.2.0
 torch>=2.0
 torchvision>=0.15
 
+# --- ARPES simulation engines ---
+chinook==1.1.3
+oscarpes==3.1.1
+# GrizzlyME: prefer PyPI/wheel; local editable OK: pip install -e GrizzlyME
+grizzlyme>=0.2.0
+ase2sprkkr==3.4.2
+
+# --- Remote compute / optional web helpers ---
 paramiko
 fastapi
 uvicorn
 
-# --- DEV ---
+# --- Dev ---
 pytest>=7.0

@@ -9,6 +9,7 @@ AxisRole = Literal["energy", "slit", "defl", "x", "y", "other"]
 SampleModeName = Literal["fermi3d", "disp2d"]
 AugmentArm = Literal["A0", "A1"]
 ModelName = Literal["vit_ti", "vit_s"]
+ObjectiveName = Literal["dino", "mae"]
 
 _VALID_AUGMENT_ARMS = frozenset({"A0", "A1"})
 _VALID_MODEL_NAMES = frozenset({"vit_ti", "vit_s"})
@@ -89,6 +90,15 @@ class DinoSpec:
 
 
 @dataclass
+class MaeSpec:
+    decoder_dim: int = 192
+    decoder_depth: int = 4
+    decoder_heads: int = 6
+    mlp_ratio: int = 4
+    min_lr: float = 1e-6
+
+
+@dataclass
 class OptimSpec:
     lr: float = 0.0005
     weight_decay_start: float = 0.04
@@ -106,11 +116,14 @@ class RunConfig:
     model: ModelSpec = field(default_factory=ModelSpec)
     dino: DinoSpec = field(default_factory=DinoSpec)
     optim: OptimSpec = field(default_factory=OptimSpec)
+    objective: ObjectiveName = "dino"
+    mae: MaeSpec = field(default_factory=MaeSpec)
     seed: int = 0
     num_workers: int = 2
     log_every: int = 20
     ckpt_every: int = 1000
     max_steps: int | None = None
+    pretrained: str | None = None
 
 
 @dataclass
@@ -192,6 +205,16 @@ def _dino_spec_from_dict(d: dict) -> DinoSpec:
     )
 
 
+def _mae_spec_from_dict(d: dict) -> MaeSpec:
+    return MaeSpec(
+        decoder_dim=d.get("decoder_dim", 192),
+        decoder_depth=d.get("decoder_depth", 4),
+        decoder_heads=d.get("decoder_heads", 6),
+        mlp_ratio=d.get("mlp_ratio", 4),
+        min_lr=d.get("min_lr", 1e-6),
+    )
+
+
 def _optim_spec_from_dict(d: dict) -> OptimSpec:
     return OptimSpec(
         lr=d.get("lr", 0.0005),
@@ -210,16 +233,22 @@ def run_config_from_dict(d: dict) -> RunConfig:
     model_d = d.get("model", {})
     dino_d = d.get("dino", {})
     optim_d = d.get("optim", {})
+    objective = d.get("objective", "dino")
+    if objective not in ("dino", "mae"):
+        raise ValueError(f"invalid objective: {objective!r}")
     return RunConfig(
         augment=_augment_spec_from_dict(augment_d),
         model=_model_spec_from_dict(model_d),
         dino=_dino_spec_from_dict(dino_d),
         optim=_optim_spec_from_dict(optim_d),
+        objective=objective,
+        mae=_mae_spec_from_dict(d.get("mae") or {}),
         seed=d.get("seed", 0),
         num_workers=d.get("num_workers", 2),
         log_every=d.get("log_every", 20),
         ckpt_every=d.get("ckpt_every", 1000),
         max_steps=d.get("max_steps"),
+        pretrained=d.get("pretrained"),
     )
 
 

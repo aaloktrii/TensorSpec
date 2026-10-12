@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 
 from tensorspec.core.compute.cluster_live_monitor import fetch_cluster_snapshot
 from tensorspec.core.compute import cluster_paths as cp
-from tensorspec.gui.services.nersc_auth import refresh_sshproxy_login
+from tensorspec.gui.services.sshproxy_auth import refresh_sshproxy_login
 
 CONFIG_FILE = os.path.expanduser('~/.tensorspec_clusters.json')
 
@@ -507,12 +507,12 @@ class ComputeManagerPanel(QDialog):
         self.test_btn = QPushButton("Test Connection")
         self.test_btn.clicked.connect(self.test_connection)
 
-        self.nersc_login_btn = QPushButton("🔑 Refresh NERSC Login")
-        self.nersc_login_btn.setToolTip(
-            "For NERSC / sshproxy clusters only — runs sshproxy (MFA). "
+        self.sshproxy_login_btn = QPushButton("🔑 Refresh sshproxy Login")
+        self.sshproxy_login_btn.setToolTip(
+            "For sshproxy clusters only (auth: sshproxy) — runs sshproxy (MFA). "
             "Hidden / disabled for Daemon / password-style clusters."
         )
-        self.nersc_login_btn.clicked.connect(self.refresh_nersc_login)
+        self.sshproxy_login_btn.clicked.connect(self.refresh_sshproxy_login)
 
         self.provision_btn = QPushButton("⚙️ Auto-Setup Remote Environment")
         self.provision_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 5px;")
@@ -520,7 +520,7 @@ class ComputeManagerPanel(QDialog):
         
         action_layout.addWidget(self.remove_btn)
         action_layout.addStretch()
-        action_layout.addWidget(self.nersc_login_btn)
+        action_layout.addWidget(self.sshproxy_login_btn)
         action_layout.addWidget(self.test_btn)
         action_layout.addWidget(self.provision_btn)
         
@@ -630,13 +630,13 @@ class ComputeManagerPanel(QDialog):
         self.update_table()
         self.save_config()
 
-    def refresh_nersc_login(self):
+    def refresh_sshproxy_login(self):
         selected_rows = self.table.selectionModel().selectedRows()
         if not selected_rows:
             QMessageBox.information(
                 self,
                 "Info",
-                "Select a NERSC / sshproxy cluster in the table first.",
+                "Select an sshproxy cluster in the table first.",
             )
             return
         row = selected_rows[0].row()
@@ -644,8 +644,8 @@ class ComputeManagerPanel(QDialog):
         if not cp.uses_sshproxy(cluster):
             QMessageBox.information(
                 self,
-                "Not NERSC",
-                f"'{cluster.get('name')}' is not a NERSC sshproxy cluster.\n"
+                "Not sshproxy",
+                f"'{cluster.get('name')}' is not an sshproxy cluster.\n"
                 "Use Test Connection for Daemon / password hosts.",
             )
             return
@@ -674,7 +674,7 @@ class ComputeManagerPanel(QDialog):
         except Exception as e:
             hint = ""
             if cp.uses_sshproxy(cluster):
-                hint = "\n\nTip: click 🔑 Refresh NERSC Login first (sshproxy MFA)."
+                hint = "\n\nTip: click 🔑 Refresh sshproxy Login first (MFA)."
             QMessageBox.critical(
                 self,
                 "Error",

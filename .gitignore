@@ -15,19 +15,28 @@ old_working_py/
 currentproblem
 currentproblem2
 # Local-only / private (never push)
-SPRKKR/
+/SPRKKR/
 GrizzlyME/
 AGENT_HANDOFF.md
+ML_local/
+scripts/tensorspec-remote.env
+
+# Local docs / agent plans (never push) — keep on disk for maintainers only
+/docs/
+
+# Demo / scratch artifacts (never push)
+/Claude outputs/
+/LEGACY.md
+/patch.py
+/generate_mock_data.py
+/qe_dryrun_*/
 
 # Local lab / debug scratch (never push)
 check_*.py
 verify_*.py
 test_sprkkr.py
 test_bulk_*.py
-einstein_*.py
-kill_einstein.py
 stop_qe.py
-setup_einstein*.py
 deep_diag.py
 clean_qe.py
 compile_sprkkr*.py
@@ -47,14 +56,12 @@ bottom.py
 /dummy.py
 /deploy_worker.py
 /tail_scf.py
-/update_einstein.py
 /upload_sprkkr.py
 /parse_wout*.py
 /install_chinook.py
 /test_*.py
 /test*.png
 /scratch/
-/docs/REMOTE_GPU_SETUP.md
 
 # Agent scratch (never push)
 .superpowers/
@@ -64,3 +71,11 @@ tensorspec_clusters.json
 .tensorspec_clusters.json
 **/tensorspec_clusters.local.json
 .worktrees/
+
+# graphify local map (contains SPRKKR names)
+graphify-out/
+.graphifyignore
+OSKI/
+
+# OSKI build tarballs — OSKI is its own repo (fawkesdx/oski)
+oski_*.tar.gz

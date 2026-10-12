@@ -1,16 +1,18 @@
 import weakref
+import json
+import os
+from datetime import datetime, timezone
+from pathlib import Path
 
 # Global registry to track all active Data Viewer windows for crosshair syncing
 GLOBAL_SYNC_REGISTRY = weakref.WeakSet()
-import os
-from datetime import datetime, timezone
 
 import numpy as np
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, 
                                QComboBox, QPushButton, QCheckBox, QFrame, QMenu, QSpinBox, 
                                QFileDialog, QMessageBox, QDoubleSpinBox, QGridLayout, QMainWindow, QSplitter,
                                QInputDialog)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer
 from PySide6.QtGui import QCursor
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -23,6 +25,17 @@ from tensorspec.core.ml.ssl.reference import (
     integrate_xy_map,
     save_floor_reference,
 )
+
+
+def _default_floor_ref_dir() -> Path:
+    """Default folder for saved floor-reference maps.
+
+    Set TENSORSPEC_FLOOR_REF_DIR to use your own folder (e.g. a synced drive).
+    """
+    return Path(
+        os.environ.get("TENSORSPEC_FLOOR_REF_DIR")
+        or Path.home() / "TensorSpec" / "floor_references"
+    ).expanduser()
 
 
 def is_ml_label_layer(layer_name: str) -> bool:
@@ -846,55 +859,8 @@ class SliceWidget(QFrame):
         return "sum"
 
     def _save_floor_reference(self):
-        if not self._is_yx_view():
-            QMessageBox.warning(
-                self, "Save floor reference", "switch panel to Y×X"
-            )
-            return
-
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save floor reference",
-            "00737_floor.npz",
-            "NumPy ZIP (*.npz)",
-        )
-        if not path:
-            return
-
-        default_sid = self.parent_panel.default_source_id()
-        source_id, ok = QInputDialog.getText(
-            self,
-            "Source ID",
-            "source_id (e.g. basename of h5):",
-            text=default_sid,
-        )
-        if not ok:
-            return
-        source_id = (source_id or "").strip()
-        if not source_id:
-            QMessageBox.warning(
-                self, "Save floor reference", "source_id required"
-            )
-            return
-
-        reduce_mode = self._reduce_mode_from_combo()
-        try:
-            ref = self.parent_panel.build_floor_reference(
-                y_label="Y",
-                x_label="X",
-                source_id=source_id,
-                reduce_mode=reduce_mode,
-            )
-            save_floor_reference(path, ref)
-        except Exception as exc:
-            QMessageBox.critical(self, "Save floor reference", str(exc))
-            return
-
-        QMessageBox.information(
-            self,
-            "Save floor reference",
-            f"Saved {path}\nmap shape {tuple(ref.map.shape)}",
-        )
+        """Right-click shortcut: same dialog as the top-bar button."""
+        self.parent_panel.save_condition_dialog()
 
     def close_widget(self):
         self.parent_panel.remove_view(self)
@@ -918,21 +884,215 @@ class DataViewerPanel(QWidget):
         
         # Register this panel to the global sync network
         DataViewerPanel._active_instances.add(self)
+
+        self._floor_request_watcher: QFileSystemWatcher | None = None
+        self._floor_request_dir: Path | None = None
+        self._floor_request_seen: set[str] = set()
         
         self._init_ui()
 
+    def enable_floor_request_watcher(self, request_dir: str | Path) -> None:
+        """Watch ``request_dir`` for ``*.request`` files and save floor maps.
+
+        Each request file is JSON: ``{"tag": "001", "reduce_mode": "sum"}``.
+        Optional keys: ``out_dir``, ``source_id``. Writes
+        ``<out_dir>/<source_stem>_floor_<tag>.npz`` and a sibling ``.done`` file.
+        """
+        path = Path(request_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        self._floor_request_dir = path
+        self._floor_request_seen = {p.name for p in path.glob("*.request")}
+        if self._floor_request_watcher is None:
+            self._floor_request_watcher = QFileSystemWatcher(self)
+            self._floor_request_watcher.directoryChanged.connect(
+                self._on_floor_request_dir_changed
+            )
+        watched = self._floor_request_watcher.directories()
+        if str(path) not in watched:
+            self._floor_request_watcher.addPath(str(path))
+        # Poll as well: some network /tmp layouts skip directoryChanged.
+        if not hasattr(self, "_floor_request_timer"):
+            self._floor_request_timer = QTimer(self)
+            self._floor_request_timer.setInterval(500)
+            self._floor_request_timer.timeout.connect(self._on_floor_request_dir_changed)
+            self._floor_request_timer.start()
+
+    def _on_floor_request_dir_changed(self, *_args) -> None:
+        if self._floor_request_dir is None or self.tensor_data is None:
+            return
+        for request_path in sorted(self._floor_request_dir.glob("*.request")):
+            if request_path.name in self._floor_request_seen:
+                continue
+            self._floor_request_seen.add(request_path.name)
+            try:
+                payload = json.loads(request_path.read_text(encoding="utf-8") or "{}")
+            except Exception as exc:
+                (request_path.with_suffix(".error")).write_text(str(exc), encoding="utf-8")
+                continue
+            tag = str(payload.get("tag") or request_path.stem).strip()
+            if not tag:
+                (request_path.with_suffix(".error")).write_text("missing tag", encoding="utf-8")
+                continue
+            try:
+                saved = self.record_floor_reference(
+                    tag=tag,
+                    out_dir=payload.get("out_dir"),
+                    source_id=payload.get("source_id"),
+                    reduce_mode=payload.get("reduce_mode"),
+                )
+            except Exception as exc:
+                (request_path.with_suffix(".error")).write_text(str(exc), encoding="utf-8")
+                continue
+            done = {
+                "path": str(saved["path"]),
+                "map_shape": list(saved["map_shape"]),
+                "roi": saved["roi"],
+            }
+            request_path.with_suffix(".done").write_text(
+                json.dumps(done, indent=2) + "\n", encoding="utf-8"
+            )
+            try:
+                request_path.unlink()
+            except OSError:
+                pass
+
+    def record_floor_reference(
+        self,
+        *,
+        tag: str,
+        out_dir: str | Path | None = None,
+        source_id: str | None = None,
+        reduce_mode: str | None = None,
+    ) -> dict:
+        """Save the current Y×X intensity map as a floor reference ``.npz``."""
+        if self.tensor_data is None:
+            raise ValueError("no data loaded")
+        sid = (source_id or self.default_source_id() or "unknown").strip()
+        if not sid:
+            raise ValueError("source_id required")
+        mode = (reduce_mode or self._default_reduce_mode()).lower()
+        if mode not in {"sum", "mean"}:
+            raise ValueError(f"reduce_mode must be sum or mean, got {mode!r}")
+        stem = Path(sid).stem
+        destination = Path(out_dir or _default_floor_ref_dir())
+        destination.mkdir(parents=True, exist_ok=True)
+        path = destination / f"{stem}_floor_{tag}.npz"
+        ref = self.build_floor_reference(
+            y_label="Y",
+            x_label="X",
+            source_id=stem,
+            reduce_mode=mode,
+        )
+        save_floor_reference(path, ref)
+        return {
+            "path": path,
+            "map_shape": tuple(ref.map.shape),
+            "roi": ref.roi,
+            "tag": tag,
+        }
+
+    def _default_reduce_mode(self) -> str:
+        for view in self._iter_slice_widgets():
+            if view._is_yx_view():
+                return view._reduce_mode_from_combo()
+        return "sum"
+
     def _init_ui(self):
         self.main_layout = QVBoxLayout(self)
-        
+        self._last_floor_dir = str(_default_floor_ref_dir())
+
         top_bar = QHBoxLayout()
         top_bar.addWidget(QLabel("<b>Dynamic Cross-Correlated Dashboard</b>"))
         top_bar.addStretch()
+        self.btn_save_condition = QPushButton("Save this condition…")
+        self.btn_save_condition.setToolTip(
+            "Save the current Y×X intensity map plus energy / deflector / "
+            "slit centers and integration widths as a floor reference .npz"
+        )
+        self.btn_save_condition.setStyleSheet(
+            "font-weight: bold; padding: 6px 12px; "
+            "background-color: #0F6A8B; color: white;"
+        )
+        self.btn_save_condition.clicked.connect(self.save_condition_dialog)
+        top_bar.addWidget(self.btn_save_condition)
         self.main_layout.addLayout(top_bar)
-        
+
         # Root splitter for vertical rows
         self.v_splitter = QSplitter(Qt.Vertical)
         self.main_layout.addWidget(self.v_splitter)
         self.main_layout.setStretch(1, 1)
+
+    def save_condition_dialog(self) -> None:
+        """Ask for a tag and folder, then save the live Y×X floor reference."""
+        if self.tensor_data is None:
+            QMessageBox.warning(self, "Save this condition", "Load data first.")
+            return
+        if not any(view._is_yx_view() for view in self._iter_slice_widgets()):
+            QMessageBox.warning(
+                self,
+                "Save this condition",
+                "Need a panel showing Y × X. Set the axes to Y and X first.",
+            )
+            return
+
+        default_sid = Path(self.default_source_id() or "scan").stem
+        tag, ok = QInputDialog.getText(
+            self,
+            "Save this condition",
+            "Short name for this cut (for example 001, near_EF, defl_mid):",
+            text="",
+        )
+        if not ok:
+            return
+        tag = (tag or "").strip().replace(" ", "_")
+        if not tag:
+            QMessageBox.warning(self, "Save this condition", "Name required.")
+            return
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Folder for floor references",
+            self._last_floor_dir,
+        )
+        if not folder:
+            return
+        self._last_floor_dir = folder
+
+        path = Path(folder) / f"{default_sid}_floor_{tag}.npz"
+        if path.exists():
+            answer = QMessageBox.question(
+                self,
+                "Save this condition",
+                f"{path.name} already exists.\nOverwrite?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            ref = self.build_floor_reference(
+                y_label="Y",
+                x_label="X",
+                source_id=default_sid,
+                reduce_mode=self._default_reduce_mode(),
+            )
+            save_floor_reference(path, ref)
+        except Exception as exc:
+            QMessageBox.critical(self, "Save this condition", str(exc))
+            return
+
+        dims = ref.roi.get("dims", [])
+        lines = [
+            f"Saved {path}",
+            f"map shape {tuple(ref.map.shape)}",
+            f"reduce_mode {ref.roi.get('reduce_mode')}",
+        ]
+        for dim in dims:
+            lines.append(
+                f"{dim['label']}: center_index={dim['center_index']}  "
+                f"halfwidth_px={dim['halfwidth_px']}  "
+                f"[{dim['physical_lo']:.6g}, {dim['physical_hi']:.6g}]"
+            )
+        QMessageBox.information(self, "Save this condition", "\n".join(lines))
         
     def load_data(self, tensor_data: TensorData):
         self.tensor_data = tensor_data
@@ -948,13 +1108,18 @@ class DataViewerPanel(QWidget):
 
     @staticmethod
     def _canonicalize_ssl_labels(labels: list[str]) -> list[str]:
-        """Map loader aliases (e.g. Slit Angle) to Energy/Angle expected by reference APIs."""
+        """Map loader aliases to Energy/Angle expected by reference APIs.
+
+        Detector slit stays ``Angle``. Deflector names that contain ``slit``
+        (for example ``Slit Defl.``) are left alone so a 5D cube keeps three
+        independent hidden axes.
+        """
         out: list[str] = []
         for lab in labels:
             key = lab.strip().casefold()
             if key == "energy" or key.startswith("energy "):
                 out.append("Energy")
-            elif key == "angle" or "slit" in key:
+            elif key == "angle" or key.startswith("angle ") or "slit angle" in key:
                 out.append("Angle")
             else:
                 out.append(lab)
@@ -965,7 +1130,7 @@ class DataViewerPanel(QWidget):
         if td is None:
             return ""
         md = td.metadata or {}
-        for key in ("source_id", "filename", "filepath", "path"):
+        for key in ("source_id", "filename", "filepath", "path", "source_path"):
             val = md.get(key)
             if val:
                 return os.path.basename(str(val))
