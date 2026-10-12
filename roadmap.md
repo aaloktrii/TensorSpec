@@ -58,6 +58,7 @@ Grand App
 			- [x] B3: Full Multiple Scattering & Time-Reversed LEED (SPR-KKR `kkrspec` wrapper: native θ×φ grid, MPI, energy/hv fan-out, local or remote; `.spc` → DataTree). Code done 2026-09-09; real-run check on the remote host pending (Gate D).
 	- [x] Hierarchical Data Container (`xarray.DataTree` / NeXus-aligned) via `core/data_tree.py` + `workspace.py` (`/raw`, `/processed`, `/analysis`, `/history`; motors under `/raw/motors` when present).
 	- [x] Universal Data Viewer (`gui/components/data_viewer_panel.py`): N-D slices, Δx/Δy integration, linked crosshairs, ML `domains_*` overlay layers; launchable from Workspace Browser and ML suite.
+	- [x] DataViewer chrome: split top bar into axes row + display row (profiles/contrast/γ/sync) so mid-width panels do not clip.
 	- [ ] Data Loader from various beamlines (beyond MAESTRO)
 		- [x] MAESTRO (partial): kinds under `core/io/loaders/maestro/kinds/` (e.g. `xy_fine_4d`, `focus_xy_fine_5d`, `fermi_defl_3d`, `defl_x_line_4d`)
 		- [ ] i05 Diamond
@@ -75,6 +76,7 @@ Grand App
 	- [x] separate CP/CM or LH/LV into processed children
 	- [x] background subtraction (shared BG core) applied across stack / channels
 	- [x] XMCD sum-rule analysis for CP/CM (and related pairs)
+	- [x] Layout: left forms-only; right tabs Frame | BG | Sum Rule (previews no longer crowd left scroll)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)
 	- [x] background subtraction + XMCD sum rule via **shared PEEM BG / sum-rule core** (no separate `xas_engine.py` yet)

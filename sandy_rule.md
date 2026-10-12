@@ -71,8 +71,8 @@ tensorspec/
     │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
-    │   ├── peem_panel.py / xas_panel.py
-    │   ├── data_viewer_panel.py   # Universal N-D viewer + ML domain overlays
+    │   ├── peem_panel.py / xas_panel.py  # PEEM: left forms; right Frame|BG|Sum Rule tabs
+    │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows
     │   └── ml_tabs/               # Extracted ML suite tabs
     ├── ml/                   # MaestroAI workers, warehouse, session helpers
     └── suites/               # Independent roadmap suites + ML

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -59,9 +60,10 @@ class PeemPanel(QWidget):
     def _setup_ui(self):
         root = QVBoxLayout(self)
         splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
         root.addWidget(splitter)
 
-        # --- LEFT: controls ---
+        # --- LEFT: controls (forms only — plots live on right tabs) ---
         control_panel = QWidget()
         control_layout = QVBoxLayout(control_panel)
 
@@ -157,10 +159,6 @@ class PeemPanel(QWidget):
         bg_btns.addWidget(self.btn_bg_preview)
         bg_btns.addWidget(self.btn_bg_apply)
         bg_form.addRow(bg_btns)
-        self.bg_figure = Figure(figsize=(3, 2), dpi=90, layout="tight")
-        self.bg_canvas = FigureCanvas(self.bg_figure)
-        self.bg_ax = self.bg_figure.add_subplot(111)
-        bg_form.addRow(self.bg_canvas)
         control_layout.addWidget(bg_group)
         self._sync_bg_method_ui()
 
@@ -207,10 +205,6 @@ class PeemPanel(QWidget):
         self.sum_results = QLabel("(no sum-rule result yet)")
         self.sum_results.setWordWrap(True)
         sum_form.addRow(self.sum_results)
-        self.sum_figure = Figure(figsize=(3, 2), dpi=90, layout="tight")
-        self.sum_canvas = FigureCanvas(self.sum_figure)
-        self.sum_ax = self.sum_figure.add_subplot(111)
-        sum_form.addRow(self.sum_canvas)
         control_layout.addWidget(sum_group)
 
         control_layout.addStretch()
@@ -220,9 +214,13 @@ class PeemPanel(QWidget):
         scroll.setMinimumWidth(360)
         splitter.addWidget(scroll)
 
-        # --- RIGHT: image viewer ---
+        # --- RIGHT: Frame | BG | Sum Rule tabs (plots leave left column) ---
+        self.view_tabs = QTabWidget()
+        self.view_tabs.setDocumentMode(True)
+
         view_panel = QWidget()
         view_layout = QVBoxLayout(view_panel)
+        view_layout.setContentsMargins(4, 4, 4, 4)
         self.view_figure = Figure(figsize=(6, 5), dpi=100, layout="tight")
         self.view_canvas = FigureCanvas(self.view_figure)
         self.view_ax = self.view_figure.add_subplot(111)
@@ -258,8 +256,29 @@ class PeemPanel(QWidget):
         contrast.addWidget(QLabel("vmax:"))
         contrast.addWidget(self.vmax_spin)
         view_layout.addLayout(contrast)
+        self.view_tabs.addTab(view_panel, "Frame")
 
-        splitter.addWidget(view_panel)
+        bg_page = QWidget()
+        bg_page_layout = QVBoxLayout(bg_page)
+        bg_page_layout.setContentsMargins(4, 4, 4, 4)
+        self.bg_figure = Figure(figsize=(6, 4), dpi=100, layout="tight")
+        self.bg_canvas = FigureCanvas(self.bg_figure)
+        self.bg_ax = self.bg_figure.add_subplot(111)
+        bg_page_layout.addWidget(self.bg_canvas, stretch=1)
+        self.view_tabs.addTab(bg_page, "BG")
+
+        sum_page = QWidget()
+        sum_page_layout = QVBoxLayout(sum_page)
+        sum_page_layout.setContentsMargins(4, 4, 4, 4)
+        self.sum_figure = Figure(figsize=(6, 4), dpi=100, layout="tight")
+        self.sum_canvas = FigureCanvas(self.sum_figure)
+        self.sum_ax = self.sum_figure.add_subplot(111)
+        sum_page_layout.addWidget(self.sum_canvas, stretch=1)
+        self.view_tabs.addTab(sum_page, "Sum Rule")
+
+        splitter.addWidget(self.view_tabs)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
         splitter.setSizes([380, 720])
 
     @staticmethod
@@ -489,6 +508,7 @@ class PeemPanel(QWidget):
         self.bg_ax.legend(fontsize=7)
         self.bg_ax.set_title(f"BG preview ({result['method']})")
         self.bg_canvas.draw()
+        self.view_tabs.setCurrentIndex(1)
 
     def _plot_sumrule(self, result: dict):
         self.sum_ax.clear()
@@ -501,6 +521,7 @@ class PeemPanel(QWidget):
         self.sum_ax.legend(fontsize=7)
         self.sum_ax.set_title("XMCD sum rule")
         self.sum_canvas.draw()
+        self.view_tabs.setCurrentIndex(2)
 
     def _refresh_meta(self):
         name = self._dataset_name

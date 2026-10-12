@@ -98,11 +98,11 @@ class SliceWidget(QFrame):
         
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        
-        # --- Top Controls ---
+
+        # --- Top Controls (3 rows so mid-width panels do not clip) ---
         ctrl_layout_v = QVBoxLayout()
-        
-        # ROW 1 (Always Visible)
+
+        # ROW 1: axes + window chrome
         row1 = QHBoxLayout()
         self.combo_x = QComboBox()
         self.combo_y = QComboBox()
@@ -110,40 +110,59 @@ class SliceWidget(QFrame):
         self.combo_x.currentIndexChanged.connect(self._on_dropdown_changed)
         self.combo_y.currentIndexChanged.connect(self._on_dropdown_changed)
         self.combo_layer.currentIndexChanged.connect(self.redraw)
-        
+
         row1.addWidget(QLabel("X:"))
         row1.addWidget(self.combo_x)
         row1.addWidget(QLabel("Y:"))
         row1.addWidget(self.combo_y)
         row1.addWidget(QLabel("Layer:"))
         row1.addWidget(self.combo_layer)
-        
+
         self.combo_aspect = QComboBox()
-        self.combo_aspect.addItems(["Stretch (Auto)", "Square (Equal)"])
+        self.combo_aspect.addItems(["Stretch (Auto)", "Square (equal)"])
         self.combo_aspect.currentIndexChanged.connect(self.update_aspect)
         row1.addWidget(self.combo_aspect)
+        row1.addStretch(1)
+
+        self.btn_toggle = QPushButton("Toggle UI")
+        self.btn_toggle.setStyleSheet("font-weight: bold; background-color: #5bc0de; color: black;")
+        self.btn_toggle.setToolTip("Hide/show Δ integration controls and dimension sliders.")
+        self.btn_toggle.clicked.connect(self.toggle_ui_controls)
+        row1.addWidget(self.btn_toggle)
+
+        btn_close = QPushButton("✕")
+        btn_close.setFixedWidth(25)
+        btn_close.setStyleSheet("background-color: #d9534f; color: white;")
+        btn_close.clicked.connect(self.close_widget)
+        row1.addWidget(btn_close)
+
+        # ROW display: profiles / contrast / sync (was crowding row1)
+        self.row_display = QWidget()
+        row_disp = QHBoxLayout(self.row_display)
+        row_disp.setContentsMargins(0, 0, 0, 0)
 
         self.chk_profiles = QCheckBox("XY Profiles")
         self.chk_profiles.stateChanged.connect(self.toggle_profiles)
-        row1.addWidget(self.chk_profiles)
-        
+        row_disp.addWidget(self.chk_profiles)
+
         self.combo_profile_mode = QComboBox()
         self.combo_profile_mode.addItems(["Raw (Sum)", "Mean", "Normalized to Max"])
         self.combo_profile_mode.currentIndexChanged.connect(self.redraw)
-        row1.addWidget(self.combo_profile_mode)
+        row_disp.addWidget(self.combo_profile_mode)
 
-        row1.addWidget(QLabel("Contrast %:"))
+        row_disp.addWidget(QLabel("Contrast %:"))
         self.sl_contrast = QSlider(Qt.Horizontal)
         self.sl_contrast.setRange(1, 100)
         self.sl_contrast.setValue(100)
-        self.sl_contrast.setFixedWidth(80)
+        self.sl_contrast.setMinimumWidth(80)
+        self.sl_contrast.setMaximumWidth(140)
         self.sl_contrast.setToolTip(
             "Scale color limits from data min toward max (100% = full range)."
         )
         self.sl_contrast.valueChanged.connect(self.redraw)
-        row1.addWidget(self.sl_contrast)
+        row_disp.addWidget(self.sl_contrast)
 
-        row1.addWidget(QLabel("γ:"))
+        row_disp.addWidget(QLabel("γ:"))
         self.spin_gamma = QDoubleSpinBox()
         self.spin_gamma.setRange(0.1, 5.0)
         self.spin_gamma.setValue(1.0)
@@ -152,92 +171,9 @@ class SliceWidget(QFrame):
         self.spin_gamma.setFixedWidth(60)
         self.spin_gamma.setToolTip("Gamma for intensity display (1 = linear).")
         self.spin_gamma.valueChanged.connect(self.redraw)
-        row1.addWidget(self.spin_gamma)
-        
-        # NEW: Zen Mode Toggle Button
-        self.btn_toggle = QPushButton("👁️ Toggle UI")
-        self.btn_toggle.setStyleSheet("font-weight: bold; background-color: #5bc0de; color: black;")
-        self.btn_toggle.clicked.connect(self.toggle_ui_controls)
-        row1.addWidget(self.btn_toggle)
-        
-        btn_close = QPushButton("✕")
-        btn_close.setFixedWidth(25)
-        btn_close.setStyleSheet("background-color: #d9534f; color: white;")
-        btn_close.clicked.connect(self.close_widget)
-        row1.addWidget(btn_close)
-        
-        # ROW 2 (Wrapped in a collapsible widget)
-        self.row2_widget = QWidget()
-        row2 = QHBoxLayout(self.row2_widget)
-        row2.setContentsMargins(0, 0, 0, 0)
-        
-        row2.addWidget(QLabel("ΔX:"))
-        self.spin_dx = QSpinBox(); self.spin_dx.setRange(0, 100); self.spin_dx.setSuffix(" px")
-        self.slider_dx = QSlider(Qt.Horizontal); self.slider_dx.setRange(0, 100); self.slider_dx.setFixedWidth(50)
-        self.spin_dx.valueChanged.connect(self.slider_dx.setValue)
-        self.slider_dx.valueChanged.connect(self.spin_dx.setValue)
-        self.spin_dx.valueChanged.connect(self._on_delta_changed)
-        row2.addWidget(self.spin_dx); row2.addWidget(self.slider_dx)
-        
-        row2.addWidget(QLabel("ΔY:"))
-        self.spin_dy = QSpinBox(); self.spin_dy.setRange(0, 100); self.spin_dy.setSuffix(" px")
-        self.slider_dy = QSlider(Qt.Horizontal); self.slider_dy.setRange(0, 100); self.slider_dy.setFixedWidth(50)
-        self.spin_dy.valueChanged.connect(self.slider_dy.setValue)
-        self.slider_dy.valueChanged.connect(self.spin_dy.setValue)
-        self.spin_dy.valueChanged.connect(self._on_delta_changed)
-        row2.addWidget(self.spin_dy); row2.addWidget(self.slider_dy)
-        
-        row2.addWidget(QLabel("  |  "))
-        self.chk_ortho = QCheckBox("Extract Orthogonal:")
-        self.chk_ortho.stateChanged.connect(self.toggle_profiles)
-        self.combo_ortho = QComboBox()
-        self.combo_ortho.currentIndexChanged.connect(self.redraw)
-        row2.addWidget(self.chk_ortho)
-        row2.addWidget(self.combo_ortho)
-        
-        ctrl_layout_v.addLayout(row1)
-        ctrl_layout_v.addWidget(self.row2_widget)
-        layout.addLayout(ctrl_layout_v)
-        
-        # --- Canvas Setup (2x3 Grid) ---
-        self.canvas = MplCanvas(self)
-        self.gs = self.canvas.figure.add_gridspec(2, 3, width_ratios=[4, 1, 2], height_ratios=[4, 1])
-        
-        self.ax_main = self.canvas.figure.add_subplot(self.gs[0, 0])
-        self.ax_prof_y = self.canvas.figure.add_subplot(self.gs[0, 1], sharey=self.ax_main)
-        self.ax_prof_x = self.canvas.figure.add_subplot(self.gs[1, 0], sharex=self.ax_main)
-        self.ax_prof_ortho = self.canvas.figure.add_subplot(self.gs[:, 2]) 
-        
-        self.im_main = self.ax_main.imshow(np.zeros((10, 10)), origin='lower', aspect='auto', cmap='magma')
-        self.line_x, = self.ax_prof_x.plot([], [], 'b-')
-        self.line_y, = self.ax_prof_y.plot([], [], 'r-')
-        self.line_ortho, = self.ax_prof_ortho.plot([], [], 'g-', linewidth=1.5)
-        
-        self.vline = self.ax_main.axvline(0, color='cyan', ls='--', alpha=0.7)
-        self.hline = self.ax_main.axhline(0, color='cyan', ls='--', alpha=0.7)
-        self.rect_window = patches.Rectangle((0,0), 0, 0, linewidth=1.5, edgecolor='cyan', facecolor='cyan', alpha=0.2, linestyle=':')
-        self.ax_main.add_patch(self.rect_window)
-        
-        self.ax_prof_y.set_visible(False)
-        self.ax_prof_x.set_visible(False)
-        self.ax_prof_ortho.set_visible(False)
-        
-        self.canvas.mpl_connect('button_press_event', self._on_click)
-        self.canvas.mpl_connect('motion_notify_event', self._on_drag) # NEW: Listen for mouse movement
-        layout.addWidget(self.canvas)
-        layout.setStretchFactor(self.canvas, 1) # Force canvas to expand vertically!
-        
-        # --- Sliders Wrapper (Collapsible) ---
-        self.sliders_widget = QWidget()
-        self.sliders_layout = QVBoxLayout(self.sliders_widget)
-        self.sliders_layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.sliders_widget)
-        
-        # Automatically collapse GridSpec unused space on boot
-        self.toggle_profiles()
+        row_disp.addWidget(self.spin_gamma)
 
-        # Cross-file sync is OFF by default; only matching Sync group IDs link.
-        self.chk_sync = QCheckBox("🔗 Sync")
+        self.chk_sync = QCheckBox("Sync")
         self.chk_sync.setChecked(False)
         self.chk_sync.setToolTip(
             "Opt-in crosshair lock with other open viewers that share the same Sync group "
@@ -253,8 +189,80 @@ class SliceWidget(QFrame):
             "Only viewers with Sync ON and this same group number share crosshairs."
         )
         self.chk_sync.toggled.connect(self.spin_sync_group.setEnabled)
-        row1.addWidget(self.chk_sync)
-        row1.addWidget(self.spin_sync_group)
+        row_disp.addWidget(self.chk_sync)
+        row_disp.addWidget(self.spin_sync_group)
+        row_disp.addStretch(1)
+
+        # ROW 2 (collapsible via Toggle UI): Δ + ortho
+        self.row2_widget = QWidget()
+        row2 = QHBoxLayout(self.row2_widget)
+        row2.setContentsMargins(0, 0, 0, 0)
+
+        row2.addWidget(QLabel("ΔX:"))
+        self.spin_dx = QSpinBox(); self.spin_dx.setRange(0, 100); self.spin_dx.setSuffix(" px")
+        self.slider_dx = QSlider(Qt.Horizontal); self.slider_dx.setRange(0, 100); self.slider_dx.setFixedWidth(50)
+        self.spin_dx.valueChanged.connect(self.slider_dx.setValue)
+        self.slider_dx.valueChanged.connect(self.spin_dx.setValue)
+        self.spin_dx.valueChanged.connect(self._on_delta_changed)
+        row2.addWidget(self.spin_dx); row2.addWidget(self.slider_dx)
+
+        row2.addWidget(QLabel("ΔY:"))
+        self.spin_dy = QSpinBox(); self.spin_dy.setRange(0, 100); self.spin_dy.setSuffix(" px")
+        self.slider_dy = QSlider(Qt.Horizontal); self.slider_dy.setRange(0, 100); self.slider_dy.setFixedWidth(50)
+        self.spin_dy.valueChanged.connect(self.slider_dy.setValue)
+        self.slider_dy.valueChanged.connect(self.spin_dy.setValue)
+        self.spin_dy.valueChanged.connect(self._on_delta_changed)
+        row2.addWidget(self.spin_dy); row2.addWidget(self.slider_dy)
+
+        row2.addWidget(QLabel("  |  "))
+        self.chk_ortho = QCheckBox("Extract Orthogonal:")
+        self.chk_ortho.stateChanged.connect(self.toggle_profiles)
+        self.combo_ortho = QComboBox()
+        self.combo_ortho.currentIndexChanged.connect(self.redraw)
+        row2.addWidget(self.chk_ortho)
+        row2.addWidget(self.combo_ortho)
+
+        ctrl_layout_v.addLayout(row1)
+        ctrl_layout_v.addWidget(self.row_display)
+        ctrl_layout_v.addWidget(self.row2_widget)
+        layout.addLayout(ctrl_layout_v)
+
+        # --- Canvas Setup (2x3 Grid) ---
+        self.canvas = MplCanvas(self)
+        self.gs = self.canvas.figure.add_gridspec(2, 3, width_ratios=[4, 1, 2], height_ratios=[4, 1])
+
+        self.ax_main = self.canvas.figure.add_subplot(self.gs[0, 0])
+        self.ax_prof_y = self.canvas.figure.add_subplot(self.gs[0, 1], sharey=self.ax_main)
+        self.ax_prof_x = self.canvas.figure.add_subplot(self.gs[1, 0], sharex=self.ax_main)
+        self.ax_prof_ortho = self.canvas.figure.add_subplot(self.gs[:, 2])
+
+        self.im_main = self.ax_main.imshow(np.zeros((10, 10)), origin='lower', aspect='auto', cmap='magma')
+        self.line_x, = self.ax_prof_x.plot([], [], 'b-')
+        self.line_y, = self.ax_prof_y.plot([], [], 'r-')
+        self.line_ortho, = self.ax_prof_ortho.plot([], [], 'g-', linewidth=1.5)
+
+        self.vline = self.ax_main.axvline(0, color='cyan', ls='--', alpha=0.7)
+        self.hline = self.ax_main.axhline(0, color='cyan', ls='--', alpha=0.7)
+        self.rect_window = patches.Rectangle((0,0), 0, 0, linewidth=1.5, edgecolor='cyan', facecolor='cyan', alpha=0.2, linestyle=':')
+        self.ax_main.add_patch(self.rect_window)
+
+        self.ax_prof_y.set_visible(False)
+        self.ax_prof_x.set_visible(False)
+        self.ax_prof_ortho.set_visible(False)
+
+        self.canvas.mpl_connect('button_press_event', self._on_click)
+        self.canvas.mpl_connect('motion_notify_event', self._on_drag) # NEW: Listen for mouse movement
+        layout.addWidget(self.canvas)
+        layout.setStretchFactor(self.canvas, 1) # Force canvas to expand vertically!
+
+        # --- Sliders Wrapper (Collapsible) ---
+        self.sliders_widget = QWidget()
+        self.sliders_layout = QVBoxLayout(self.sliders_widget)
+        self.sliders_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.sliders_widget)
+
+        # Automatically collapse GridSpec unused space on boot
+        self.toggle_profiles()
 
     def _populate_dropdowns(self):
         self.combo_x.blockSignals(True)
