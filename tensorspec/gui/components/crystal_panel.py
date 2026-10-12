@@ -1,10 +1,11 @@
 # File: tensorspec/gui/components/crystal_panel.py
 import os
 import numpy as np
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                               QFileDialog, QLabel, QSpinBox, QDoubleSpinBox, 
-                               QComboBox, QColorDialog, QCheckBox, 
-                               QGroupBox, QGridLayout, QSlider, QScrollArea, QFrame, QMessageBox)
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+                               QFileDialog, QLabel, QSpinBox, QDoubleSpinBox,
+                               QComboBox, QColorDialog, QCheckBox, QTabWidget,
+                               QGroupBox, QGridLayout, QSlider, QScrollArea, QFrame, QMessageBox,
+                               QRadioButton)
 from PySide6.QtCore import Qt
 from pymatgen.core import Structure
 
@@ -14,8 +15,24 @@ import platform
 
 is_legacy_mac = (platform.system() == "Darwin" and platform.machine() == "x86_64")
 
+
+def _scroll_page(*widgets):
+    """Wrap widgets in a scroll area so dense controls stay usable."""
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    page = QWidget()
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(4, 4, 4, 4)
+    for w in widgets:
+        layout.addWidget(w)
+    layout.addStretch()
+    scroll.setWidget(page)
+    return scroll
+
+
 class TabViewEdit(QWidget):
-    """Modular Tab 1: Handles CIF loading, camera controls, styles, and exporting."""
+    """Modular Tab 1: CIF load / style / camera / export split into sub-tabs."""
     def __init__(self, main_suite):
         super().__init__()
         self.main_suite = main_suite
@@ -24,39 +41,36 @@ class TabViewEdit(QWidget):
     def init_ui(self):
         main_tab_layout = QVBoxLayout(self)
         main_tab_layout.setContentsMargins(0, 0, 0, 0)
-        
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        
-        # --- File Loading ---
+
+        sub = QTabWidget()
+        main_tab_layout.addWidget(sub)
+
+        # --- Structure page: load + geometry + style + colors + render ---
+        struct_box = QWidget()
+        struct_layout = QVBoxLayout(struct_box)
+        struct_layout.setContentsMargins(0, 0, 0, 0)
+
         self.btn_load = QPushButton("📂 Load CIF File")
         self.btn_load.clicked.connect(self.handle_load_cif)
-        layout.addWidget(self.btn_load)
-        
+        struct_layout.addWidget(self.btn_load)
+
         self.lbl_file = QLabel("No file loaded"); self.lbl_file.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.lbl_file)
-        
+        struct_layout.addWidget(self.lbl_file)
+
         self.lbl_sym = QLabel("Space Group: N/A")
         self.lbl_sym.setStyleSheet("color: #aaaaaa; font-style: italic;")
-        layout.addWidget(self.lbl_sym)
+        struct_layout.addWidget(self.lbl_sym)
 
-        # --- Graphics Backend ---
-        layout.addWidget(QLabel("Graphics Backend:"))
+        struct_layout.addWidget(QLabel("Graphics Backend:"))
         self.combo_backend = QComboBox()
         self.combo_backend.addItems(["CPU Safe Mode (Matplotlib)", "GPU Fast Mode (PyVista)"])
         self.combo_backend.setCurrentIndex(0 if is_legacy_mac else 1)
         self.combo_backend.currentIndexChanged.connect(self.switch_backend)
-        layout.addWidget(self.combo_backend)
+        struct_layout.addWidget(self.combo_backend)
 
-        # --- 1. Geometry & Scaling ---
-        from PySide6.QtWidgets import QRadioButton
         group_geom = QGroupBox("Geometry & Scaling")
         geom_layout = QVBoxLayout(group_geom)
-        
+
         self.radio_conv = QRadioButton("Conventional Basis")
         self.radio_prim = QRadioButton("Primitive Basis")
         self.radio_conv.setChecked(True)
@@ -64,7 +78,7 @@ class TabViewEdit(QWidget):
         basis_layout = QHBoxLayout()
         basis_layout.addWidget(self.radio_conv); basis_layout.addWidget(self.radio_prim)
         geom_layout.addLayout(basis_layout)
-        
+
         sc_layout = QHBoxLayout()
         sc_layout.addWidget(QLabel("Supercell (X,Y,Z):"))
         self.spin_scx = QSpinBox(); self.spin_scx.setValue(1); self.spin_scx.setRange(1, 20)
@@ -81,12 +95,11 @@ class TabViewEdit(QWidget):
         self.spin_bond_thick = QDoubleSpinBox(); self.spin_bond_thick.setRange(0.01, 1.0); self.spin_bond_thick.setValue(0.10); self.spin_bond_thick.setSingleStep(0.02)
         scale_layout.addWidget(self.spin_bond_thick)
         geom_layout.addLayout(scale_layout)
-        layout.addWidget(group_geom)
+        struct_layout.addWidget(group_geom)
 
-        # --- 2. Styles & Rendering ---
         group_render = QGroupBox("Styles & Rendering")
         render_layout = QVBoxLayout(group_render)
-        
+
         style_layout = QHBoxLayout()
         style_layout.addWidget(QLabel("Connections:"))
         self.combo_style = QComboBox()
@@ -103,30 +116,36 @@ class TabViewEdit(QWidget):
         self.chk_axes = QCheckBox("Show Axes"); self.chk_axes.setChecked(True); self.chk_axes.stateChanged.connect(self.main_suite.refresh_render)
         self.chk_show_conventional = QCheckBox("Show Conv. Box"); self.chk_show_conventional.setChecked(True); self.chk_show_conventional.stateChanged.connect(self.main_suite.refresh_render)
         self.chk_show_primitive = QCheckBox("Show Prim. Box"); self.chk_show_primitive.stateChanged.connect(self.main_suite.refresh_render)
-        chk_layout.addWidget(self.chk_shiny); chk_layout.addWidget(self.chk_axes); chk_layout.addWidget(self.chk_show_conventional); chk_layout.addWidget(self.chk_show_primitive)
+        chk_layout.addWidget(self.chk_shiny); chk_layout.addWidget(self.chk_axes)
+        chk_layout.addWidget(self.chk_show_conventional); chk_layout.addWidget(self.chk_show_primitive)
         render_layout.addLayout(chk_layout)
-        layout.addWidget(group_render)
+        struct_layout.addWidget(group_render)
 
-        # --- 3. Interactive Eraser ---
         self.chk_edit_mode = QCheckBox("Enable Interactive Eraser Brush")
         self.chk_edit_mode.setStyleSheet("color: #d9534f; font-weight: bold;")
         self.chk_edit_mode.stateChanged.connect(self.toggle_edit_mode)
-        layout.addWidget(self.chk_edit_mode)
+        struct_layout.addWidget(self.chk_edit_mode)
 
-        # --- 4. Dynamic Color Pickers ---
         self.group_colors = QGroupBox("Dynamic Element Colors")
         self.colors_layout = QGridLayout(self.group_colors)
-        layout.addWidget(self.group_colors)
+        struct_layout.addWidget(self.group_colors)
 
-        # --- 5. Camera & Projection ---
+        self.btn_draw = QPushButton("🎨 Render Structure")
+        self.btn_draw.setStyleSheet("background-color: #2b5c8f; color: white; font-weight: bold; padding: 6px;")
+        self.btn_draw.clicked.connect(self.handle_draw)
+        struct_layout.addWidget(self.btn_draw)
+
+        sub.addTab(_scroll_page(struct_box), "Structure")
+
+        # --- Camera page ---
         self.group_camera = QGroupBox("Camera & Projection")
         self.cam_layout = QVBoxLayout(self.group_camera)
-        
+
         self.combo_projection = QComboBox()
         self.combo_projection.addItems(["Perspective Projection", "Orthogonal Projection"])
         self.combo_projection.currentIndexChanged.connect(self.handle_camera_update)
         self.cam_layout.addWidget(self.combo_projection)
-        
+
         quick_view_layout = QHBoxLayout()
         quick_view_layout.addWidget(QLabel("Quick View:"))
         for axis, label in [('x', '+a'), ('y', '+b'), ('z', '+c'), ('iso', '111')]:
@@ -134,7 +153,7 @@ class TabViewEdit(QWidget):
             btn.clicked.connect(lambda checked, a=axis: self.main_suite.renderer.set_camera_preset(a) if hasattr(self.main_suite.renderer, 'set_camera_preset') else None)
             quick_view_layout.addWidget(btn)
         self.cam_layout.addLayout(quick_view_layout)
-        
+
         azel_layout = QHBoxLayout()
         azel_layout.addWidget(QLabel("Azimuth:")); self.spin_azimuth = QDoubleSpinBox(); self.spin_azimuth.setRange(-360.0, 360.0); self.spin_azimuth.setSingleStep(5.0)
         self.spin_azimuth.valueChanged.connect(self.update_azel)
@@ -143,12 +162,10 @@ class TabViewEdit(QWidget):
         self.spin_elevation.valueChanged.connect(self.update_azel)
         azel_layout.addWidget(self.spin_elevation)
         self.cam_layout.addLayout(azel_layout)
-        layout.addWidget(self.group_camera)
 
-        # --- 6. Crystallography Tools ---
         self.group_cryst = QGroupBox("Crystallography Tools")
         self.cryst_layout = QVBoxLayout(self.group_cryst)
-        
+
         hkl_layout = QHBoxLayout()
         hkl_layout.addWidget(QLabel("View [h k l]:"))
         self.spin_h = QDoubleSpinBox(); self.spin_h.setRange(-10, 10); self.spin_k = QDoubleSpinBox(); self.spin_k.setRange(-10, 10); self.spin_l = QDoubleSpinBox(); self.spin_l.setRange(-10, 10)
@@ -168,51 +185,46 @@ class TabViewEdit(QWidget):
         self.combo_plane_orient.currentIndexChanged.connect(self.lock_plane_normal)
         plane_layout.addWidget(self.combo_plane_orient)
         self.cryst_layout.addLayout(plane_layout)
-        
+
         depth_layout = QHBoxLayout()
         depth_layout.addWidget(QLabel("Depth:")); self.slider_plane_depth = QSlider(Qt.Horizontal); self.slider_plane_depth.setRange(-100, 100); self.slider_plane_depth.setValue(0)
         self.slider_plane_depth.valueChanged.connect(self.update_cut_plane)
         depth_layout.addWidget(self.slider_plane_depth)
         self.cryst_layout.addLayout(depth_layout)
-        layout.addWidget(self.group_cryst)
 
-        # --- 7. Export Elements ---
+        sub.addTab(_scroll_page(self.group_camera, self.group_cryst), "Camera")
+
+        # --- Export page ---
         self.group_export = QGroupBox("Export Elements")
         exp_layout = QVBoxLayout(self.group_export)
-        chk_layout = QHBoxLayout()
+        exp_chk = QHBoxLayout()
         self.chk_exp_atoms = QCheckBox("Atoms/Bonds"); self.chk_exp_atoms.setChecked(True)
         self.chk_exp_cell = QCheckBox("Unit Cell"); self.chk_exp_cell.setChecked(True)
         self.chk_exp_bz = QCheckBox("Brillouin Zone"); self.chk_exp_bz.setChecked(True)
-        chk_layout.addWidget(self.chk_exp_atoms); chk_layout.addWidget(self.chk_exp_cell); chk_layout.addWidget(self.chk_exp_bz)
-        exp_layout.addLayout(chk_layout)
-        
+        exp_chk.addWidget(self.chk_exp_atoms); exp_chk.addWidget(self.chk_exp_cell); exp_chk.addWidget(self.chk_exp_bz)
+        exp_layout.addLayout(exp_chk)
+
         btn_layout = QHBoxLayout()
         self.btn_export_max = QPushButton("Export 3ds Max"); self.btn_export_max.setStyleSheet("background-color: #0F6A8B; color: white; font-weight: bold;"); self.btn_export_max.clicked.connect(self.export_scripts)
         self.btn_export_blend = QPushButton("Export Blender"); self.btn_export_blend.setStyleSheet("background-color: #E87D0D; color: white; font-weight: bold;"); self.btn_export_blend.clicked.connect(self.export_scripts)
         btn_layout.addWidget(self.btn_export_max); btn_layout.addWidget(self.btn_export_blend)
         exp_layout.addLayout(btn_layout)
-        layout.addWidget(self.group_export)
 
-        # --- 8. Action Buttons ---
-        self.btn_draw = QPushButton("🎨 Render Structure")
-        self.btn_draw.setStyleSheet("background-color: #2b5c8f; color: white; font-weight: bold; padding: 6px;")
-        self.btn_draw.clicked.connect(self.handle_draw)
-        layout.addWidget(self.btn_draw)
+        export_actions = QWidget()
+        export_actions_layout = QVBoxLayout(export_actions)
+        export_actions_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.btn_save = QPushButton("萄 Save High-Res Image")
+        self.btn_save = QPushButton("🖼 Save High-Res Image")
         self.btn_save.setStyleSheet("background-color: #28a745; color: white; font-weight: bold; padding: 6px;")
         self.btn_save.clicked.connect(self.save_image)
-        layout.addWidget(self.btn_save)
+        export_actions_layout.addWidget(self.btn_save)
 
-        # --- NEW: Export to CIF ---
         self.btn_export_cif = QPushButton("💾 Export Structure to CIF")
         self.btn_export_cif.setStyleSheet("background-color: #0F6A8B; color: white; font-weight: bold; padding: 6px;")
         self.btn_export_cif.clicked.connect(self.export_cif)
-        layout.addWidget(self.btn_export_cif)
+        export_actions_layout.addWidget(self.btn_export_cif)
 
-        layout.addStretch()
-        scroll.setWidget(container)
-        main_tab_layout.addWidget(scroll)
+        sub.addTab(_scroll_page(self.group_export, export_actions), "Export")
 
     # --- LOGIC METHODS ---
     def handle_load_cif(self):

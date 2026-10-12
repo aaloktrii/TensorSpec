@@ -4,6 +4,11 @@ General Rule for the App
 - [] 
 Grand App
 - Crystal viewer Suite
+	- Tab layout (left panel, 2026-10): **View** | **CDW** | **Stack** | **BZ**
+		- **View** (`gui/components/crystal_panel.py` `TabViewEdit`): sub-tabs Structure (CIF/load, backend, geometry, styles, eraser, colors, Render) | Camera (projection, presets, az/el, hkl align, cut plane) | Export (3ds Max/Blender, high-res image, CIF)
+		- **CDW**: wavevector / amplitude / phase modulator
+		- **Stack**: 2D templates, bulk exfoliator, layer rows, Bernevig twist, moiré (scrollable)
+		- **BZ**: bulk / surface Brillouin zone + export to workspace
 	- [x] **Refactor Architectural Modularity:** Decouple monolithic `crystal_viewer.py` into modular architecture (`core/crystallography.py`, `plotting/pyvista_engine.py`, `plotting/matplotlib_engine.py`, and `gui/components/crystal_panel.py`).
 	- [x] File loader panel & "Draw" button.
 	- [x] Define Miller indices for bounding the drawing. Define number of unit cells.
@@ -13,15 +18,16 @@ Grand App
 	- [x] Interactive Mode: Toggle to view, select, and delete individual atoms/sticks (Continuous Eraser Brush & Camera Lock).
 	- [x] PBR/Shiny visual styling (3ds Max style) with color controls.
 	- [x] Toggleable crystallographic a, b, c axes display mapped to bounding box.
-	- [x] Twisting Multilayer Tab
+	- [x] Twisting Multilayer Tab (**Stack**)
 	- [x] Draw polyhedra/planes connecting atoms instead of just sticks (deletable).
 	- [x] CDW Mode: Define atom shifts (dx, dy, dz) and propagate simulated distortions.
-	- [x] Brillouin Zone Engine: Bulk BZ, Cleaving surface BZ, kz slicing, and surface termination projections. (Completed: Tab 4 is fully operational, generating the Wigner-Seitz cell, the hovering surface plane, and exporting them natively.)
+	- [x] Brillouin Zone Engine: Bulk BZ, Cleaving surface BZ, kz slicing, and surface termination projections. (**BZ** tab: Wigner-Seitz cell, hovering surface plane, native export.)
+	- [x] View-panel de-crowding: Structure / Camera / Export sub-tabs + wider left splitter (avoids squeezed controls).
 	- [ ] ML Interatomic Potential (MLIP) Relaxation: Fast real-space atomic force relaxation for stacked/cleaved heterostructures (CHGNet / M3GNet integration via matgl).
 - DFT Suite
 	- [x] Establish Data Pipeline: Pull crystal structure from `workspace.py` (drawn from Crystal Viewer Suite) to perform bulk band structure calculations.
 	- [x] Core Math: High-Symmetry K-Path Generator (calculate k-points between high symmetry nodes like Gamma, M, K).
-	- [x] Core Math: Pull exact Wigner-Seitz BZ nodes (Gamma, M, K, etc.) directly from Tab 4 of the Crystal Suite via global_workspace to define arbitrary 3D k-paths.
+	- [x] Core Math: Pull exact Wigner-Seitz BZ nodes (Gamma, M, K, etc.) directly from the Crystal Suite **BZ** tab via global_workspace to define arbitrary 3D k-paths.
 	- [x] Toy Tight Binding (TB) Engine: Built-in simple models (1D chain, 2D square lattice, 2D honeycomb/graphene) to test the solver and plotting.
 	- [x] Generalized TB Capability: UI to define custom hopping parameters and on-site energies.Engine dynamically scales Slater-Koster integrals using Harrison's rules and auto-detects materials via database.
 	- [x] Multi-Orbital Projection: Calculate eigenvector probabilities for atomic character mapping (Fat Bands).

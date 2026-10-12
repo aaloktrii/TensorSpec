@@ -123,22 +123,23 @@ class CrystalViewerSuite(QWidget):
         left_layout.setContentsMargins(0, 0, 0, 0)
         
         self.tabs = QTabWidget()
-        self.tabs.setMinimumWidth(340)
+        self.tabs.setMinimumWidth(380)
+        self.tabs.setDocumentMode(True)
         left_layout.addWidget(self.tabs)
-        
+
         # --- NEW: Push to Workspace Button ---
         self.btn_push_workspace = QPushButton("📥 Push Structure to Central Workspace")
         self.btn_push_workspace.setStyleSheet("background-color: #5cb85c; color: white; font-weight: bold; padding: 10px;")
         self.btn_push_workspace.clicked.connect(self.push_current_to_workspace)
         left_layout.addWidget(self.btn_push_workspace)
-        
+
         splitter.addWidget(left_container)
-        
+
         # --- NEW: Import and Mount Modular Tab 1 ---
         from tensorspec.gui.components.crystal_panel import TabViewEdit
         self.tab_view = TabViewEdit(self)
-        self.tabs.addTab(self.tab_view, "1. View & Edit")
-        
+        self.tabs.addTab(self.tab_view, "View")
+
         # Keep the rest initialized locally for now until we move them
         self.init_tab_cdw()
         self.init_tab_heterostructure()
@@ -175,7 +176,7 @@ class CrystalViewerSuite(QWidget):
             self.viewer_stack.setCurrentIndex(1)
             self.renderer = self.renderer_gpu
         
-        splitter.setSizes([380, 820])
+        splitter.setSizes([420, 780])
 
 
     
@@ -221,13 +222,20 @@ class CrystalViewerSuite(QWidget):
         layout.addWidget(self.spin_cdw_phase)
 
         layout.addStretch()
-        self.tabs.addTab(tab, "2. CDW Modulator")
+        self.tabs.addTab(tab, "CDW")
 
     # ================= TAB 3: STACK & TWIST =================
     def init_tab_heterostructure(self):
         tab = QWidget()
-        layout = QVBoxLayout(tab)
-        
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        layout = QVBoxLayout(body)
+
         tpl_group = QGroupBox("2D Material Templates")
         tpl_layout = QVBoxLayout(tpl_group)
         
@@ -362,8 +370,11 @@ class CrystalViewerSuite(QWidget):
         self.lbl_moire = QLabel("Status: Waiting for stack...")
         self.lbl_moire.setStyleSheet("background-color: #1e1e24; color: white; padding: 4px;")
         layout.addWidget(self.lbl_moire)
+        layout.addStretch()
 
-        self.tabs.addTab(tab, "3. Stack & Twist")
+        scroll.setWidget(body)
+        outer.addWidget(scroll)
+        self.tabs.addTab(tab, "Stack")
 
     # ================= TAB 4: BRILLOUIN ZONE =================
     def init_tab_bz(self):
@@ -413,7 +424,7 @@ class CrystalViewerSuite(QWidget):
         layout.addWidget(btn_bz)
         
         layout.addStretch()
-        self.tabs.addTab(tab, "4. Brillouin Zone")
+        self.tabs.addTab(tab, "BZ")
 
     # ================= LOGIC AND EVENT CONTROLLERS ================
 

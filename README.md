@@ -34,7 +34,7 @@ The Workspace Browser ribbon opens independent suites (Crystal, DFT, ARPES, PEEM
 
 | Suite | Status | Notes |
 |-------|--------|--------|
-| Crystal Viewer | Live | CIF, supercells, twist/Bernevig, BZ, CDW |
+| Crystal Viewer | Live | Tabs View (Structure/Camera/Export) · CDW · Stack · BZ; CIF, supercells, twist/Bernevig |
 | DFT | Live | Chinook TB, QE/Wannier helpers, SPR-KKR SCF |
 | ARPES | Live (sim) | Kinematics + three-step / Chinook B1 / SPR-KKR B3; MAESTRO loaders partial |
 | PEEM | Live | TIF/ZIP load, pair CP/CM·LH/LV, drift, BG, XMCD sum rule |

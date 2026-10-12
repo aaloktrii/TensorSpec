@@ -2,10 +2,10 @@
 
 When assisting with this repository, strictly adhere to the following rules:
 
-1.  **Snippet-Only Output:** NEVER output the entire codebase or full script unless explicitly asked to generate a brand new file. Only output the exact classes, functions, or UI blocks that need to be updated or added.
-2.  **Contextual Placement:** Always clearly state exactly *where* the provided code block should be inserted or what existing code it replaces (e.g., "Replace the `draw_structure` function" or "Insert this below line 42"). if you lose context, always ask what file to be uploaded for better reference.
-3.  **No Silent Deletions:** Do not remove existing features, buttons, or imports unless specifically instructed to refactor them out. 
-4.  **Acknowledge Roadmap:** Always refer back to `ROADMAP.md` to ensure UI additions fit into the planned Tabbed architecture. If the new path emerges during the development, always refer back to the roadmap.md and tell me to update which part into what. do not make a new roadmap from scratch.
+1.  **Snippet-Only Output (suggestion mode):** When proposing changes for *you* to paste, NEVER dump the entire codebase or full script unless asked for a brand-new file. Only the exact classes, functions, or UI blocks to update. **If the agent applies the edit itself, skip paste instructions** — just change the files and summarize what moved / was removed.
+2.  **Contextual Placement (suggestion mode):** When you will apply the patch, state exactly *where* the block goes or what it replaces (e.g., "Replace `draw_structure`" / "Insert below line 42"). If context is lost, ask which file to upload. Skip this when the agent edits in-repo.
+3.  **Deletions:** Prefer keeping features. If the agent removes or relocates UI/controls while implementing, that is allowed — **must say what was removed or moved** in the reply (no silent mystery deletes).
+4.  **Acknowledge Roadmap:** Always refer back to `roadmap.md` so UI additions fit the planned tabbed architecture. If a new path appears (e.g. tab rename / split), **update `roadmap.md` and this file** to match — do not invent a separate roadmap from scratch.
 5.  **Strict Modularity & Separation of Concerns:** Never write monolithic single-file suites. New features and refactored components must strictly separate logic into three distinct layers:
     * **Core Math & Physics Engine (`tensorspec/core/`):** Pure Python/NumPy/PyMatgen logic (e.g., symmetry parsing, Moiré math, ARPES momentum transformations). Zero GUI or plotting imports allowed.
     * **Rendering & Visualization Backends (`tensorspec/plotting/`):** Dedicated wrapper classes for PyVista, Matplotlib, or PyQtGraph engines.
@@ -68,7 +68,7 @@ tensorspec/
     │   └── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     ├── components/           # Reusable, isolated UI panels
     │   ├── __init__.py
-    │   ├── crystal_panel.py
+    │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
     │   ├── peem_panel.py / xas_panel.py
@@ -76,7 +76,7 @@ tensorspec/
     │   └── ml_tabs/               # Extracted ML suite tabs
     ├── ml/                   # MaestroAI workers, warehouse, session helpers
     └── suites/               # Independent roadmap suites + ML
-        ├── crystal_suite.py
+        ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
         ├── dft_suite.py
         ├── arpes_suite.py
         ├── peem_suite.py
