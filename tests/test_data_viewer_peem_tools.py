@@ -92,3 +92,52 @@ def test_tools_and_overlays(app):
                     {"kind": "line", "a": (1, 1), "b": (20, 30)},
                     {"kind": "rect", "x0": 0, "x1": 1, "y0": 0, "y1": 1, "dims": (0, 2)}])  # other dims: skipped
     assert len(v._overlay_artists) == 2
+
+
+def test_xpeem_map_colour_range_is_live_and_used_by_the_export(tmp_path, monkeypatch):
+    """Typed min / max fix the viewer's colour scale at once; Auto and a new layer go back to the
+    automatic range; the one-click export saves the range that is shown."""
+    import numpy as np
+    from PySide6.QtWidgets import QApplication, QFileDialog
+    from tensorspec.core.peem import synthetic
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+
+    app = QApplication.instance() or QApplication([])
+    mz = synthetic.stripe_domains(64, 64, period_px=16)
+    cp, cm = synthetic.helicity_stacks(mz, a0=0.05, n_cp=2, n_cm=2, noise=0.0)
+    pos = synthetic.write_ue49_scan(tmp_path, "X_0002", cp, ["Cr_pos_0000", "Cr_pos_0001"])
+    neg = synthetic.write_ue49_scan(tmp_path, "X_0003", cm, ["Cr_neg_0000", "Cr_neg_0001"])
+    p = PeemXmcdPanel()
+    p._run = lambda fn, done, *a, **k: done(fn(*a, **k))
+    p.chk_tpx3.setChecked(False)
+    p._add_paths([str(pos), str(neg)])
+    p._load()
+    n = p._name
+    p.service.drift_correct(n, method="central")
+    p.service.stack(n)
+    p.service.asymmetry(n)
+    p._refresh_views(select="pcd")
+    app.processEvents()
+    view = p.viewer.primary_view()
+    auto = p.viewer.color_limits()
+    assert p.range_state.text() == "auto" and np.allclose((p.range_min.value(), p.range_max.value()), auto, atol=1e-4)
+    p.range_min.setValue(-0.2)
+    p.range_max.setValue(0.3)
+    assert (view.im_main.norm.vmin, view.im_main.norm.vmax) == (-0.2, 0.3) and p.range_state.text() == "fixed"
+    p.range_max.setValue(-0.5)  # max below min: ignored, said so
+    assert view.fixed_limits == (-0.2, 0.3) and "above" in p.range_state.text()
+    p.range_max.setValue(0.3)
+    calls = []
+    real = p.service.export_map
+    monkeypatch.setattr(p.service, "export_map", lambda *a, **k: (calls.append(k), real(*a, **k))[1])
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "m.tif"), "")))
+    p._export()
+    assert (calls[-1]["vmin"], calls[-1]["vmax"], calls[-1]["cmap"]) == (-0.2, 0.3, "bwr")
+    assert (tmp_path / "m.png").exists()
+    p._auto_range()
+    assert view.fixed_limits is None and p.range_state.text() == "auto"
+    p.range_min.setValue(-0.25)
+    p._select("stack", "mean_cp")
+    app.processEvents()
+    assert view.fixed_limits is None and p.range_state.text() == "auto"
+    p.service.unload(n)

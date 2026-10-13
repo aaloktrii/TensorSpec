@@ -87,6 +87,7 @@ class SliceWidget(QFrame):
         super().__init__(parent_panel)
         self.parent_panel = parent_panel
         self.tensor_data = parent_panel.tensor_data
+        self.fixed_limits = None  # (vmin, vmax) typed by a host panel; None = automatic (contrast / Sym)
         
         self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
         self.setLineWidth(2)
@@ -600,6 +601,9 @@ class SliceWidget(QFrame):
                 c = float(np.median(finite)) if self.combo_center.currentText() == "median" else 0.0
                 half = float(np.percentile(np.abs(finite - c), 99)) * c_scale or 1.0  # robust to outliers
                 vmin, vmax_adj = c - half, c + half
+            if self.fixed_limits is not None:
+                vmin, vmax_adj = self.fixed_limits
+            self.shown_limits = (float(vmin), float(vmax_adj))
             gamma = float(self.spin_gamma.value())
             cmap_name = self.combo_cmap.currentText()
             self.im_main.set_cmap(cmap_name)
@@ -1638,10 +1642,19 @@ class DataViewerPanel(QWidget):
         view = self.primary_view()
         return None if view is None else getattr(view, "_last_sliced", None)
 
+    def color_limits(self) -> tuple[float, float] | None:
+        """(vmin, vmax) of the colour scale the first view shows now."""
+        view = self.primary_view()
+        return None if view is None else getattr(view, "shown_limits", None)
+
     def configure_view(self, cmap: str | None = None, symmetric: bool | None = None, center: str | None = None,
-                       image_origin: bool | None = None, aspect_equal: bool | None = None) -> None:
-        """Set display options on every view (host panels, e.g. PEEM XMCD maps)."""
+                       image_origin: bool | None = None, aspect_equal: bool | None = None,
+                       limits: tuple[float, float] | str | None = None) -> None:
+        """Set display options on every view (host panels, e.g. PEEM XMCD maps).
+        limits: (vmin, vmax) fixes the colour range; "auto" goes back to the automatic one."""
         for v in self._iter_slice_widgets():
+            if limits is not None:
+                v.fixed_limits = None if limits == "auto" else (float(limits[0]), float(limits[1]))
             for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect):
                 w.blockSignals(True)
             if cmap is not None and v.combo_cmap.findText(cmap) >= 0:

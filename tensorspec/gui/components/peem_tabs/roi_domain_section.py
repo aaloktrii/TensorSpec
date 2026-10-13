@@ -244,7 +244,8 @@ class RoiDomainSection:
             return
         name, kind, var = shown
         try:
-            dlg = ExportMapDialog(self, self.service.export_options(name, kind, var), self._roi_box())
+            dlg = ExportMapDialog(self, {**self.service.export_options(name, kind, var), **self._shown_look()},
+                                  self._roi_box())
         except Exception as exc:
             self._err(str(exc))
             return
@@ -258,6 +259,17 @@ class RoiDomainSection:
             except Exception as exc:
                 self._err(str(exc))
 
+    def _shown_look(self) -> dict:
+        """Colour map and range of the image shown now (what the user sees is what is saved)."""
+        out = {}
+        lim = self.viewer.color_limits()
+        if lim is not None:
+            out["vmin"], out["vmax"] = lim
+        view = self.viewer.primary_view()
+        if view is not None:
+            out["cmap"] = view.combo_cmap.currentText()
+        return out
+
     def _export(self):
         name = self._require()
         kind = self._view_kind()
@@ -268,7 +280,7 @@ class RoiDomainSection:
         path, _ = QFileDialog.getSaveFileName(self, "Export map", f"{name}_{kind}_{var}.tif", "TIFF (*.tif)")
         if path:
             try:
-                tif = self.service.export_map_tiff(name, kind, path, var)
+                tif = self.service.export_map(name, kind, path, var, pictures=("png",), **self._shown_look())[0]
                 self._log(f"Saved {tif} (values) and {os.path.splitext(os.path.basename(tif))[0]}.png (colour picture)")
             except Exception as exc:
                 self._err(str(exc))

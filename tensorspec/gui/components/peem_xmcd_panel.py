@@ -14,6 +14,7 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -148,6 +149,25 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         rl.addLayout(top)
         self.viewer = DataViewerPanel(compact=True)  # TensorSpec N-D data viewer
         rl.addWidget(self.viewer, 1)
+        rng = QHBoxLayout()
+        rng.addWidget(QLabel("Colour range:"))
+        self.range_min, self.range_max = QDoubleSpinBox(), QDoubleSpinBox()
+        for sp, tip in ((self.range_min, "lowest value (first colour)"), (self.range_max, "highest value (last colour)")):
+            sp.setRange(-1e12, 1e12)
+            sp.setDecimals(4)
+            sp.setKeyboardTracking(False)  # applies on Enter / leaving the field, or the arrows
+            sp.setToolTip(f"Colour range of the shown image: {tip}. Type a number and press Enter.")
+            sp.valueChanged.connect(self._apply_range)
+        rng.addWidget(self.range_min, 1)
+        rng.addWidget(QLabel("to"))
+        rng.addWidget(self.range_max, 1)
+        b = QPushButton("Auto")
+        b.setToolTip("Back to the automatic colour range (contrast / Sym ± in the viewer)")
+        b.clicked.connect(self._auto_range)
+        rng.addWidget(b)
+        self.range_state = QLabel("auto")
+        rng.addWidget(self.range_state)
+        rl.addLayout(rng)
         self.plot_box = QWidget()
         pb = QVBoxLayout(self.plot_box)
         pb.setContentsMargins(0, 0, 0, 0)
@@ -362,6 +382,9 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
             view.combo_x.setCurrentIndex(2)  # x across, y down, frame on the slider
             view.combo_y.setCurrentIndex(1)
             view.combo_layer.currentIndexChanged.connect(self._on_layer_changed)
+            # keep the colour-range fields on the automatic range while frames / contrast change
+            view.canvas.mpl_connect("draw_event", lambda _e, v=view: (
+                self._sync_range() if getattr(v, "fixed_limits", None) is None else None))
             self.viewer.configure_view(cmap="gray", symmetric=False, image_origin=True, aspect_equal=True)
             self.viewer.update_global_coord(0, min(frame, n - 1))
             self._viewer_key, self._frames_dirty = key, False
@@ -384,7 +407,35 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
             hint = self.service.display_hint(self._name, self._view_kind(), self._view_var(), self._frame())
         except ValueError:  # e.g. a layer of a map that is being replaced
             return
-        self.viewer.configure_view(**hint)
+        self.viewer.configure_view(**hint, limits="auto")  # a typed range belongs to the previous image
+        self._sync_range()
+
+    # ------------------------------------------------------------ colour range
+    def _sync_range(self):
+        """Show the range the viewer uses now in the two fields (without applying it)."""
+        lim = self.viewer.color_limits()
+        if lim is None:
+            return
+        fixed = getattr(self.viewer.primary_view(), "fixed_limits", None) is not None
+        step = max((lim[1] - lim[0]) / 50, 1e-6)
+        for sp, v in ((self.range_min, lim[0]), (self.range_max, lim[1])):
+            sp.blockSignals(True)
+            sp.setSingleStep(step)
+            sp.setValue(v)
+            sp.blockSignals(False)
+        self.range_state.setText("fixed" if fixed else "auto")
+
+    def _apply_range(self, *_):
+        lo, hi = self.range_min.value(), self.range_max.value()
+        if hi <= lo:
+            self.range_state.setText("max must be above min")
+            return
+        self.viewer.configure_view(limits=(lo, hi))
+        self.range_state.setText("fixed")
+
+    def _auto_range(self):
+        self.viewer.configure_view(limits="auto")
+        self._sync_range()
 
     def _on_view_changed(self, *_):
         self._frames_dirty = True

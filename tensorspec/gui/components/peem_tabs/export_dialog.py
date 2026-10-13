@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QRadioButton,
     QSpinBox,
     QVBoxLayout,
@@ -100,20 +101,17 @@ class ExportMapDialog(QDialog):
         self.cmap = QComboBox()
         self.cmap.addItems(list(dict.fromkeys((opts["cmap"],) + CMAPS)))
         lf.addRow("Colour map:", self.cmap)
-        self.chk_auto_lim = QCheckBox("Limits as in the viewer")
-        self.chk_auto_lim.setChecked(True)
-        lf.addRow(self.chk_auto_lim)
         lim = QHBoxLayout()
-        self.vmin = _dspin(-1e9, 1e9, float(opts["vmin"]), 0.01, 4)
-        self.vmax = _dspin(-1e9, 1e9, float(opts["vmax"]), 0.01, 4)
-        lim.addWidget(QLabel("min"))
+        self.vmin = _dspin(-1e12, 1e12, float(opts["vmin"]), max((opts["vmax"] - opts["vmin"]) / 50, 1e-6), 4)
+        self.vmax = _dspin(-1e12, 1e12, float(opts["vmax"]), max((opts["vmax"] - opts["vmin"]) / 50, 1e-6), 4)
         lim.addWidget(self.vmin)
-        lim.addWidget(QLabel("max"))
+        lim.addWidget(QLabel("to"))
         lim.addWidget(self.vmax)
-        lf.addRow(lim)
-        self.chk_auto_lim.toggled.connect(lambda on: (self.vmin.setEnabled(not on), self.vmax.setEnabled(not on)))
-        self.vmin.setEnabled(False)
-        self.vmax.setEnabled(False)
+        b = QPushButton("As shown")
+        b.setToolTip("Back to the range the viewer shows now")
+        b.clicked.connect(lambda: (self.vmin.setValue(float(opts["vmin"])), self.vmax.setValue(float(opts["vmax"]))))
+        lim.addWidget(b)
+        lf.addRow("Colour range:", lim)
         self.chk_cbar = QCheckBox("Colour bar")
         self.chk_cbar.setChecked(True)
         lf.addRow(self.chk_cbar)
@@ -184,11 +182,10 @@ class ExportMapDialog(QDialog):
         """Keyword arguments for PeemService.export_map (without name / kind / path / var)."""
         pictures = tuple(f for f, c in (("png", self.chk_png), ("pdf", self.chk_pdf), ("svg", self.chk_svg))
                          if c.isChecked())
-        auto_lim = self.chk_auto_lim.isChecked()
         return {"values": self.chk_tif.isChecked(), "pictures": pictures, "crop": self.crop(),
                 "size_px": None if self.chk_auto_size.isChecked() else (self.w_spin.value(), self.h_spin.value()),
                 "dpi": self.dpi_spin.value(), "cmap": self.cmap.currentText(),
-                "vmin": None if auto_lim else self.vmin.value(), "vmax": None if auto_lim else self.vmax.value(),
+                "vmin": self.vmin.value(), "vmax": self.vmax.value(),
                 "colorbar": self.chk_cbar.isChecked(), "title": self.title_edit.text(),
                 "label": self.label_edit.text(), "scalebar": self.chk_scalebar.isChecked(),
                 "image_only": self.chk_image_only.isChecked()}
@@ -202,7 +199,7 @@ class ExportMapDialog(QDialog):
         if not o["values"] and not o["pictures"]:
             self.error.setText("Tick at least one file.")
             return
-        if o["vmin"] is not None and o["vmax"] <= o["vmin"]:
+        if o["vmax"] <= o["vmin"]:
             self.error.setText("The colour maximum must be above the minimum.")
             return
         self.accept()

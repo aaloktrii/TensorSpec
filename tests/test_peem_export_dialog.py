@@ -19,7 +19,7 @@ def test_defaults_are_the_map_size_and_viewer_look(app):
     d = ExportMapDialog(None, OPTS)
     o = d.options()
     assert o["size_px"] == (1024, 512) and o["crop"] is None and o["values"] and o["pictures"] == ("png",)
-    assert o["vmin"] is None and o["cmap"] == "bwr" and o["label"] == "(CM-CP)/(CM+CP)"
+    assert (o["vmin"], o["vmax"]) == (-0.1, 0.1) and o["cmap"] == "bwr" and o["label"] == "(CM-CP)/(CM+CP)"
     assert not d.rb_roi.isEnabled()
 
 
@@ -33,7 +33,6 @@ def test_region_aspect_and_typed_limits(app):
     d.crop_edit.setText("0, 64, 0, 32")
     d._region_changed()
     assert d.options()["crop"] == (0, 64, 0, 32) and d.options()["size_px"] == (64, 32)
-    d.chk_auto_lim.setChecked(False)
     d.vmin.setValue(-0.05)
     d.vmax.setValue(0.05)
     d.chk_pdf.setChecked(True)
