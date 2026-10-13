@@ -57,6 +57,7 @@ class RamanService:
         self.name: Optional[str] = None                   # workspace key of the loaded map
         self.band_maps = {}                               # key -> (lo, hi, grid, mapfile it is on)
         self._band_written = None                         # band map shown as /analysis data
+        self.clear_peak_maps()
         self.clear_area()
 
     # -- naming --------------------------------------------------------------------------------
@@ -98,6 +99,7 @@ class RamanService:
         self.clear_area()
         self.band_maps = {}
         self._band_written = None
+        self.clear_peak_maps()
         self.name = workspace_name(mf.path)
         global_workspace.push_spectroscopy_data(self.name, raman_loaders.map_to_tensor(mf))
         return res
@@ -214,6 +216,7 @@ class RamanService:
         self.mapfile = apply_map_transform(self.mapfile_raw, self.current_transform())
         self.clear_area()                       # the rectangle was drawn in the old placement
         self._band_written = None               # band maps are on the new grid now
+        self._lay_peak_maps()                   # per-spectrum fits, laid onto the new grid
         self.rebuild_maps()
         self.write_twod_fit()
         return True
@@ -237,6 +240,32 @@ class RamanService:
             ds = products.band_maps_dataset(self.mapfile, {k: v[:3] for k, v in self.band_maps.items()
                                                            if v[3] is self.mapfile}, key)
             global_workspace.write_analysis_data(self.name, "raman_band_maps", ds)
+        return grid
+
+    # -- peak maps: the step-1 model on every pixel (2 · Map) ------------------------------------
+    def clear_peak_maps(self):
+        self.peak_results = None                # fit_spectrum per spectrum index
+        self.peak_model = None
+        self.peak_grids = {}                    # key -> grid (peak_maps.peak_maps)
+        self._peak_written = None
+
+    def set_peak_results(self, results, model):
+        self.peak_results, self.peak_model = results, model
+        self._lay_peak_maps()
+
+    def _lay_peak_maps(self):
+        if self.peak_results is None or self.mapfile is None:
+            return
+        self.peak_grids = self.engine.peak_maps(self.mapfile, self.peak_results, self.peak_model)
+        self._peak_written = None
+
+    def peak_map(self, key: str):
+        """One peak map; written to /analysis/raman_peak_maps (data = this one) when shown."""
+        grid = self.peak_grids[key]
+        if self.name is not None and key != self._peak_written:
+            self._peak_written = key
+            ds = products.peak_maps_dataset(self.mapfile, self.peak_grids, self.peak_model, key)
+            global_workspace.write_analysis_data(self.name, "raman_peak_maps", ds)
         return grid
 
     def clear_area(self):

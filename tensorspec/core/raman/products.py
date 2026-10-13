@@ -15,7 +15,8 @@ import xarray as xr
 
 # /analysis/<kind> products of the Raman suite
 RAMAN_ANALYSIS_KINDS = ("raman_2d_fit", "raman_classification", "raman_layer_prediction",
-                        "raman_peakfit", "raman_strain_doping", "raman_roi", "raman_band_maps")
+                        "raman_peakfit", "raman_strain_doping", "raman_roi", "raman_band_maps",
+                        "raman_peak_maps")
 
 
 def _grid_coords(mapfile) -> dict:
@@ -123,6 +124,18 @@ def band_maps_dataset(mapfile, maps: dict, latest: str) -> xr.Dataset:
     return xr.Dataset(vars_, coords=_grid_coords(mapfile),
                       attrs={"kind": "raman_band_maps", "latest": latest,
                              "integration": "trapezoid, raw counts, no background subtracted"})
+
+
+def peak_maps_dataset(mapfile, maps: dict, model, shown: str) -> xr.Dataset:
+    """Peak maps of the step-1 model on (y, x), one variable per map; ``data`` = the one shown."""
+    units = {"pos": "cm-1", "fwhm": "cm-1", "height": "counts", "area": "counts cm-1", "n": ""}
+    vars_ = {k: (("y", "x"), np.asarray(g, float), {"units": units[k.rsplit("_", 1)[1]]})
+             for k, g in maps.items()}
+    vars_["data"] = vars_[shown]
+    return xr.Dataset(vars_, coords=_grid_coords(mapfile),
+                      attrs={"kind": "raman_peak_maps", "shown": shown,
+                             "fit_model": _attr(model.to_dict()),
+                             "peak_numbering": "per pixel, low to high wavenumber"})
 
 
 def strain_doping_rows(rows: list, decompose) -> list:

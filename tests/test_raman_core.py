@@ -162,3 +162,23 @@ def test_neutral_defaults_and_graphene_preset():
     assert m.bands == [] and m.si_calibrate is False          # universal start: nothing assumed
     g = PRESETS["Graphene"]
     assert [b[0] for b in g["bands"]] == ["G", "2D"] and g["si_calibrate"] is True
+
+
+def test_peak_maps_count_and_number_peaks_by_position(tmp_path):
+    from tensorspec.core.raman import peak_maps
+    from tensorspec.core.raman.fit_model import FitModel
+    folder = tmp_path / "pm"
+    folder.mkdir()
+    for i, split in enumerate((False, True)):                 # pixel 0: one G, pixel 1: G-/G+
+        np.savetxt(folder / f"s_{i}__X_{2.0 * i:.1f}__Y_0.0__T.txt",
+                   np.c_[WN, graphene(split_g=split, seed=i)], delimiter="\t")
+    _, mf = raman_loaders.load_raman(str(folder))
+    model = FitModel(bands=[("G", 1500.0, 1680.0, "auto", 3)])
+    results = peak_maps.fit_pixels(mf, model, parallel=False)
+    maps = peak_maps.peak_maps(mf, results, model)
+    single, split = mf.index_map[0, 0], mf.index_map[0, 1]
+    assert maps["G_n"][0, 0] == 1 and maps["G_n"][0, 1] == 2
+    assert abs(maps["G_p1_pos"][0, 0] - 1584) < 1.5
+    assert abs(maps["G_p1_pos"][0, 1] - 1585) < 1.5 and abs(maps["G_p2_pos"][0, 1] - 1603) < 1.5
+    assert np.isnan(maps["G_p2_pos"][0, 0])                  # no second peak in the single-G pixel
+    assert single >= 0 and split >= 0

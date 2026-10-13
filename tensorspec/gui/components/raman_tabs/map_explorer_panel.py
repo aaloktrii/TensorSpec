@@ -74,7 +74,7 @@ class MapExplorerTab(QtWidgets.QWidget):
         bar.addSpacing(12)
         bar.addWidget(QtWidgets.QLabel("Map"))
         self.cmb_quantity = QtWidgets.QComboBox()
-        self.cmb_quantity.addItems(["Total intensity", "Band integral", "FWHM(2D)",
+        self.cmb_quantity.addItems(["Total intensity", "Band integral", "Peak map", "FWHM(2D)",
                                     "G height", "2D height"])
         self.cmb_quantity.setToolTip("Total intensity / Band integral: raw counts integrated over "
                                      "the whole spectrum / a window, no fitting, no background "
@@ -103,6 +103,27 @@ class MapExplorerTab(QtWidgets.QWidget):
         for w in self._band_row:
             bar.addWidget(w)
             w.setVisible(False)
+        # peak map: band, peak (count or peak k, low to high wavenumber), fitted quantity
+        self.cmb_pband = QtWidgets.QComboBox()
+        self.cmb_peak = QtWidgets.QComboBox()
+        self.cmb_pq = QtWidgets.QComboBox()
+        for label, key in (("position", "pos"), ("FWHM", "fwhm"), ("height", "height"),
+                           ("area", "area")):
+            self.cmb_pq.addItem(label, key)
+        self.cmb_peak.setToolTip("Peaks are numbered in each pixel from low to high wavenumber")
+        self.cmb_pband.currentIndexChanged.connect(self._fill_peaks)
+        for w in (self.cmb_peak, self.cmb_pq):
+            w.currentIndexChanged.connect(self.refresh_map)
+        self._peak_row = (self.cmb_pband, self.cmb_peak, self.cmb_pq)
+        for w in self._peak_row:
+            bar.addWidget(w)
+            w.setVisible(False)
+        self.btn_fit_pixels = QtWidgets.QPushButton("Fit every pixel")
+        self.btn_fit_pixels.setToolTip("Fit every pixel's spectrum with the model of 1 · Spectra ▸ "
+                                       "Peak fitting and map each peak (Map ▸ Peak map). Runs in "
+                                       "the background; nothing is fitted until pressed.")
+        self.btn_fit_pixels.clicked.connect(self.main.start_peak_maps)
+        bar.addWidget(self.btn_fit_pixels)
         bar.addWidget(QtWidgets.QLabel("Colour map"))
         bar.addWidget(self.cmb_cmap)
         bar.addStretch(1)
@@ -262,7 +283,55 @@ class MapExplorerTab(QtWidgets.QWidget):
             w.setVisible(integral)
         if integral:
             self._fill_bands()
+        for w in self._peak_row:
+            w.setVisible(self.cmb_quantity.currentText() == "Peak map")
         self.refresh_map()
+
+    # -- peak maps ---------------------------------------------------------
+    def peak_maps_ready(self):
+        """Offer the bands of the latest pixel fits (or none) in the Peak map pickers."""
+        grids = self.main.service.peak_grids
+        bands = [k[:-2] for k in grids if k.endswith("_n")]
+        keep = self.cmb_pband.currentText()
+        self.cmb_pband.blockSignals(True)
+        self.cmb_pband.clear()
+        self.cmb_pband.addItems(bands)
+        if keep in bands:
+            self.cmb_pband.setCurrentText(keep)
+        self.cmb_pband.blockSignals(False)
+        self._fill_peaks()
+        if bands and self.cmb_quantity.currentText() != "Peak map":
+            self.cmb_quantity.setCurrentText("Peak map")
+
+    def _fill_peaks(self):
+        band = self.cmb_pband.currentText()
+        grids = self.main.service.peak_grids
+        n = 0
+        while "%s_p%d_pos" % (band, n + 1) in grids:
+            n += 1
+        keep = self.cmb_peak.currentText()
+        self.cmb_peak.blockSignals(True)
+        self.cmb_peak.clear()
+        self.cmb_peak.addItem("peak count", "n")
+        for k in range(1, n + 1):
+            self.cmb_peak.addItem("peak %d" % k, k)
+        i = self.cmb_peak.findText(keep)
+        self.cmb_peak.setCurrentIndex(i if i >= 0 else min(1, self.cmb_peak.count() - 1))
+        self.cmb_peak.blockSignals(False)
+        self.refresh_map()
+
+    def peak_key(self):
+        """(grid key, colour-bar label, title) of the peak map chosen, or None."""
+        band, peak = self.cmb_pband.currentText(), self.cmb_peak.currentData()
+        if not band or peak is None:
+            return None
+        if peak == "n":
+            return "%s_n" % band, "peaks (0 = no fit)", "%s peak count (fit)" % band
+        q = self.cmb_pq.currentData()
+        unit = {"pos": "cm$^{-1}$", "fwhm": "cm$^{-1}$", "height": "counts",
+                "area": "counts·cm$^{-1}$"}[q]
+        return ("%s_p%d_%s" % (band, peak, q), "%s  [%s]" % (self.cmb_pq.currentText(), unit),
+                "%s peak %d %s (fit)" % (band, peak, self.cmb_pq.currentText()))
 
     def _window_choices(self):
         """[(name, lo, hi)]: the step-1 fit bands, then any windows of the applied preset."""
@@ -411,10 +480,12 @@ class MapExplorerTab(QtWidgets.QWidget):
             "flip_y": self.chk_fy.isChecked(),
             "dx": self.spn_dx.value(), "dy": self.spn_dy.value()})
 
-    def _show_placeholder(self, text="No map loaded"):
+    def _show_placeholder(self, text="No map loaded", spectrum_too=True):
         self.map_canvas.clear()
         draw_placeholder(self.map_canvas.ax, text)
         self.map_canvas.draw()
+        if not spectrum_too:
+            return
         self.spec_canvas.clear()
         draw_placeholder(self.spec_canvas.ax)
         self.spec_canvas.draw()
@@ -442,13 +513,21 @@ class MapExplorerTab(QtWidgets.QWidget):
             return
         if fwhm and self.main.fwhm_map is None:
             self._show_placeholder("FWHM(2D) needs the 2D-band fit:\n3 · Analysis > Classification"
-                                   " > Fit 2D band on all pixels")
+                                   " > Fit 2D band on all pixels", spectrum_too=False)
             return
 
         cv = self.map_canvas
         cv.clear()
         cbar_label = title = None
-        if quantity == "Total intensity":
+        if quantity == "Peak map":
+            choice = self.peak_key() if self.main.service.peak_grids else None
+            if choice is None:
+                self._show_placeholder("No pixel fits yet: define bands in 1 · Spectra > Peak fitting,"
+                                       "\nthen press 'Fit every pixel'", spectrum_too=False)
+                return
+            key, cbar_label, title = choice
+            data = self.main.service.peak_map(key)
+        elif quantity == "Total intensity":
             data = self.main.service.band_integral_map("total", float(mf.axis.min()),
                                                        float(mf.axis.max()))
             cbar_label = "∫ I dω  [counts·cm$^{-1}$]"
