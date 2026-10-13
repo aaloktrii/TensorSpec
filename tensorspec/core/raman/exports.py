@@ -8,6 +8,8 @@ import os
 
 import numpy as np
 
+from tensorspec.core.raman.classification import LAYER_THICK, label_of, pixel_ratio
+
 
 def _fmt(v, nd=3) -> str:
     return "" if v is None or not np.isfinite(v) else ("%.*f" % (nd, v))
@@ -103,4 +105,48 @@ def write_cells_csv(path: str, mf, cells, lo: float, hi: float, names) -> str:
                             "%.1f" % pk["area"], "%.2f" % r["band_fwhm"],
                             "%.5f" % r["r2"], "%.1f" % r["bic"]])
     return fpath
+
+
+def write_classification_csv(path: str, mf, layers, calls, ncands, reasons, fits, g_fits,
+                             ratio_metric: str) -> str:
+    """One row per map pixel: fit results, I(2D)/I(G), layer number, stacking call and why a pixel
+    stayed unclassified. Moved from the Classification tab (export_csv)."""
+    ny, nx = layers.shape
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["row", "col", "x_um", "y_um", "fwhm_2d_cm-1",
+                    "fwhm_err_cm-1", "center_cm-1", "asym_hwhm", "asym_area",
+                    "asym_residual", "snr", "spikes_removed",
+                    "g_height", "twod_height", "ratio_2d_g", "n_layers",
+                    "stacking", "label", "n_candidate_layers",
+                    "unclassified_reason", "fit_note"])
+        for r in range(ny):
+            for c in range(nx):
+                i = mf.index_map[r, c]
+                res = fits[i] if i >= 0 and fits else {}
+                gr = (g_fits[i] if i >= 0 and g_fits
+                      else {})
+                lay = int(layers[r, c])
+                call = calls[r, c]
+                w.writerow([
+                    r, c,
+                    "" if i < 0 else "%.4f" % mf.x[i],
+                    "" if i < 0 else "%.4f" % mf.y[i],
+                    _fmt(res.get("fwhm")), _fmt(res.get("fwhm_err"), 2),
+                    _fmt(res.get("center")),
+                    _fmt(res.get("asym_hwhm"), 4),
+                    _fmt(res.get("asym_area"), 4),
+                    _fmt(res.get("asym_residual"), 4),
+                    _fmt(res.get("snr"), 2), res.get("spikes", 0),
+                    _fmt(gr.get("height") if gr.get("ok") else None, 2),
+                    _fmt(res.get("height") if res.get("ok") else None, 2),
+                    _fmt(pixel_ratio(res, gr, ratio_metric), 3),
+                    (">=4" if lay == LAYER_THICK else ("" if lay < 0 else lay)),
+                    call or "",
+                    label_of(lay, call),
+                    int(ncands[r, c]),
+                    reasons[r, c] or "",
+                    res.get("note", ""),
+                ])
+    return path
 

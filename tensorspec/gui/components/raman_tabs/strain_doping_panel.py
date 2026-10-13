@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Optional
 
 from PySide6 import QtCore, QtWidgets
 
-from tensorspec.core.raman import strain_doping
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
 from tensorspec.plotting.backends.raman_views import peak_fit as views
@@ -34,7 +33,7 @@ class StrainDopingTab(QtWidgets.QWidget):
         form = QtWidgets.QFormLayout()
         self.eds = {}
         for k, lab in PARAM_ROWS:
-            self.eds[k] = QtWidgets.QLineEdit("%g" % strain_doping.PARAMS[k])
+            self.eds[k] = QtWidgets.QLineEdit("%g" % self.main.service.strain_doping_defaults()[k])
             form.addRow(lab, self.eds[k])
         self.btn_run = QtWidgets.QPushButton("Analyse spectra from Peak fitting")
         self.btn_run.clicked.connect(self.analyse)

@@ -9,9 +9,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 from PySide6 import QtWidgets
 
-from tensorspec.core.raman.classification import LAYER_THICK, layer_from_ratio
+from tensorspec.core.raman.classification import LAYER_THICK
 from tensorspec.core.raman.constants import LAYERS
 from tensorspec.gui.components.raman_tabs.layout import fit_to_screen
+from tensorspec.gui.services.raman_service import RamanService
 from tensorspec.plotting.backends.raman_views import classification as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
 
@@ -25,7 +26,7 @@ class ThicknessDialog(QtWidgets.QDialog):
     so the cutoffs can be explored freely.
     """
 
-    LAYER_ORDER = (1, 2, 3, LAYER_THICK)
+    LAYER_ORDER = RamanService.THICKNESS_LAYERS
 
     def __init__(self, main: "RamanPanel", parent=None):
         super().__init__(parent)
@@ -135,8 +136,7 @@ class ThicknessDialog(QtWidgets.QDialog):
         return c
 
     def _valid(self, c: dict) -> bool:
-        k = c["ratio_cut"]
-        return k["1_2"] > k["2_3"] > k["3_thick"] > 0
+        return self.main.service.thickness_valid(c)
 
     def redraw(self):
         c = self._local_cfg()
@@ -144,17 +144,8 @@ class ThicknessDialog(QtWidgets.QDialog):
         valid = self._valid(c)
         self.btn_use.setEnabled(valid)
         mf = self.main.mapfile
-        rm = self.main.ratio_maps[c["ratio_metric"]]
-        ny, nx = rm.shape
-        lm = np.full((ny, nx), np.nan)
-        counts = {k: 0 for k in self.LAYER_ORDER}
-        for r in range(ny):
-            for cc in range(nx):
-                n = layer_from_ratio(rm[r, cc], c) if valid else None
-                if n is not None:
-                    lm[r, cc] = self.LAYER_ORDER.index(n)
-                    counts[n] += 1
-        with_ratio = int(np.isfinite(rm).sum())
+        pv = self.main.service.thickness_preview(c)
+        rm, lm, counts, with_ratio = pv["ratios"], pv["layer_index"], pv["counts"], pv["with_ratio"]
 
         fig = self.canvas.figure
         fig.clear()
@@ -179,9 +170,7 @@ class ThicknessDialog(QtWidgets.QDialog):
         c = self._local_cfg()
         if not self._valid(c):
             return
-        for k in ("ratio_cut", "ratio_metric", "thick_policy", "thick_assume"):
-            self.main.cfg[k] = c[k]
-        self.main.cfg["layer_mode"] = "auto"
+        self.main.service.use_thickness(c)
         self.main.tab_class.rb_auto.setChecked(True)
         self.accept()
         self.main.tab_class.run_classification()

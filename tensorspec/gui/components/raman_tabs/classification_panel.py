@@ -5,19 +5,14 @@ stacking per pixel, editable threshold table, histograms, PNG / CSV export. Resu
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 2 - Classification: ClassificationTab)."""
 from __future__ import annotations
 
-import csv
 from typing import TYPE_CHECKING
-from typing import Dict, Optional
 
-import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from tensorspec.core.raman.classification import (LAYER_THICK, classify_map, label_of, pixel_ratio,
-                                                  terrace_edges)
 from tensorspec.core.raman.constants import (APP_NAME, BOUHAFS_FWHM, DEFAULT_COLORS, DEFAULT_TOL,
                                              LAYERS)
 from tensorspec.gui.components.raman_tabs.layer_regions_dialog import LayerRegionsDialog
-from tensorspec.gui.components.raman_tabs.layout import ThresholdTable, _fmt
+from tensorspec.gui.components.raman_tabs.layout import ThresholdTable
 from tensorspec.gui.components.raman_tabs.thickness_dialog import ThicknessDialog
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_placeholder
 from tensorspec.plotting.backends.raman_views import classification as views
@@ -31,10 +26,6 @@ class ClassificationTab(QtWidgets.QWidget):
     def __init__(self, main: "RamanPanel"):
         super().__init__()
         self.main = main
-        self.layers: Optional[np.ndarray] = None
-        self.calls: Optional[np.ndarray] = None
-        self.ncands: Optional[np.ndarray] = None
-        self.reasons: Optional[np.ndarray] = None
         self._build()
 
     # -- UI -----------------------------------------------------------------
@@ -356,32 +347,43 @@ class ClassificationTab(QtWidgets.QWidget):
             return
         ThicknessDialog(self.main, self).exec()
 
+    # -- the classification result, held by the service ---------------------------------
+    def _result(self, key):
+        c = self.main.service.classification
+        return None if c is None else c[key]
+
+    @property
+    def layers(self):
+        return self._result("layers")
+
+    @layers.setter
+    def layers(self, value):
+        if value is None:                   # a new map / placement: the result no longer applies
+            self.main.service.classification = None
+
+    @property
+    def calls(self):
+        return self._result("calls")
+
+    @property
+    def ncands(self):
+        return self._result("ncands")
+
+    @property
+    def reasons(self):
+        return self._result("reasons")
+
     def run_classification(self):
-        if self.main.fwhm_map is None:
-            QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load a Raman map and press 'Fit 2D band on all pixels' first.")
-            return
         self._pull_config()
-        cfg = self.main.cfg
-        if cfg["layer_mode"] == "auto" and not self.main.ratio_ok:
-            QtWidgets.QMessageBox.information(
-                self, APP_NAME,
-                "Auto mode is not applicable for this file: %s.\n\nUsing "
-                "Manual." % self.main.ratio_note)
-            cfg["layer_mode"] = "manual"
+        try:
+            notes = self.main.service.classify()
+        except ValueError as exc:
+            QtWidgets.QMessageBox.information(self, APP_NAME, str(exc))
+            return
+        for note in notes:
+            QtWidgets.QMessageBox.information(self, APP_NAME, note)
+        if self.main.cfg["layer_mode"] == "manual":
             self.rb_manual.setChecked(True)
-        asym = self.main.asym_maps[cfg["asym_metric"]]
-        if cfg["layer_mode"] == "map":
-            lb = self.main.layer_by_spec
-            if lb is None or not (lb > 0).any():
-                QtWidgets.QMessageBox.information(
-                    self, APP_NAME, "Layer-map mode needs a layer map — use "
-                    "'Define layer regions…' first.")
-                return
-        ratio = self.main.ratio_maps.get(cfg.get("ratio_metric", "height"))
-        self.layers, self.calls, self.ncands, self.reasons = classify_map(
-            self.main.fwhm_map, asym, cfg, ratio, self.main.layer_grid())
-        self.main.service.write_classification(self.layers, self.calls, self.ncands)
         self.refresh_map()
         self._report()
         ts = getattr(self.main, "tab_spec", None)
@@ -390,86 +392,7 @@ class ClassificationTab(QtWidgets.QWidget):
             ts.refresh_mini()
 
     def _report(self):
-        labels: Dict[str, int] = {}
-        ny, nx = self.layers.shape
-        for r in range(ny):
-            for c in range(nx):
-                lab = label_of(int(self.layers[r, c]), self.calls[r, c])
-                labels[lab] = labels.get(lab, 0) + 1
-        total = ny * nx
-        cfg = self.main.cfg
-        fitted = int(np.isfinite(self.main.fwhm_map).sum())
-        lines = ["Pixels: %d   (%d × %d)   fitted: %d" % (total, nx, ny, fitted),
-                 "Mode: %s   technique: %s   metric: %s   asym ≥ %.3f"
-                 % (cfg["layer_mode"], cfg["technique"],
-                    cfg["asym_metric"], cfg["asym_threshold"])]
-        if fitted:
-            errs = np.array([r.get("fwhm_err", np.nan) for r in self.main.fits
-                             if r.get("ok")], dtype=float)
-            errs = errs[np.isfinite(errs)]
-            if errs.size:
-                med_err = float(np.median(errs))
-                gaps = [abs(cfg["fwhm"][L]["ABC"] - cfg["fwhm"][L]["ABA"]) / 2.0
-                        for L in cfg["fwhm"]]
-                lines.append("Median FWHM uncertainty: ± %.1f cm⁻¹  "
-                             "(threshold-to-boundary gap ≈ %.0f cm⁻¹)%s"
-                             % (med_err, float(np.median(gaps)),
-                                "   ← too large to separate ABA from ABC"
-                                if med_err > 0.5 * float(np.median(gaps)) else ""))
-            out = 0
-            for r in range(ny):
-                for c in range(nx):
-                    why = self.reasons[r, c] or ""
-                    if self.calls[r, c] is None and "outside both" in why:
-                        out += 1
-            if out:
-                lines.append("Outside every tolerance window: %d of %d fitted "
-                             "pixels (%.1f %%)" % (out, fitted, 100.0 * out / fitted))
-            if cfg["layer_mode"] == "map":
-                g = self.main.layer_grid()
-                fitted_mask = np.isfinite(self.main.fwhm_map)
-                per = "  ".join("%dL %d" % (n, int(((g == n) & fitted_mask).sum()))
-                                for n in sorted(set(g[g > 0].tolist())))
-                lines.append("Layer map: fitted pixels per region — %s   "
-                             "(no N assigned: %d)"
-                             % (per, int(((g == 0) & fitted_mask).sum())))
-                if cfg.get("exclude_edges", True):
-                    e = int((terrace_edges(g) & fitted_mask).sum())
-                    lines.append("Terrace-edge pixels excluded: %d" % e)
-            elif cfg["layer_mode"] == "manual":
-                amb = int(((self.ncands > 1) & np.isfinite(self.main.fwhm_map)).sum())
-                lines.append("Ambiguous layer assignment: %d of %d fitted pixels "
-                             "(%.1f %%) matched more than one layer window"
-                             % (amb, fitted, 100.0 * amb / fitted))
-            else:
-                k = cfg["ratio_cut"]
-                rm = self.main.ratio_maps.get(cfg.get("ratio_metric", "height"))
-                nr = int(np.isfinite(rm).sum()) if rm is not None else 0
-                lines.append("Thickness from I(2D)/I(G) (%s), cutoffs %.2f / %.2f / "
-                             "%.2f: ratio available for %d of %d fitted pixels"
-                             % (cfg.get("ratio_metric", "height"), k["1_2"],
-                                k["2_3"], k["3_thick"], nr, fitted))
-                if cfg.get("thick_policy") == "assume":
-                    lines.append("≥4L pixels assumed to be %dL for the stacking call"
-                                 % int(cfg.get("thick_assume", 5)))
-            res = self.main.mapfile.spectral_resolution if self.main.mapfile else None
-            if res and res > 8.0 and cfg["technique"] != "asym":
-                lines.append("⚠ Spectral resolution %.1f cm⁻¹: the 2D widths are "
-                             "instrument-broadened, so ABA/ABC calls against the "
-                             "Bouhafs table are unreliable. Use this map for "
-                             "thickness and a 1800 gr/mm map for stacking." % res)
-        rejected = total - fitted
-        if rejected:
-            lines.append("")
-            lines.append("Rejected before classification (%d pixels):" % rejected)
-            for why, n in sorted((self.main.fit_tally or {}).items(),
-                                 key=lambda kv: -kv[1]):
-                lines.append("   %5d   %s" % (n, why))
-        lines.append("")
-        for lab in sorted(labels, key=lambda s: (s == "Unclassified", s)):
-            n = labels[lab]
-            lines.append("%-16s %6d   %5.1f %%" % (lab, n, 100.0 * n / total))
-        self.stats.setPlainText("\n".join(lines))
+        self.stats.setPlainText(self.main.service.classification_report())
 
     def show_histograms(self):
         """Show where the thresholds actually fall relative to the data.
@@ -484,10 +407,7 @@ class ClassificationTab(QtWidgets.QWidget):
                 self, APP_NAME, "Load a Raman map and press 'Fit 2D band on all pixels' first.")
             return
         self._pull_config()
-        cfg = self.main.cfg
-        fw = self.main.fwhm_map[np.isfinite(self.main.fwhm_map)]
-        am = self.main.asym_maps[cfg["asym_metric"]]
-        am = am[np.isfinite(am)]
+        fw, am, shown = self.main.service.histogram_data()
         if fw.size == 0:
             QtWidgets.QMessageBox.information(self, APP_NAME, "No successful fits.")
             return
@@ -498,14 +418,7 @@ class ClassificationTab(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(dlg)
         cv = Canvas(figsize=(9, 4))
         cv.figure.clear()
-        if cfg["layer_mode"] == "manual":
-            shown = [int(cfg["manual_layer"])]
-        elif cfg["layer_mode"] == "map" and self.main.layer_by_spec is not None:
-            shown = sorted(n for n in set(self.main.layer_by_spec.tolist())
-                           if n in cfg["fwhm"]) or sorted(cfg["fwhm"])
-        else:
-            shown = sorted(cfg["fwhm"])
-        views.draw_threshold_histograms(cv.figure, fw, am, cfg, shown)
+        views.draw_threshold_histograms(cv.figure, fw, am, self.main.cfg, shown)
 
         lay.addWidget(cv)
         msg = QtWidgets.QLabel(
@@ -565,42 +478,5 @@ class ClassificationTab(QtWidgets.QWidget):
             return
         if not path.lower().endswith(".csv"):
             path += ".csv"
-        mf = self.main.mapfile
-        ny, nx = self.layers.shape
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            w = csv.writer(fh)
-            w.writerow(["row", "col", "x_um", "y_um", "fwhm_2d_cm-1",
-                        "fwhm_err_cm-1", "center_cm-1", "asym_hwhm", "asym_area",
-                        "asym_residual", "snr", "spikes_removed",
-                        "g_height", "twod_height", "ratio_2d_g", "n_layers",
-                        "stacking", "label", "n_candidate_layers",
-                        "unclassified_reason", "fit_note"])
-            for r in range(ny):
-                for c in range(nx):
-                    i = mf.index_map[r, c]
-                    res = self.main.fits[i] if i >= 0 and self.main.fits else {}
-                    gr = (self.main.g_fits[i] if i >= 0 and self.main.g_fits
-                          else {})
-                    lay = int(self.layers[r, c])
-                    call = self.calls[r, c]
-                    w.writerow([
-                        r, c,
-                        "" if i < 0 else "%.4f" % mf.x[i],
-                        "" if i < 0 else "%.4f" % mf.y[i],
-                        _fmt(res.get("fwhm")), _fmt(res.get("fwhm_err"), 2),
-                        _fmt(res.get("center")),
-                        _fmt(res.get("asym_hwhm"), 4),
-                        _fmt(res.get("asym_area"), 4),
-                        _fmt(res.get("asym_residual"), 4),
-                        _fmt(res.get("snr"), 2), res.get("spikes", 0),
-                        _fmt(gr.get("height") if gr.get("ok") else None, 2),
-                        _fmt(res.get("height") if res.get("ok") else None, 2),
-                        _fmt(pixel_ratio(res, gr, self.main.cfg.get("ratio_metric", "height")), 3),
-                        (">=4" if lay == LAYER_THICK else ("" if lay < 0 else lay)),
-                        call or "",
-                        label_of(lay, call),
-                        int(self.ncands[r, c]),
-                        self.reasons[r, c] or "",
-                        res.get("note", ""),
-                    ])
+        self.main.service.export_classification_csv(path)
         self.main.status("Saved %s" % path)

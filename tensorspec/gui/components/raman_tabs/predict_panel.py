@@ -40,14 +40,21 @@ class PredictTab(QtWidgets.QWidget):
     def __init__(self, main: "RamanPanel"):
         super().__init__()
         self.main = main
-        self.ref = None
-        self.ref_path = None
         self.preds: Optional[List[dict]] = None
         self.pred_title = ""
         self._build()
         ref_path = self.main.service.preferred_reference()
         if HAVE_GREF and os.path.exists(ref_path):
-            self._set_ref(self.main.engine.load_reference(ref_path), ref_path)
+            self._set_ref(self.main.service.set_reference(ref_path), ref_path)
+
+    @property
+    def ref(self):
+        """The 1L / 2L reference in use (held by the service)."""
+        return self.main.service.reference
+
+    @property
+    def ref_path(self):
+        return self.main.service.reference_path
 
     def _build(self):
         root = QtWidgets.QHBoxLayout(self)
@@ -94,8 +101,6 @@ class PredictTab(QtWidgets.QWidget):
 
     # -- reference --------------------------------------------------------------
     def _set_ref(self, ref, path):
-        self.ref = ref
-        self.ref_path = path
         ds = ref["datasets"]
         self.lbl_ref.setText("Reference %s (built %s). Predictions use the 'matching' "
                              "spots: fitted 2D FWHM %s." % (
@@ -136,9 +141,8 @@ class PredictTab(QtWidgets.QWidget):
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
-            out_json = self.main.service.user_reference_path()
-            ref = self.main.engine.build_reference([("1L", f1), ("2L", f2)], out_json,
-                                                 figures=raman_matplotlib_engine)
+            out_json = self.main.service.build_reference(f1, f2, figures=raman_matplotlib_engine)
+            ref = self.ref
         except Exception as exc:
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.critical(self, APP_NAME, "Could not build:\n\n%s" % exc)
@@ -152,7 +156,7 @@ class PredictTab(QtWidgets.QWidget):
             self, "Load reference", os.path.dirname(self.main.service.preferred_reference()),
             "JSON (*.json)")
         if path:
-            self._set_ref(self.main.engine.load_reference(path), path)
+            self._set_ref(self.main.service.set_reference(path), path)
 
     # -- prediction -------------------------------------------------------------
     def predict_map(self):
@@ -162,23 +166,14 @@ class PredictTab(QtWidgets.QWidget):
             return
         prog = QtWidgets.QProgressDialog("Fitting G and 2D…", "Cancel", 0, mf.n_points, self)
         prog.setWindowModality(QtCore.Qt.WindowModal)
-        rows = []
-        for i in range(mf.n_points):
-            if prog.wasCanceled():
-                return
-            prog.setValue(i)
-            r, _, _ = self.main.engine.fit_band("g_2d", mf.axis, mf.data[i].astype(float))
-            r.update(file="spot %d" % i, x=float(mf.x[i]), y=float(mf.y[i]), idx=i)
-            rows.append(r)
+
+        def tick(k, n):
+            prog.setValue(k)
+            return not prog.wasCanceled()
+        done = self.main.service.predict_map(tick, figures=raman_matplotlib_engine)
         prog.setValue(mf.n_points)
-        p = mf.path.rstrip(os.sep)
-        out = os.path.join(p, "output") if os.path.isdir(p) else \
-            os.path.splitext(p)[0] + "_output"
-        preds = self.main.engine.write_predictions(rows, self.ref, out, short_label(p),
-                                                   figures=raman_matplotlib_engine)
-        self.main.service.write_table("raman_layer_prediction", preds, "2D_fwhm",
-                                      {"reference": self.ref_path or ""})
-        self._show(preds, short_label(p), out)
+        if done is not None:
+            self._show(*done)
 
     def predict_dir(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Dataset to predict")
@@ -186,7 +181,7 @@ class PredictTab(QtWidgets.QWidget):
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
-            preds = self.main.engine.predict_folder(folder, self.ref, figures=raman_matplotlib_engine)
+            preds = self.main.service.predict_folder(folder, figures=raman_matplotlib_engine)
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
         self._show(preds, short_label(folder), os.path.join(folder, "output"))

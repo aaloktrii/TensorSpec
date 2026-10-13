@@ -24,11 +24,14 @@ import numpy as np
 
 from tensorspec.core.io import raman_loaders
 from tensorspec.core.io.raman_loaders import MapFile
-from tensorspec.core.raman import exports, presets, products, reference
+import json
+
+from tensorspec.core.raman import exports, layer_regions, presets, products, reference
 from tensorspec.core.raman import spectra as spectra_lists
 from tensorspec.core.raman.fit_model import FitModel
-from tensorspec.core.raman.classification import (g_band_cfg, label_of, layer_from_ratio, pixel_ratio,
-                                                  ratio_applicable)
+from tensorspec.core.raman.classification import (LAYER_THICK, classify_map, g_band_cfg, label_of,
+                                                  layer_from_ratio, pixel_ratio, ratio_applicable,
+                                                  terrace_edges, windows_for)
 from tensorspec.core.raman.constants import default_config
 from tensorspec.core.raman.map_geometry import (apply_map_transform, auto_align, band_height,
                                                 default_transform, describe_transform)
@@ -76,6 +79,11 @@ class RamanService:
         self.strain_rows: Optional[list] = None
         # 2 · Map ▸ Compare cells
         self.cells: List[dict] = []                       # {"idx", "color", "visible", "fit"}
+        # 3 · Analysis
+        self.classification: Optional[dict] = None        # layers, calls, ncands, reasons
+        self.reference: Optional[dict] = None             # 1L / 2L reference in use
+        self.reference_path: Optional[str] = None
+        self.predictions: Optional[list] = None
         self._band_written = None                         # band map shown as /analysis data
         self.clear_peak_maps()
         self.clear_area()
@@ -160,6 +168,12 @@ class RamanService:
         if rows is not None:
             self.strain_rows = rows
         return rows
+
+    @staticmethod
+    def strain_doping_defaults() -> dict:
+        """Default omega_G - omega_2D grid parameters (strain_doping.PARAMS)."""
+        from tensorspec.core.raman.strain_doping import PARAMS
+        return dict(PARAMS)
 
     def strain_doping_params(self, params: dict):
         """Grid parameters chosen for the correlation; stored with the map's results."""
@@ -329,6 +343,7 @@ class RamanService:
         self.fits = []
         self.fwhm_map = None
         self.cells = []
+        self.classification = None
         self.clear_area()
         self.band_maps = {}
         self._band_written = None
@@ -643,6 +658,266 @@ class RamanService:
                                       self.area_indices, self.AREA_MODE, self.area_fit, model)
             global_workspace.write_analysis_data(self.name, "raman_roi", ds)
         return self.area_fit
+
+    # =========================================================================================
+    # 3 · Analysis
+    # =========================================================================================
+    THICKNESS_LAYERS = (1, 2, 3, LAYER_THICK)
+
+    def classify(self) -> List[str]:
+        """Layer number + ABA/ABC for every pixel with the current cfg (written to
+        /analysis/raman_classification). Returns notes for the user (e.g. Auto mode not applicable,
+        switched to Manual: cfg['layer_mode'] then says so). Raises ValueError when it cannot run."""
+        if self.fwhm_map is None:
+            raise ValueError("Load a Raman map and press 'Fit 2D band on all pixels' first.")
+        cfg, notes = self.cfg, []
+        if cfg["layer_mode"] == "auto" and not self.ratio_ok:
+            notes.append("Auto mode is not applicable for this file: %s.\n\nUsing "
+                         "Manual." % self.ratio_note)
+            cfg["layer_mode"] = "manual"
+        if cfg["layer_mode"] == "map":
+            lb = self.layer_by_spec
+            if lb is None or not (lb > 0).any():
+                raise ValueError("Layer-map mode needs a layer map — use "
+                                 "'Define layer regions…' first.")
+        asym = self.asym_maps[cfg["asym_metric"]]
+        ratio = self.ratio_maps.get(cfg.get("ratio_metric", "height"))
+        layers, calls, ncands, reasons = classify_map(self.fwhm_map, asym, cfg, ratio,
+                                                      self.layer_grid())
+        self.classification = {"layers": layers, "calls": calls, "ncands": ncands,
+                               "reasons": reasons}
+        self.write_classification(layers, calls, ncands)
+        return notes
+
+    def classification_report(self) -> str:
+        """Text summary of the last classification: pixels, settings, fit uncertainty, pixels
+        outside every window, layer-map / ambiguity / ratio statistics, rejections, class counts."""
+        cl = self.classification
+        labels: Dict[str, int] = {}
+        ny, nx = cl['layers'].shape
+        for r in range(ny):
+            for c in range(nx):
+                lab = label_of(int(cl['layers'][r, c]), cl['calls'][r, c])
+                labels[lab] = labels.get(lab, 0) + 1
+        total = ny * nx
+        cfg = self.cfg
+        fitted = int(np.isfinite(self.fwhm_map).sum())
+        lines = ["Pixels: %d   (%d × %d)   fitted: %d" % (total, nx, ny, fitted),
+                 "Mode: %s   technique: %s   metric: %s   asym ≥ %.3f"
+                 % (cfg["layer_mode"], cfg["technique"],
+                    cfg["asym_metric"], cfg["asym_threshold"])]
+        if fitted:
+            errs = np.array([r.get("fwhm_err", np.nan) for r in self.fits
+                             if r.get("ok")], dtype=float)
+            errs = errs[np.isfinite(errs)]
+            if errs.size:
+                med_err = float(np.median(errs))
+                gaps = [abs(cfg["fwhm"][L]["ABC"] - cfg["fwhm"][L]["ABA"]) / 2.0
+                        for L in cfg["fwhm"]]
+                lines.append("Median FWHM uncertainty: ± %.1f cm⁻¹  "
+                             "(threshold-to-boundary gap ≈ %.0f cm⁻¹)%s"
+                             % (med_err, float(np.median(gaps)),
+                                "   ← too large to separate ABA from ABC"
+                                if med_err > 0.5 * float(np.median(gaps)) else ""))
+            out = 0
+            for r in range(ny):
+                for c in range(nx):
+                    why = cl['reasons'][r, c] or ""
+                    if cl['calls'][r, c] is None and "outside both" in why:
+                        out += 1
+            if out:
+                lines.append("Outside every tolerance window: %d of %d fitted "
+                             "pixels (%.1f %%)" % (out, fitted, 100.0 * out / fitted))
+            if cfg["layer_mode"] == "map":
+                g = self.layer_grid()
+                fitted_mask = np.isfinite(self.fwhm_map)
+                per = "  ".join("%dL %d" % (n, int(((g == n) & fitted_mask).sum()))
+                                for n in sorted(set(g[g > 0].tolist())))
+                lines.append("Layer map: fitted pixels per region — %s   "
+                             "(no N assigned: %d)"
+                             % (per, int(((g == 0) & fitted_mask).sum())))
+                if cfg.get("exclude_edges", True):
+                    e = int((terrace_edges(g) & fitted_mask).sum())
+                    lines.append("Terrace-edge pixels excluded: %d" % e)
+            elif cfg["layer_mode"] == "manual":
+                amb = int(((cl['ncands'] > 1) & np.isfinite(self.fwhm_map)).sum())
+                lines.append("Ambiguous layer assignment: %d of %d fitted pixels "
+                             "(%.1f %%) matched more than one layer window"
+                             % (amb, fitted, 100.0 * amb / fitted))
+            else:
+                k = cfg["ratio_cut"]
+                rm = self.ratio_maps.get(cfg.get("ratio_metric", "height"))
+                nr = int(np.isfinite(rm).sum()) if rm is not None else 0
+                lines.append("Thickness from I(2D)/I(G) (%s), cutoffs %.2f / %.2f / "
+                             "%.2f: ratio available for %d of %d fitted pixels"
+                             % (cfg.get("ratio_metric", "height"), k["1_2"],
+                                k["2_3"], k["3_thick"], nr, fitted))
+                if cfg.get("thick_policy") == "assume":
+                    lines.append("≥4L pixels assumed to be %dL for the stacking call"
+                                 % int(cfg.get("thick_assume", 5)))
+            res = self.mapfile.spectral_resolution if self.mapfile else None
+            if res and res > 8.0 and cfg["technique"] != "asym":
+                lines.append("⚠ Spectral resolution %.1f cm⁻¹: the 2D widths are "
+                             "instrument-broadened, so ABA/ABC calls against the "
+                             "Bouhafs table are unreliable. Use this map for "
+                             "thickness and a 1800 gr/mm map for stacking." % res)
+        rejected = total - fitted
+        if rejected:
+            lines.append("")
+            lines.append("Rejected before classification (%d pixels):" % rejected)
+            for why, n in sorted((self.fit_tally or {}).items(),
+                                 key=lambda kv: -kv[1]):
+                lines.append("   %5d   %s" % (n, why))
+        lines.append("")
+        for lab in sorted(labels, key=lambda s: (s == "Unclassified", s)):
+            n = labels[lab]
+            lines.append("%-16s %6d   %5.1f %%" % (lab, n, 100.0 * n / total))
+        return "\n".join(lines)
+
+
+    def export_classification_csv(self, path: str) -> str:
+        c = self.classification
+        return exports.write_classification_csv(path, self.mapfile, c["layers"], c["calls"],
+                                                c["ncands"], c["reasons"], self.fits, self.g_fits,
+                                                self.cfg.get("ratio_metric", "height"))
+
+    def histogram_data(self):
+        """(fitted FWHM(2D) values, asymmetry values, layers whose windows to show)."""
+        cfg = self.cfg
+        fw = self.fwhm_map[np.isfinite(self.fwhm_map)]
+        am = self.asym_maps[cfg["asym_metric"]]
+        am = am[np.isfinite(am)]
+        if cfg["layer_mode"] == "manual":
+            shown = [int(cfg["manual_layer"])]
+        elif cfg["layer_mode"] == "map" and self.layer_by_spec is not None:
+            shown = sorted(n for n in set(self.layer_by_spec.tolist())
+                           if n in cfg["fwhm"]) or sorted(cfg["fwhm"])
+        else:
+            shown = sorted(cfg["fwhm"])
+        return fw, am, shown
+
+    def windows_for(self, layer: int):
+        return windows_for(layer, self.cfg)
+
+    # -- thickness from I(2D)/I(G) -------------------------------------------------------------
+    @staticmethod
+    def thickness_valid(c: dict) -> bool:
+        k = c["ratio_cut"]
+        return k["1_2"] > k["2_3"] > k["3_thick"] > 0
+
+    def thickness_preview(self, c: dict) -> dict:
+        """Layer count from I(2D)/I(G) under trial cutoffs ``c`` (not stored): {"layer_index"
+        (grid of indices into THICKNESS_LAYERS), "counts", "with_ratio", "ratios", "valid"}."""
+        valid = self.thickness_valid(c)
+        rm = self.ratio_maps[c["ratio_metric"]]
+        ny, nx = rm.shape
+        lm = np.full((ny, nx), np.nan)
+        counts = {k: 0 for k in self.THICKNESS_LAYERS}
+        for r in range(ny):
+            for cc in range(nx):
+                n = layer_from_ratio(rm[r, cc], c) if valid else None
+                if n is not None:
+                    lm[r, cc] = self.THICKNESS_LAYERS.index(n)
+                    counts[n] += 1
+        return {"layer_index": lm, "counts": counts, "with_ratio": int(np.isfinite(rm).sum()),
+                "ratios": rm, "valid": valid}
+
+    def use_thickness(self, c: dict) -> bool:
+        """Adopt the cutoffs of ``c`` and switch to Auto (layer from the ratio)."""
+        if not self.thickness_valid(c):
+            return False
+        for k in ("ratio_cut", "ratio_metric", "thick_policy", "thick_assume"):
+            self.cfg[k] = c[k]
+        self.cfg["layer_mode"] = "auto"
+        return True
+
+    # -- layer regions from optical contrast ---------------------------------------------------
+    def segment_regions(self, cut: float, k: int) -> dict:
+        """layer_regions.segment on the current map and optical image."""
+        return layer_regions.segment(self.mapfile, self.optical, self.fits, cut, k,
+                                     int(self.cfg.get("manual_layer", 3)))
+
+    @staticmethod
+    def region_n(is_height: bool, value: float, sio2_offset: float):
+        return layer_regions.region_n(is_height, value, sio2_offset)
+
+    def check_regions(self, levels, region_of, rows, exclude_edges: bool):
+        return layer_regions.check(self.mapfile, levels, region_of, rows, self.cfg["fwhm"],
+                                   exclude_edges)
+
+    def region_edges(self, region_of, n_per_region) -> np.ndarray:
+        """Terrace-edge pixels of the region assignment on the map grid."""
+        mf = self.mapfile
+        ng = np.zeros(mf.shape, dtype=int)
+        ok = mf.index_map >= 0
+        ng[ok] = layer_regions.n_by_spectrum(region_of, n_per_region)[mf.index_map[ok]]
+        return terrace_edges(ng)
+
+    def apply_regions(self, region_of, n_per_region, exclude_edges: bool, levels: int,
+                      cut: float, sio2_offset: float) -> bool:
+        """Use the regions as the layer map (layer_mode 'map'). False if nothing is assigned."""
+        nb = layer_regions.n_by_spectrum(region_of, n_per_region)
+        if not (nb > 0).any():
+            return False
+        self.layer_by_spec = nb
+        self.cfg.update(exclude_edges=exclude_edges, contrast_levels=levels, contrast_cut=cut,
+                        sio2_offset=sio2_offset, layer_mode="map")
+        return True
+
+    def save_regions(self, path, sio2_offset, cut, levels, entries, region_of) -> str:
+        return layer_regions.save(path, self.mapfile, sio2_offset, cut, levels, entries, region_of)
+
+    def load_regions(self, path):
+        return layer_regions.load(path, self.mapfile)
+
+    # -- 1L / 2L reference and prediction ------------------------------------------------------
+    def set_reference(self, path: str) -> dict:
+        self.reference, self.reference_path = self.engine.load_reference(path), path
+        return self.reference
+
+    def build_reference(self, folder_1l: str, folder_2l: str, figures=None) -> str:
+        """Build the 1L / 2L reference into the workspace folder and use it. Returns its path."""
+        out = self.user_reference_path()
+        self.reference = self.engine.build_reference([("1L", folder_1l), ("2L", folder_2l)], out,
+                                                     figures=figures)
+        self.reference_path = out
+        return out
+
+    def predict_map(self, progress=None, figures=None):
+        """Layer number / stacking of every spectrum of the map against the reference: G and 2D
+        fitted per spectrum, predictions.csv next to the map, /analysis/raman_layer_prediction.
+        Returns (predictions, title, output folder), or None if cancelled."""
+        mf = self.mapfile
+        rows = []
+        for i in range(mf.n_points):
+            if progress and progress(i, mf.n_points) is False:
+                return None
+            r, _, _ = self.engine.fit_band("g_2d", mf.axis, mf.data[i].astype(float))
+            r.update(file="spot %d" % i, x=float(mf.x[i]), y=float(mf.y[i]), idx=i)
+            rows.append(r)
+        p = mf.path.rstrip(os.sep)
+        out = os.path.join(p, "output") if os.path.isdir(p) else os.path.splitext(p)[0] + "_output"
+        title = raman_loaders.short_label(p)
+        preds = self.engine.write_predictions(rows, self.reference, out, title, figures=figures)
+        self.write_table("raman_layer_prediction", preds, "2D_fwhm",
+                         {"reference": self.reference_path or ""})
+        self.predictions = preds
+        return preds, title, out
+
+    def predict_folder(self, folder: str, figures=None) -> list:
+        self.predictions = self.engine.predict_folder(folder, self.reference, figures=figures)
+        return self.predictions
+
+    # -- settings ------------------------------------------------------------------------------
+    def save_config(self, path: str) -> str:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(self.config_to_json(), fh, indent=2)
+        return path
+
+    def read_config(self, path: str) -> dict:
+        """A settings file as a full cfg (not applied; apply with apply_transform / cfg = ...)."""
+        with open(path, "r", encoding="utf-8") as fh:
+            return self.config_from_json(json.load(fh))
 
     # -- settings ------------------------------------------------------------------------------
     def config_to_json(self) -> dict:

@@ -8,7 +8,6 @@ suite can embed it. The shared state and non-GUI logic live in gui/services/rama
 Each tab is a panel in gui/components/raman_tabs/."""
 from __future__ import annotations
 
-import json
 import os
 from typing import Optional
 
@@ -17,7 +16,6 @@ from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.io.raman_loaders import MapFile
 from tensorspec.core.raman.constants import APP_NAME
-from tensorspec.core.raman.map_geometry import describe_transform
 from tensorspec.core.raman.presets import PRESETS
 from tensorspec.core.raman.voigt_2d import HAVE_LMFIT
 from tensorspec.gui.components.raman_tabs.area_panel import AreaTab
@@ -415,7 +413,7 @@ class RamanPanel(QtWidgets.QWidget):
         self.tab_spec.refresh_mini()
         self.tab_spec._rebuild_list()
         note = self._coverage_note(self.optical) if self.optical is not None else ""
-        self.status("Map placed as  %s%s" % (describe_transform(self.current_transform()), note))
+        self.status("Map placed as  %s%s" % (self.service.describe_transform(self.current_transform()), note))
 
     def run_auto_align(self):
         """Fit the map's offset to the camera image (RamanService.auto_align).
@@ -448,14 +446,14 @@ class RamanPanel(QtWidgets.QWidget):
         if full:
             runner = out["runner"]
             extra = ("Next best orientation:  %s   (r = %+.2f)\n\n"
-                     % (describe_transform(runner[0]), runner[1]) if runner else "")
+                     % (self.service.describe_transform(runner[0]), runner[1]) if runner else "")
         else:
             extra = ("Orientation locked; only the offset was searched (±%.0f µm).\n\n"
                      % out["search_um"])
         msg = ("Aligned using the %s height against the optical image.\n\n"
                "Placement:  %s   (r = %+.2f)\n%s"
                "Result: %s.%s"
-               % (out["signal"], describe_transform(t), out["r"], extra, out["verdict"],
+               % (out["signal"], self.service.describe_transform(t), out["r"], extra, out["verdict"],
                   "\n\n⚠ The best offset lies at the edge of the search range — "
                   "the true offset may be larger. Raise the search range." if out["at_edge"] else ""))
         QtWidgets.QMessageBox.information(self, "Auto-align", msg)
@@ -535,8 +533,7 @@ class RamanPanel(QtWidgets.QWidget):
         if not path:
             return
         self.tab_class._pull_config()
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(self.service.config_to_json(), fh, indent=2)
+        self.service.save_config(path)
         self.status("Settings saved to %s" % path)
 
     def load_config(self):
@@ -545,9 +542,7 @@ class RamanPanel(QtWidgets.QWidget):
         if not path:
             return
         try:
-            with open(path, "r", encoding="utf-8") as fh:
-                raw = json.load(fh)
-            cfg = self.service.config_from_json(raw)
+            cfg = self.service.read_config(path)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(self, APP_NAME,
                                            "Could not read settings:\n\n%s" % exc)

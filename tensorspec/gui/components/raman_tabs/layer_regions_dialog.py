@@ -4,15 +4,12 @@ layer count; save / load regions. Figures are drawn by plotting/backends/raman_v
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 2 - Classification: LayerRegionsDialog)."""
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
 
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from tensorspec.core.raman.classification import terrace_edges
 from tensorspec.core.raman.constants import APP_NAME, LAYER_NM
-from tensorspec.core.raman.map_geometry import describe_transform, kmeans_1d, optical_contrast
 from tensorspec.gui.components.raman_tabs.layout import fit_to_screen
 from tensorspec.plotting.backends.raman_views import classification as views
 from tensorspec.plotting.backends.raman_views.classification import REGION_COLORS
@@ -161,7 +158,7 @@ class LayerRegionsDialog(QtWidgets.QDialog):
             self.lbl_place.setStyleSheet("color:#b71c1c; font-size:11px;")
         else:
             self.lbl_place.setText("Placement: %s" %
-                                   describe_transform(main.cfg["map_transform"]))
+                                   self.main.service.describe_transform(main.cfg["map_transform"]))
             self.lbl_place.setStyleSheet("color:#555; font-size:11px;")
         self.segment()
 
@@ -172,21 +169,14 @@ class LayerRegionsDialog(QtWidgets.QDialog):
         self.ax, self.axh, self.overlay = views.build_regions_figure(
             fig, self.main.mapfile, self.main.cfg, self.main.optical, self.main.optical_image)
 
-    def _n_by_spec(self) -> np.ndarray:
-        n = np.zeros(self.main.mapfile.n_points, dtype=int)
-        for j in range(len(self.rows)):
-            nj = self.row_n(j)[1]
-            n[self.region_of == j] = max(nj, 0)
-        return n
+    def _n_per_region(self):
+        return [self.row_n(j)[1] for j in range(len(self.rows))]
 
     def refresh_map(self):
         mf = self.main.mapfile
         edges = None
         if self.chk_edges.isChecked():
-            ng = np.zeros(mf.shape, dtype=int)
-            ok = mf.index_map >= 0
-            ng[ok] = self._n_by_spec()[mf.index_map[ok]]
-            edges = terrace_edges(ng)
+            edges = self.main.service.region_edges(self.region_of, self._n_per_region())
         self.overlay.set_data(views.region_rgba(mf, self.region_of, len(self.rows),
                                                 self.selected, edges))
         self._texts = views.draw_region_labels(self.ax, mf, self.region_of, len(self.rows),
@@ -196,45 +186,20 @@ class LayerRegionsDialog(QtWidgets.QDialog):
 
     # -- segmentation --------------------------------------------------------
     def segment(self):
-        mf, opt = self.main.mapfile, self.main.optical
-        if opt is None:
+        if self.main.optical is None:
             return
-        self.contrast, _ = optical_contrast(mf, opt)
-        cut = self.spn_cut.value()
-        on = np.isfinite(self.contrast) & (np.abs(self.contrast) >= cut)
         k = self.spn_k.value()
-        self.region_of[:] = -1
-        if on.sum() < k:
-            self.levels = None
+        seg = self.main.service.segment_regions(self.spn_cut.value(), k)
+        self.contrast, self.levels = seg["contrast"], seg["levels"]
+        self.region_of[:] = seg["region_of"]
+        if self.levels is None:
             self._build_rows([])
             self.lbl_warn.setText("Too few pixels above the substrate cut to make "
                                   "%d regions — lower the cut or the region count." % k)
             self.lbl_warn.setStyleSheet("color:#b71c1c; font-size:11px;")
             self.refresh_map()
             return
-        c = kmeans_1d(self.contrast[on], k)
-        c = c[np.argsort(np.abs(c))]          # R1 = faintest = thinnest
-        self.levels = c
-        idx = np.where(on)[0]
-        self.region_of[idx] = np.argmin(np.abs(self.contrast[idx, None] - c[None, :]), axis=1)
-
-        # Defaults: a region with almost no 2D-band fits, or contrast opposite
-        # to the flake's, is not a graphene terrace and starts unassigned.
-        fit_ok = np.array([bool(r.get("ok")) for r in self.main.fits])
-        n_pos = int(((self.contrast >= cut) & fit_ok).sum())
-        n_neg = int(((self.contrast <= -cut) & fit_ok).sum())
-        sign = 1.0 if n_pos >= n_neg else -1.0
-        nxt = int(self.main.cfg.get("manual_layer", 3))
-        entries = []
-        for j, cj in enumerate(c):
-            m = self.region_of == j
-            frac = float(fit_ok[m].mean()) if m.any() else 0.0
-            if np.sign(cj) == sign and frac >= 0.2:
-                entries.append(("N", float(min(9, nxt))))
-                nxt += 1
-            else:
-                entries.append(("N", 0.0))
-        self._build_rows(entries)
+        self._build_rows(seg["entries"])
 
     def _build_rows(self, entries):
         fw = np.array([r["fwhm"] if r.get("ok") else np.nan for r in self.main.fits])
@@ -303,31 +268,15 @@ class LayerRegionsDialog(QtWidgets.QDialog):
     # -- layer numbers + checks ---------------------------------------------
     def row_n(self, j: int):
         """(unrounded N or None, N used (0 = unassigned), note)."""
-        is_h = self.rows[j]["entry"].currentIndex() == 1
-        v = self.rows[j]["value"].value()
-        if not is_h:
-            n = int(round(v))
-            return (float(n) if n > 0 else None), n, ""
-        if v <= 0:
-            return None, 0, ""
-        raw = (v - self.spn_off.value()) / LAYER_NM
-        n = int(round(raw))
-        note = ""
-        if n < 1:
-            note = "height is below the offset"
-            n = 0
-        elif abs(raw - n) > 0.25:
-            note = "%.2f is not close to a whole number of layers" % raw
-        return raw, n, note
+        return self.main.service.region_n(self.rows[j]["entry"].currentIndex() == 1,
+                                          self.rows[j]["value"].value(), self.spn_off.value())
 
     def update_status(self, *_):
         if not self.rows:
             self.refresh_map()
             return
-        warns, infos = [], []
-        assigned = []
-        for j in range(len(self.rows)):
-            raw, n, note = self.row_n(j)
+        rows = [self.row_n(j) for j in range(len(self.rows))]
+        for j, (raw, n, note) in enumerate(rows):
             it = self.tbl.item(j, 6)
             is_h = self.rows[j]["entry"].currentIndex() == 1
             if n <= 0:
@@ -337,30 +286,8 @@ class LayerRegionsDialog(QtWidgets.QDialog):
                 it.setText(("%.2f → %d" % (raw, n) if is_h else "%d" % n) +
                            (" ⚠" if note else ""))
                 it.setForeground(QtGui.QBrush(QtGui.QColor("#b71c1c" if note else "#1b5e20")))
-                assigned.append((abs(self.levels[j]) if self.levels is not None else 0, j, n))
-                if n not in self.main.cfg["fwhm"] and n not in (1, 2):
-                    warns.append("R%d: no reference widths for %dL in the table." % (j + 1, n))
-            if note:
-                warns.append("R%d: %s — check the SiO₂ offset or the line "
-                             "profile." % (j + 1, note))
-        assigned.sort()
-        for (ca, ja, na), (cb, jb, nb) in zip(assigned[:-1], assigned[1:]):
-            if nb < na:
-                warns.append("R%d has stronger contrast than R%d but fewer layers "
-                             "(%d vs %d) — check the values or which terrace is "
-                             "which." % (jb + 1, ja + 1, nb, na))
-            elif nb == na:
-                infos.append("R%d and R%d are both %dL and will be treated as one "
-                             "terrace." % (ja + 1, jb + 1, na))
-        nb = self._n_by_spec()
-        mf = self.main.mapfile
-        g = np.zeros(mf.shape, dtype=int)
-        ok = mf.index_map >= 0
-        g[ok] = nb[mf.index_map[ok]]
-        ne = int(terrace_edges(g).sum())
-        infos.append("%d pixels assigned; %d step-edge pixels %s."
-                     % (int((nb > 0).sum()), ne,
-                        "excluded" if self.chk_edges.isChecked() else "kept"))
+        warns, infos, assigned = self.main.service.check_regions(
+            self.levels, self.region_of, rows, self.chk_edges.isChecked())
         html = "".join("<div style='color:#b71c1c'>⚠ %s</div>" % w for w in warns) + \
                "".join("<div style='color:#555'>%s</div>" % i for i in infos)
         self.lbl_warn.setText(html)
@@ -388,16 +315,10 @@ class LayerRegionsDialog(QtWidgets.QDialog):
 
     # -- apply / persistence ----------------------------------------------------
     def apply(self):
-        cfg = self.main.cfg
-        nb = self._n_by_spec()
-        if not (nb > 0).any():
+        if not self.main.service.apply_regions(self.region_of, self._n_per_region(),
+                                               self.chk_edges.isChecked(), self.spn_k.value(),
+                                               self.spn_cut.value(), self.spn_off.value()):
             return
-        self.main.layer_by_spec = nb
-        cfg["exclude_edges"] = self.chk_edges.isChecked()
-        cfg["contrast_levels"] = self.spn_k.value()
-        cfg["contrast_cut"] = self.spn_cut.value()
-        cfg["sio2_offset"] = self.spn_off.value()
-        cfg["layer_mode"] = "map"
         tab = self.main.tab_class
         tab.rb_map.setChecked(True)
         tab.update_map_status()
@@ -409,15 +330,10 @@ class LayerRegionsDialog(QtWidgets.QDialog):
             "JSON (*.json)")
         if not path:
             return
-        mf = self.main.mapfile
-        data = {"sio2_offset": self.spn_off.value(), "cut": self.spn_cut.value(),
-                "levels": [float(v) for v in (self.levels if self.levels is not None else [])],
-                "regions": [{"entry": "height" if r["entry"].currentIndex() else "N",
-                             "value": r["value"].value()} for r in self.rows],
-                "spectra": [[round(float(mf.raw0[i]), 4), round(float(mf.raw1[i]), 4),
-                             int(self.region_of[i])] for i in range(mf.n_points)]}
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh)
+        self.main.service.save_regions(
+            path, self.spn_off.value(), self.spn_cut.value(), self.levels,
+            [("height" if r["entry"].currentIndex() else "N", r["value"].value()) for r in self.rows],
+            self.region_of)
         self.main.status("Regions saved to %s" % path)
 
     def load_regions(self):
@@ -425,26 +341,15 @@ class LayerRegionsDialog(QtWidgets.QDialog):
             self, "Load layer regions", "", "JSON (*.json)")
         if not path:
             return
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
-        mf = self.main.mapfile
-        key = {(round(float(a), 3), round(float(b), 3)): i
-               for i, (a, b) in enumerate(zip(mf.raw0, mf.raw1))}
-        self.region_of[:] = -1
-        hit = 0
-        for a, b, r in data.get("spectra", []):
-            i = key.get((round(a, 3), round(b, 3)))
-            if i is not None:
-                self.region_of[i] = int(r)
-                hit += 1
-        if hit == 0:
+        data = self.main.service.load_regions(path)
+        if data is None:
             QtWidgets.QMessageBox.warning(
                 self, APP_NAME, "No positions in that file match this map — it "
                 "was saved for a different acquisition.")
             return
+        self.region_of[:] = data["region_of"]
         self.spn_off.blockSignals(True)
-        self.spn_off.setValue(float(data.get("sio2_offset", 0.5)))
+        self.spn_off.setValue(data["sio2_offset"])
         self.spn_off.blockSignals(False)
-        lv = np.asarray(data.get("levels", []), dtype=float)
-        self.levels = lv if lv.size else None
-        self._build_rows([(r["entry"], float(r["value"])) for r in data.get("regions", [])])
+        self.levels = data["levels"]
+        self._build_rows(data["entries"])

@@ -108,3 +108,47 @@ def test_step2_map(spot_folder):
     assert all(c["fit"][1]["ok"] for c in svc.cells)
     picks, best = svc.cells_suggest(2550.0, 2850.0)
     assert best == 1 and len(picks) == 2
+
+
+def test_step3_analysis(spot_folder, tmp_path):
+    from tensorspec.gui.services.raman_service import RamanService
+    svc = RamanService()
+    svc.load(str(spot_folder))
+    with pytest.raises(ValueError):
+        svc.classify()                                            # needs the 2D-band fit first
+    svc.set_fits(svc.map_fitter().run())
+    svc.cfg["layer_mode"] = "auto"
+    notes = svc.classify()
+    assert svc.classification["layers"].shape == (3, 4)
+    assert "Pixels: 12" in svc.classification_report()
+    assert os.path.exists(svc.export_classification_csv(str(tmp_path / "class.csv")))
+    fw, am, shown = svc.histogram_data()
+    assert fw.size == 12 and shown
+    pv = svc.thickness_preview(dict(svc.cfg))
+    assert pv["valid"] and sum(pv["counts"].values()) == pv["with_ratio"]
+    # reference + prediction
+    from tensorspec.core.raman.reference import DEFAULT_REF
+    svc.set_reference(DEFAULT_REF)
+    preds, title, out = svc.predict_map()
+    assert len(preds) == 12 and os.path.exists(os.path.join(out, "predictions.csv"))
+    # strain / doping of the step-1 spectra
+    svc.add_map_spectra()
+    rows = svc.strain_doping(svc.reference)
+    assert len(rows) == 12
+    # settings round trip
+    path = svc.save_config(str(tmp_path / "s.json"))
+    assert svc.read_config(path)["band_min"] == svc.cfg["band_min"]
+    assert isinstance(notes, list)
+
+
+@pytest.mark.skipif(not os.environ.get("TENSORSPEC_RAMAN_MAP"), reason="set TENSORSPEC_RAMAN_MAP")
+def test_real_map_through_the_service():
+    from tensorspec.gui.services.raman_service import RamanService
+    svc = RamanService()
+    info = svc.load(os.path.expanduser(os.environ["TENSORSPEC_RAMAN_MAP"]))
+    assert info["kind"] == "map"
+    svc.preset("Graphene")
+    mf = svc.mapfile
+    l, r, b, t = mf.extent
+    assert svc.set_area((l, r, b, t)) == mf.n_points                # the whole map
+    assert svc.fit_area(svc.fit_model)["bands"]["G"]["ok"]
