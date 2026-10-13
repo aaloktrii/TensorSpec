@@ -18,10 +18,11 @@ from tensorspec.core.raman.classification import (LAYER_THICK, classify_map, lab
 from tensorspec.core.raman.constants import (APP_NAME, BOUHAFS_FWHM, DEFAULT_COLORS, DEFAULT_TOL,
                                              LAYERS)
 from tensorspec.gui.components.raman_tabs.layer_regions_dialog import LayerRegionsDialog
-from tensorspec.gui.components.raman_tabs.layout import Canvas, ThresholdTable, _fmt, export_figure
+from tensorspec.gui.components.raman_tabs.layout import ThresholdTable, _fmt
 from tensorspec.gui.components.raman_tabs.map_explorer_panel import MapExplorerTab
 from tensorspec.gui.components.raman_tabs.thickness_dialog import ThicknessDialog
 from tensorspec.plotting.backends.raman_matplotlib_engine import class_rgba, frame_axes, na_color, orient_axes
+from tensorspec.plotting.viewers.raman_canvas import Canvas, export_figure
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel

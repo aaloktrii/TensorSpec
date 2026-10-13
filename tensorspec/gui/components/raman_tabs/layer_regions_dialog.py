@@ -14,8 +14,9 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from tensorspec.core.raman.classification import terrace_edges
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.core.raman.map_geometry import describe_transform, kmeans_1d, optical_contrast
-from tensorspec.gui.components.raman_tabs.layout import Canvas, fit_to_screen
+from tensorspec.gui.components.raman_tabs.layout import fit_to_screen
 from tensorspec.plotting.backends.raman_matplotlib_engine import orient_axes
+from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
