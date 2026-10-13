@@ -15,7 +15,7 @@ import xarray as xr
 
 # /analysis/<kind> products of the Raman suite
 RAMAN_ANALYSIS_KINDS = ("raman_2d_fit", "raman_classification", "raman_layer_prediction",
-                        "raman_peakfit", "raman_strain_doping")
+                        "raman_peakfit", "raman_strain_doping", "raman_roi", "raman_band_maps")
 
 
 def _grid_coords(mapfile) -> dict:
@@ -89,6 +89,26 @@ def table_dataset(kind: str, rows: list, data_key: str, attrs: dict | None = Non
     out_attrs = {"kind": kind, "n_spots": len(rows)}
     out_attrs.update({k: _attr(v) for k, v in (attrs or {}).items()})
     return xr.Dataset(vars_, coords={"spot": np.arange(len(rows))}, attrs=out_attrs)
+
+
+def roi_dataset(axis, spectrum, rect, indices, mode: str, fit=None, model=None) -> xr.Dataset:
+    """Integrated spectrum of a map area (data on 'Raman shift'), the pixels it covers, and its
+    fit with the step-1 model (per band: peak count and each peak's position / FWHM / height)."""
+    vars_ = {"data": (("Raman shift",), np.asarray(spectrum, float),
+                      {"long_name": "area spectrum (%s)" % mode}),
+             "spectrum_index": (("pixel",), np.asarray(indices, int))}
+    attrs = {"kind": "raman_roi", "rect_um": _attr(list(rect)), "mode": mode,
+             "n_pixels": int(len(indices))}
+    if model is not None:
+        attrs["fit_model"] = _attr(model.to_dict())
+    if fit is not None:
+        attrs["si_shift"] = float(fit["shift"])
+        attrs["fit"] = _attr({name: {"n": b.get("n", 0), "ok": bool(b.get("ok")),
+                                     "peaks": [{q: float(c[q]) for q in ("pos", "fwhm", "height", "area")}
+                                               for c in (b.get("comps") or [])]}
+                              for name, b in fit["bands"].items()})
+    return xr.Dataset(vars_, coords={"Raman shift": ("Raman shift", np.asarray(axis, float),
+                                                     {"units": "cm-1"})}, attrs=attrs)
 
 
 def strain_doping_rows(rows: list, decompose) -> list:

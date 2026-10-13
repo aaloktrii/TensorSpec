@@ -19,6 +19,7 @@ from tensorspec.core.io.raman_loaders import MapFile, is_single_spectrum, parse_
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.core.raman.map_geometry import auto_align, describe_transform
 from tensorspec.core.raman.voigt_2d import HAVE_LMFIT
+from tensorspec.gui.components.raman_tabs.area_panel import AreaTab
 from tensorspec.gui.components.raman_tabs.classification_panel import ClassificationTab
 from tensorspec.gui.components.raman_tabs.map_explorer_panel import MapExplorerTab
 from tensorspec.gui.components.raman_tabs.peak_fit_panel import PeakFitTab
@@ -70,6 +71,7 @@ class RamanPanel(QtWidgets.QWidget):
         self.tab_pred = PredictTab(self)
         self.tab_fit = PeakFitTab(self)
         self.tab_strain = StrainDopingTab(self)
+        self.tab_area = AreaTab(self)
 
         # Workflow order: 1 · Spectra → 2 · Map → 3 · Analysis, each step with its sub-tabs.
         self.tabs = QtWidgets.QTabWidget()
@@ -77,6 +79,7 @@ class RamanPanel(QtWidgets.QWidget):
         for step, subs in (("1 · Spectra", ((self.tab_fit, "Peak fitting"),
                                             (self.tab_stack, "Stacked spectra"))),
                            ("2 · Map", ((self.tab_map, "Map Explorer"),
+                                        (self.tab_area, "Area spectrum"),
                                         (self.tab_spec, "Compare cells"))),
                            ("3 · Analysis", ((self.tab_class, "Classification"),
                                              (self.tab_pred, "Layer prediction"),
@@ -213,6 +216,7 @@ class RamanPanel(QtWidgets.QWidget):
         self.tab_spec.reset()
         self.tab_class.update_auto_availability()
         self.tab_class.layers = None
+        self.tab_area.clear()
         bits = ["Loaded %s — %d spectra on a %d × %d grid"
                 % (os.path.basename(path), mf.n_points, mf.shape[1], mf.shape[0])]
         if mf.swapped:
@@ -292,6 +296,19 @@ class RamanPanel(QtWidgets.QWidget):
                         "%.1f cm⁻¹. Click a pixel to inspect it."
                         % (ok, mf.n_points, mf.n_points - ok, med))
 
+    # -- map area ----------------------------------------------------------
+    def set_area(self, rect):
+        """Sum the spectra inside ``rect`` on the map and fit them with the step-1 model."""
+        n = self.service.set_area(rect)
+        self.tab_map.refresh_map()
+        if n == 0:
+            self.tab_area.clear()
+            self.status("No measured pixel inside that rectangle.")
+            return
+        self.tab_map.show_area()
+        self.tab_area.fit()
+        self.status("Area: %d pixels summed and fitted — see 2 · Map ▸ Area spectrum." % n)
+
     def rebuild_maps(self) -> int:
         return self.service.rebuild_maps()
 
@@ -313,6 +330,7 @@ class RamanPanel(QtWidgets.QWidget):
         self.tab_map.sel = None
         self.tab_map._spec = None
         self.tab_class.layers = None
+        self.tab_area.clear()
         self.tab_map.sync_transform_ui()
         self.tab_map.refresh_map()
         self.tab_class.refresh_map()

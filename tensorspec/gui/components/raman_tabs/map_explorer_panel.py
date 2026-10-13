@@ -48,6 +48,11 @@ class MapExplorerTab(QtWidgets.QWidget):
         self.chk_grid.toggled.connect(self.refresh_map)
         self.chk_optical = QtWidgets.QCheckBox("Overlay optical")
         self.chk_optical.toggled.connect(self.refresh_map)
+        self.chk_area = QtWidgets.QCheckBox("Select area")
+        self.chk_area.setToolTip("Drag a rectangle on the map: the spectra inside are summed and "
+                                 "fitted with the 1 · Spectra model (2 · Map ▸ Area spectrum).")
+        self.chk_area.toggled.connect(self.refresh_map)
+        self._area_selector = None
         self.sld_alpha = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.sld_alpha.setRange(0, 100)
         self.sld_alpha.setValue(50)
@@ -63,6 +68,7 @@ class MapExplorerTab(QtWidgets.QWidget):
         bar.addSpacing(12)
         bar.addWidget(self.chk_grid)
         bar.addWidget(self.chk_optical)
+        bar.addWidget(self.chk_area)
         bar.addWidget(QtWidgets.QLabel("Opacity"))
         bar.addWidget(self.sld_alpha)
         bar.addSpacing(12)
@@ -368,13 +374,34 @@ class MapExplorerTab(QtWidgets.QWidget):
         views.draw_quantity_map(cv.figure, cv.ax, mf, data, quantity, self.main.fit_tally,
                                 self.main.cfg, self.main.optical, self.main.optical_image,
                                 self.chk_optical.isChecked(), self.chk_grid.isChecked(),
-                                self.sel)
+                                self.sel, self.main.service.area_rect)
+        # the selector belongs to the axes just drawn; a new one after every redraw
+        self._area_selector = (views.make_area_selector(cv.ax, self._area_selected)
+                               if self.chk_area.isChecked() else None)
+        cv.draw()
+
+    def _area_selected(self, x0, x1, y0, y1):
+        self.main.set_area((x0, x1, y0, y1))
+
+    def show_area(self):
+        """The summed spectrum of the selected area in the spectrum panel."""
+        svc = self.main.service
+        if svc.area_spectrum is None:
+            return
+        cv = self.spec_canvas
+        cv.clear()
+        wn, spec = svc.area_axis, svc.area_spectrum
+        self._spec = dict(wn=wn, inten=spec, row=None, col=None)
+        views.draw_area_spectrum(cv.ax, wn, spec, len(svc.area_indices),
+                                 (self.main.cfg["band_min"], self.main.cfg["band_max"]),
+                                 svc.AREA_MODE)
+        self._apply_view()
         cv.draw()
 
     # -- interaction --------------------------------------------------------
     def _on_click(self, event):
         mf = self.main.mapfile
-        if mf is None or event.inaxes is None or event.xdata is None:
+        if mf is None or event.inaxes is None or event.xdata is None or self.chk_area.isChecked():
             return
         left, right, bottom, top = mf.extent
         ny, nx = mf.shape

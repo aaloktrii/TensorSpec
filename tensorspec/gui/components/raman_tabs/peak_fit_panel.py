@@ -17,7 +17,7 @@ from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.io.raman_loaders import _SPOT_RE, is_single_spectrum, read_single_spectrum, short_label
 from tensorspec.core.raman.fit_model import FitModel
-from tensorspec.gui.components.raman_tabs.layout import _fmt
+from tensorspec.gui.components.raman_tabs.layout import _fmt, fill_peak_table
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
 from tensorspec.plotting.backends.raman_views import peak_fit as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
@@ -330,19 +330,7 @@ class PeakFitTab(QtWidgets.QWidget):
             self._placeholder()
             return
         views.draw_band_fits(fig, bands)
-        self.tbl_peaks.setRowCount(0)
-        for name, b in bands:
-            if "x" not in b or not b.get("ok"):
-                continue
-            for k, c in enumerate(b["comps"]):
-                r = self.tbl_peaks.rowCount()
-                self.tbl_peaks.insertRow(r)
-                for col, txt in enumerate([name, str(k + 1),
-                                           "%.2f ± %.2f" % (c["pos"], c["pos_err"]),
-                                           "%.2f ± %.2f" % (c["fwhm"], c["fwhm_err"]),
-                                           "%.0f ± %.0f" % (c["height"], c["height_err"]),
-                                           "%.0f" % c["area"]]):
-                    self.tbl_peaks.setItem(r, col, QtWidgets.QTableWidgetItem(txt))
+        fill_peak_table(self.tbl_peaks, bands)
         notes = ["Si shift %+.2f cm⁻¹" % res["shift"] if self.chk_si.isChecked() else "no Si calibration",
                  "noise %.1f counts" % res["noise"]]
         for name, b in bands:
