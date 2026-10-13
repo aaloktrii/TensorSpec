@@ -950,7 +950,42 @@ class CrystalViewerSuite(QWidget):
             QMessageBox.critical(self, "Bernevig twist build failed", err)
 
     def handle_moire(self):
-        self.handle_bernevig_twist()
+        """Bernevig builder: build the twisted bilayer. Plain: moiré period + outline over the plain stack."""
+        import numpy as np
+        if (self.combo_stack_builder.currentData() or "plain") == "bernevig":
+            self.handle_bernevig_twist()
+            return
+        if len(self.stack_layer_rows) != 2:
+            self.lbl_moire.setText("Error: Requires exactly 2 stacked layers.")
+            return
+
+        l1, l2 = (row.get_layer_dict() for row in self.stack_layer_rows)
+        result = CrystalEngine.calculate_moire_superlattice(l1["struct"], l2["struct"], l1["twist"], l2["twist"])
+        if result["status"] in ("perfect_alignment", "error"):
+            self.lbl_moire.setText(result["message"])
+            return
+
+        # Redraw the plain stack so the outline matches the current row twists.
+        self.handle_draw_stack()
+
+        m1 = l1["struct"].lattice.matrix[:2, :2]
+        n_cells = int(round(abs(np.linalg.det(result["matrix"])) / abs(np.linalg.det(m1))))
+        if result["status"] == "commensurate":
+            self.lbl_moire.setText(
+                f"🟢 Commensurate: moiré period {result['periodicity']:.2f} Å, {n_cells} cells of layer 1"
+            )
+        else:
+            self.lbl_moire.setText(
+                f"🟡 Incommensurate: moiré period {result['periodicity']:.2f} Å "
+                "(outline is the moiré cell, not an exact repeat)"
+            )
+
+        z_vals = [r.spin_z.value() for r in self.stack_layer_rows]
+        self.renderer.draw_moire_envelope(result["matrix"], min(z_vals) - 1.5, max(z_vals) + 1.5)
+        if hasattr(self.renderer, 'plotter') and hasattr(self.renderer.plotter, 'render'):
+            self.renderer.plotter.render()
+        elif hasattr(self.renderer, 'canvas'):
+            self.renderer.canvas.draw_idle()
 
     def handle_draw_bz(self):
         if not getattr(self, 'current_structure', None): return
@@ -1067,3 +1102,13 @@ class CrystalViewerSuite(QWidget):
                 pass
         
         event.accept()
+
+if __name__ == "__main__":
+    import sys
+    from PySide6.QtWidgets import QApplication
+    app = QApplication(sys.argv)
+    window = CrystalViewerSuite()
+    window.resize(1400, 900)
+    window.setWindowTitle("TensorSpec - Crystal Suite")
+    window.show()
+    sys.exit(app.exec())
