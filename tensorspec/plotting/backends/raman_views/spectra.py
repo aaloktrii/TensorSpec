@@ -26,7 +26,7 @@ def draw_cell_picker(fig, ax, mf, view: str, cfg: dict, items, optical=None, opt
 
     if view == "Classification":
         if class_layers is None or class_layers.shape != mf.shape:
-            note = "No classification yet —\nrun 'Classify map' in tab 2"
+            note = "No classification yet —\nrun 'Classify map' in\n3 · Analysis > Classification"
         else:
             rgba = class_rgba(class_layers, class_calls, cfg)
             rgba[..., 3] *= alpha
@@ -51,7 +51,7 @@ def draw_cell_picker(fig, ax, mf, view: str, cfg: dict, items, optical=None, opt
     elif view == "Layer map (N)":
         g = layer_grid
         if g is None or not (g > 0).any():
-            note = "No layer map yet —\ndefine layer regions in tab 2"
+            note = "No layer map yet —\ndefine layer regions in\n3 · Analysis > Classification"
         else:
             rgba = np.zeros(g.shape + (4,))
             for n in sorted(set(g[g > 0].tolist())):

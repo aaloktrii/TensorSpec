@@ -327,7 +327,7 @@ class ClassificationTab(QtWidgets.QWidget):
     def show_layermap(self):
         if self.main.mapfile is None or not self.main.fits:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load and fit a Raman map first (tab 1).")
+                self, APP_NAME, "Load and fit a Raman map first (2 · Map ▸ Map Explorer).")
             return
         dlg = getattr(self, "_regions_dlg", None)
         if dlg is not None and dlg.isVisible():
@@ -346,14 +346,14 @@ class ClassificationTab(QtWidgets.QWidget):
     def show_thickness(self):
         if self.main.mapfile is None:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load a Raman map first (tab 1).")
+                self, APP_NAME, "Load a Raman map first (2 · Map ▸ Map Explorer).")
             return
         ThicknessDialog(self.main, self).exec()
 
     def run_classification(self):
         if self.main.fwhm_map is None:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load a Raman map first (tab 1).")
+                self, APP_NAME, "Load a Raman map first (2 · Map ▸ Map Explorer).")
             return
         self._pull_config()
         cfg = self.main.cfg
@@ -475,7 +475,7 @@ class ClassificationTab(QtWidgets.QWidget):
         """
         if self.main.fwhm_map is None:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load and fit a map first (tab 1).")
+                self, APP_NAME, "Load and fit a map first (2 · Map ▸ Map Explorer).")
             return
         self._pull_config()
         cfg = self.main.cfg

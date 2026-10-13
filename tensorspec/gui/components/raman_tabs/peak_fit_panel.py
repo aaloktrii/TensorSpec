@@ -1,7 +1,7 @@
 """Tab 6 · Peak fitting: optional Si calibration, background model, Lorentzians with a fixed or
 data-chosen peak count, batch over files / folders / the loaded map, and the omega_G - omega_2D
-strain/doping correlation. Results for the loaded map are written to /analysis/raman_peakfit and
-/analysis/raman_strain_doping.
+strain/doping correlation (shown in 3 · Analysis ▸ Strain / doping). Results for the loaded map are
+written to /analysis/raman_peakfit.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 6 - Peak fitting); calls go through RamanEngineRouter (main.engine),
 figures through plotting/backends/raman_views/peak_fit.py."""
@@ -16,9 +16,7 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.io.raman_loaders import _SPOT_RE, is_single_spectrum, read_single_spectrum, short_label
-from tensorspec.core.raman import strain_doping
-from tensorspec.core.raman.constants import APP_NAME
-from tensorspec.gui.components.raman_tabs.layout import _fmt, fit_to_screen
+from tensorspec.gui.components.raman_tabs.layout import _fmt
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
 from tensorspec.plotting.backends.raman_views import peak_fit as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
@@ -355,53 +353,8 @@ class PeakFitTab(QtWidgets.QWidget):
         self.plot.draw()
 
     def correlation(self):
+        """ω_G–ω_2D plot of these spectra: 3 · Analysis ▸ Strain / doping."""
         if not self.items:
             return
-        ref = self.main.tab_pred.ref
-        if ref is None:
-            QtWidgets.QMessageBox.information(self, APP_NAME, "Build or load a 1L/2L "
-                                              "reference in tab 5 first.")
-            return
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("ω_G – ω_2D correlation")
-        lay = QtWidgets.QHBoxLayout(dlg)
-        form = QtWidgets.QFormLayout()
-        eds = {}
-        for k, lab in (("G0", "ω_G0 (cm⁻¹)"), ("D0", "ω_2D0 (cm⁻¹)"),
-                       ("a_G", "∂ω_G/∂ε (cm⁻¹/%)"), ("s_strain", "strain slope"),
-                       ("b_G", "∂ω_G/∂n (cm⁻¹/10¹³)"), ("s_doping", "doping slope")):
-            eds[k] = QtWidgets.QLineEdit("%g" % strain_doping.PARAMS[k])
-            form.addRow(lab, eds[k])
-        btn = QtWidgets.QPushButton("Redraw")
-        form.addRow(btn)
-        fw = QtWidgets.QWidget()
-        fw.setLayout(form)
-        lay.addWidget(fw)
-        cv = Canvas(figsize=(5, 5))
-        lay.addWidget(cv, 1)
-        prog = QtWidgets.QProgressDialog("Analysing…", "Cancel", 0, len(self.items), self)
-        prog.setWindowModality(QtCore.Qt.WindowModal)
-        def tick(k, n):
-            prog.setValue(k)
-            QtWidgets.QApplication.processEvents()
-            return not prog.wasCanceled()
-        rows = self.main.engine.strain_doping_many([(it["wn"], it["y"]) for it in self.items],
-                                                   ref, progress=tick)
-        prog.setValue(len(self.items))
-        if rows is None:
-            return
-
-        def redraw():
-            try:
-                p = {k: float(e.text()) for k, e in eds.items()}
-            except ValueError:
-                return
-            cv.figure.clear()
-            views.draw_correlation_figure(cv.figure, rows, p)
-            cv.draw()
-            if self._from_map():
-                self.main.service.write_strain_doping(rows, p)
-        btn.clicked.connect(redraw)
-        redraw()
-        fit_to_screen(dlg, 1000, 700)
-        dlg.exec()
+        self.main.show_tab(self.main.tab_strain)
+        self.main.tab_strain.analyse()
