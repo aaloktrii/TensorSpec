@@ -28,6 +28,38 @@ def display_hint(kind: str, var: str, image: np.ndarray | None = None) -> dict:
     return {"cmap": "bwr" if signed else "gray", "symmetric": signed, "center": center}
 
 
+def color_limits(image: np.ndarray, hint: dict) -> tuple[float, float]:
+    """Limits the viewer uses by default: signed maps c +/- the 99th percentile of |v - c|, the
+    rest the 1st-99th percentile."""
+    fin = np.asarray(image, float)
+    fin = fin[np.isfinite(fin)]
+    if not fin.size:
+        return 0.0, 1.0
+    if hint.get("symmetric"):
+        c = float(np.median(fin)) if hint.get("center") == "median" else 0.0
+        half = float(np.percentile(np.abs(fin - c), 99)) or 1.0
+        return c - half, c + half
+    lo, hi = (float(v) for v in np.percentile(fin, (1, 99)))
+    return (lo, hi) if hi > lo else (lo, lo + 1.0)
+
+
+def save_map_png(image: np.ndarray, path, hint: dict, title: str = "", label: str = "") -> None:
+    """Colour picture of a map with its colour bar, scaled like the viewer shows it (a float TIFF of
+    asymmetry values around +/-0.1 looks blank in ordinary image viewers)."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(6, 5.2))
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot()
+    vmin, vmax = color_limits(image, hint)
+    im = ax.imshow(np.asarray(image, float), cmap=hint.get("cmap", "gray"), vmin=vmin, vmax=vmax)
+    ax.set_title(title, fontsize=9)
+    ax.axis("off")
+    fig.colorbar(im, ax=ax, shrink=0.8, label=label)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+
+
 def line_profile(ax, pr: dict) -> None:
     """Profile A->B (PeemService.line_profile)."""
     ax.plot(pr["distance"], pr["values"], "k-", lw=1)

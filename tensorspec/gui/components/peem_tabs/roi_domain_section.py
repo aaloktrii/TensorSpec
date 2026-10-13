@@ -5,6 +5,7 @@ Mixin of ``PeemXmcdPanel`` (gui/components/peem_xmcd_panel.py); it uses the pane
 from __future__ import annotations
 
 import json
+import os
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -216,6 +217,7 @@ class RoiDomainSection:
         path, _ = QFileDialog.getSaveFileName(self, "Export map", f"{name}_{kind}_{var}.tif", "TIFF (*.tif)")
         if path:
             try:
-                self._log("Saved " + self.service.export_map_tiff(name, kind, path, var))
+                tif = self.service.export_map_tiff(name, kind, path, var)
+                self._log(f"Saved {tif} (values) and {os.path.splitext(os.path.basename(tif))[0]}.png (colour picture)")
             except Exception as exc:
                 self._err(str(exc))

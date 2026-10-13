@@ -41,12 +41,20 @@ class PeemMapsDomainsSteps:
         ds = global_workspace.pull_analysis_data(name, kind)
         return {} if ds is None else products.stats_table(ds)
 
-    def export_map_tiff(self, name: str, kind: str, path: str | Path, var: str = "data") -> str:
+    def export_map_tiff(self, name: str, kind: str, path: str | Path, var: str = "data", png: bool = True) -> str:
+        """32-bit float TIFF of the map values (for ImageJ / Igor / analysis) and, with png, a colour
+        PNG next to it (<name>.png), scaled like the viewer, for looking at. Returns the TIFF path."""
         import tifffile
+
+        from tensorspec.plotting import peem_plots
 
         arr = self.get_map(name, kind, var).astype(np.float32)
         out = Path(path).expanduser()
         tifffile.imwrite(str(out), arr)
+        if png:
+            label = (self.get_product_attrs(name, kind).get("formula") or "") if var == "data" else ""
+            peem_plots.save_map_png(arr, out.with_suffix(".png"), self.display_hint(name, kind, var),
+                                    title=f"{name}: {kind} / {var}", label=str(label))
         return str(out)
 
     # ------------------------------------------------------------- ROI tools

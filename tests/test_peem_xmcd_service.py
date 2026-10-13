@@ -330,3 +330,29 @@ def test_background_and_sum_rule_are_reproducible(tmp_path):
         global_workspace.remove(n)
     finally:
         global_workspace.remove("synth_scan")
+
+
+def test_export_map_writes_float_tiff_and_a_colour_png(tmp_path):
+    """The TIFF keeps the asymmetry values (they look blank in ordinary viewers); the PNG next to it
+    is the coloured picture, scaled like the viewer."""
+    import tifffile
+    from matplotlib.image import imread
+
+    from tensorspec.core.peem import synthetic
+    from tensorspec.gui.services.peem_service import PeemService
+
+    mz = synthetic.stripe_domains(64, 64, period_px=16)
+    cp, cm = synthetic.helicity_stacks(mz, a0=0.05, n_cp=2, n_cm=2, noise=0.0)
+    pos = synthetic.write_ue49_scan(tmp_path, "X_0002", cp, ["Cr_pos_0000", "Cr_pos_0001"])
+    neg = synthetic.write_ue49_scan(tmp_path, "X_0003", cm, ["Cr_neg_0000", "Cr_neg_0001"])
+    s = PeemService()
+    n = s.load_beamline([pos, neg], "export", tpx3=False)["name"]
+    s.drift_correct(n, method="central"); s.stack(n); s.asymmetry(n)
+    tif = s.export_map_tiff(n, "pcd", tmp_path / "map.tif")
+    vals = tifffile.imread(tif)
+    assert vals.dtype == np.float32 and np.nanmax(np.abs(vals)) < 0.2
+    rgb = imread(tmp_path / "map.png")[..., :3]
+    assert rgb.std(axis=-1).max() > 0.2  # coloured (red / blue), not gray or blank
+    assert not (tmp_path / "raw.png").exists()
+    s.export_map_tiff(n, "stack", tmp_path / "raw.tif", "data", png=False)
+    assert (tmp_path / "raw.tif").exists() and not (tmp_path / "raw.png").exists()

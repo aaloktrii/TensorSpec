@@ -51,7 +51,7 @@ checks every public call is listed here and runs the workflow without Qt):
 
 8. Maps, ROI statistics, domains  [maps_domains]
     list_products, get_map, get_product_attrs, roi_statistics, auto_fov_roi,
-    compute_domain_map, export_map_tiff
+    compute_domain_map, export_map_tiff (float TIFF of the values + colour PNG to look at)
 
 9. Sum Rule tab  [drift_stack, peem_service, bg_sumrule]
     to_peem_stack(name, pair, source)     XPEEM-map images -> a new dataset, paired + separated
