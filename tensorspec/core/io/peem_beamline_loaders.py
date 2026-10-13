@@ -97,6 +97,59 @@ def detect_pol(path: str | Path) -> tuple[str | None, str]:
     return None, "mixed / no polarization in the scan" if tags else "no polarization in the scan"
 
 
+def is_container(path: str | Path) -> bool:
+    """A folder of acquisitions rather than one: it has sub-folders (acquisition folders hold only
+    frame files) and is not a scan's image folder."""
+    p = Path(path)
+    if not p.is_dir() or Path(str(p) + ".txt").is_file():
+        return False
+    return any(c.is_dir() and not c.name.startswith((".", "tensorspec_")) for c in p.iterdir())
+
+
+def find_acquisitions(root: str | Path, max_depth: int = 2) -> list[tuple[str, Path]]:
+    """Every loadable acquisition inside ``root`` (sub-folders up to ``max_depth`` levels):
+    [(format, path)], sorted. A scan table and its image folder count once (the table); single
+    image files count when they are not frames of an acquisition folder; output folders
+    (``tensorspec_*``) and hidden entries are skipped."""
+    root = Path(root)
+    out: list[tuple[str, Path]] = []
+    seen: set[str] = set()
+
+    def add(fmt: str, norm: Path, shown: Path) -> None:
+        if str(norm) not in seen:
+            seen.add(str(norm))
+            out.append((fmt, norm if fmt == "ue49" else shown))
+
+    def visit(d: Path, depth: int) -> None:
+        try:
+            children = sorted(d.iterdir())
+        except OSError:
+            return
+        for child in children:
+            if child.name.startswith((".", "tensorspec_")):
+                continue
+            if child.is_dir():
+                if is_container(child):
+                    if depth < max_depth:
+                        visit(child, depth + 1)
+                    continue
+                try:
+                    fmt, norm = detect_format(child)
+                except ValueError:
+                    continue
+                add(fmt, norm, child)
+            elif child.suffix.lower() in (".txt", ".dat") or child.suffix.upper() == ".P3B":
+                try:
+                    fmt, norm = detect_format(child)
+                except (ValueError, OSError):
+                    continue
+                if fmt != "p3b":  # loose .P3B files are frames of their folder
+                    add(fmt, norm, child)
+
+    visit(root, 1)
+    return out
+
+
 def is_beamline_source(path: str | Path) -> bool:
     try:
         detect_format(path)

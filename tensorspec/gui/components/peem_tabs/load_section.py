@@ -1,4 +1,4 @@
-"""PEEM XMCD-tab section: 1. Load data (UE49 / BNL UView / ALS P3B) and the load options.
+"""PEEM XPEEM-map section: 1. Load data (several files / folders at once) and the load options.
 
 Mixin of ``PeemXmcdPanel`` (gui/components/peem_xmcd_panel.py); it uses the panel's shared state
 (service, _name, ROIs, viewer, _log / _err / _run). Moved verbatim from the former ue49_panel.py."""
@@ -6,10 +6,13 @@ from __future__ import annotations
 
 import os
 
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -27,6 +30,25 @@ from tensorspec.core.io import peem_beamline_loaders
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
 
+class _DropPaths(QObject):
+    """Files / folders dropped from Finder onto the load list -> callback(paths)."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, obj, ev):
+        t = ev.type()
+        if t in (QEvent.DragEnter, QEvent.DragMove) and ev.mimeData().hasUrls():
+            ev.acceptProposedAction()
+            return True
+        if t == QEvent.Drop and ev.mimeData().hasUrls():
+            ev.acceptProposedAction()
+            self._callback([u.toLocalFile() for u in ev.mimeData().urls() if u.isLocalFile()])
+            return True
+        return False
+
+
 
 class LoadSection:
     def _build_load(self, cl):
@@ -37,6 +59,11 @@ class LoadSection:
         self.scan_list = QListWidget()
         self.scan_list.setMaximumHeight(90)
         self.scan_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.scan_list.setToolTip("Drop files / folders here from Finder (several at once)")
+        self.scan_list.setAcceptDrops(True)
+        self.scan_list.viewport().setAcceptDrops(True)
+        self._drop_filter = _DropPaths(self._add_any, self)
+        self.scan_list.viewport().installEventFilter(self._drop_filter)
         lf.addRow(self.scan_list)
         self.pol_combo = QComboBox()
         for label, tag in (("auto (from the data)", ""), ("circular + (CP)", "CP"),
@@ -51,8 +78,8 @@ class LoadSection:
         b_add = QPushButton("Add files…")
         b_add.setToolTip("Scan tables (.txt), .dat or .P3B images")
         b_add.clicked.connect(self._add_scans)
-        b_dirs = QPushButton("Add folder…")
-        b_dirs.setToolTip("One acquisition folder per click")
+        b_dirs = QPushButton("Add folders…")
+        b_dirs.setToolTip("Pick one acquisition, or a folder that holds several and tick the ones to add")
         b_dirs.clicked.connect(self._add_folders)
         b_clear = QPushButton("Clear")
         b_clear.clicked.connect(self._clear_scans)
@@ -180,7 +207,7 @@ class LoadSection:
                    if q is not None and os.path.normpath(str(q)) not in self._scan_paths]
         msg = f"{n} item(s) ready. Click Load."
         if missing:
-            msg += f" Partner not added yet: {', '.join(missing)} (Add folder… again for XMCD/XLD)."
+            msg += f" Partner not added yet: {', '.join(missing)}."
         self.load_status.setText(msg)
 
     def _set_format(self, fmt: str):
@@ -197,19 +224,76 @@ class LoadSection:
         self._add_paths(paths)
 
     def _add_folders(self):
-        """One acquisition folder per click (native picker; multi-select folder dialogs are unreliable on macOS)."""
-        path = QFileDialog.getExistingDirectory(self, "Acquisition folder (add one at a time)", self._start_dir())
-        if not path:
-            return
-        self._add_paths([path])
-        partner = self._partner_folder(path)
-        if partner and partner not in self._scan_paths:
-            self._log(f"Partner folder found: {os.path.basename(partner)}. Click 'Add folder…' again to add it.")
+        """Native folder picker (multi-select folder dialogs are unreliable on macOS): an acquisition
+        is added directly; a folder of acquisitions opens a checklist of everything inside."""
+        path = QFileDialog.getExistingDirectory(self, "Acquisition, or a folder of acquisitions", self._start_dir())
+        if path:
+            self._add_any([path])
 
-    @staticmethod
-    def _partner_folder(path: str) -> str | None:
-        partner = peem_beamline_loaders.partner_folder(path)
-        return str(partner) if partner else None
+    def _add_any(self, paths):
+        """Add files / folders; folders that hold several acquisitions open the checklist."""
+        direct = []
+        for p in map(os.path.normpath, paths):
+            if os.path.isdir(p) and peem_beamline_loaders.is_container(p):
+                found = peem_beamline_loaders.find_acquisitions(p)
+                if not found:
+                    self._err(f"{os.path.basename(p)}: no loadable acquisitions inside.")
+                    continue
+                direct += self._choose_acquisitions(p, found)
+            else:
+                direct.append(p)
+        if direct:
+            self._add_paths(direct)
+
+    def _choose_acquisitions(self, root: str, found) -> list[str]:
+        """Checklist of the acquisitions inside ``root``; returns the ticked paths."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Add from {os.path.basename(root)}")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(f"{len(found)} acquisition(s) found. Tick the ones to add "
+                             "(click, shift-click, or select several and press Space)."))
+        lst = QListWidget()
+        lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        for fmt, p in found:
+            rel = os.path.relpath(str(p), root)
+            lst.addItem(f"[{fmt}] {rel}")
+            it = lst.item(lst.count() - 1)
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Unchecked)
+            it.setData(Qt.UserRole, str(p))
+            if str(p) in self._scan_paths:
+                it.setCheckState(Qt.Checked)
+        lst.setMinimumSize(560, 360)
+
+        def toggle_selected():
+            sel = lst.selectedItems()
+            on = any(i.checkState() != Qt.Checked for i in sel)
+            for i in sel:
+                i.setCheckState(Qt.Checked if on else Qt.Unchecked)
+
+        lst.itemActivated.connect(lambda _it: toggle_selected())
+        lay.addWidget(lst)
+        row = QHBoxLayout()
+        for label, state in (("Tick all", Qt.Checked), ("Tick none", Qt.Unchecked)):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, s=state: [lst.item(i).setCheckState(s) for i in range(lst.count())])
+            row.addWidget(b)
+        b = QPushButton("Tick selected")
+        b.clicked.connect(toggle_selected)
+        row.addWidget(b)
+        row.addStretch(1)
+        lay.addLayout(row)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.button(QDialogButtonBox.Ok).setText("Add ticked")
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lay.addWidget(bb)
+        if self._exec_dialog(dlg) != QDialog.Accepted:
+            return []
+        return [lst.item(i).data(Qt.UserRole) for i in range(lst.count()) if lst.item(i).checkState() == Qt.Checked]
+
+    def _exec_dialog(self, dlg) -> int:
+        return dlg.exec()
 
     def _clear_scans(self):
         """Clear the file list AND unload the current dataset (frames, drift, stack, maps) and the view."""

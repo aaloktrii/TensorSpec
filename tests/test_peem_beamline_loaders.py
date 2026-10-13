@@ -282,3 +282,45 @@ def test_universal_asymmetry_step_by_step(tmp_path, tags, expected):
     kind = "pcd" if tags[0] == "CL" else "pld"
     assert out["formula"] == ("(CM-CP)/(CM+CP)" if kind == "pcd" else "(LV-LH)/(LV+LH)")
     assert np.nanmean(svc.get_map(name, kind)) == pytest.approx(expected, abs=1e-6)
+
+
+def test_find_acquisitions_in_a_folder_of_acquisitions(tmp_path):
+    root = tmp_path / "sample"
+    (root / "RT").mkdir(parents=True)
+    cl, cr = uview_acq(root / "RT", "CL", 1100), uview_acq(root / "RT", "CR", 900)
+    loose = next(cl.glob("*.dat"))
+    (root / "RT" / "single.dat").write_bytes(loose.read_bytes())  # a loose single-image file
+    day = root / "day"
+    day.mkdir()
+    txt = _ue49(day)
+    als = _p3b(root)
+    (root / "tensorspec_peem").mkdir()  # outputs are skipped
+    found = {str(p.relative_to(root)): fmt for fmt, p in peem_beamline_loaders.find_acquisitions(root)}
+    assert found == {"RT/" + cl.name: "uview", "RT/" + cr.name: "uview", "RT/single.dat": "uview",
+                     "day/" + txt.name: "ue49", als.name: "p3b"}
+    assert peem_beamline_loaders.is_container(root / "RT") and not peem_beamline_loaders.is_container(cl)
+
+
+def test_add_several_at_once_checklist_and_drop(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QDialog, QListWidget
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    cl, cr = uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)
+    als = _p3b(tmp_path)
+    p = PeemXmcdPanel()
+
+    def tick_uview(dlg):  # the user ticks the two UView folders and clicks "Add ticked"
+        lst = dlg.findChild(QListWidget)
+        for i in range(lst.count()):
+            if lst.item(i).text().startswith("[uview]"):
+                lst.item(i).setCheckState(Qt.Checked)
+        return QDialog.Accepted
+
+    p._exec_dialog = tick_uview
+    p._add_any([str(tmp_path)])  # "Add folders…" on the parent folder
+    assert sorted(p._scan_paths) == sorted([str(cl), str(cr)])
+    p._clear_scans()
+    p._drop_filter._callback([str(cl), str(cr)])  # two folders dropped from Finder
+    assert p._scan_paths == [str(cl), str(cr)]
+    p._add_any([str(als)])  # an acquisition itself is added directly (no checklist)
+    assert p._scan_paths[-1] == str(als)
