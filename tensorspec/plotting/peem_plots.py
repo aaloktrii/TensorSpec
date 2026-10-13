@@ -1,0 +1,109 @@
+"""Matplotlib drawing for the PEEM suite's XMCD-imaging tab (no Qt).
+
+Each function draws one result of the PEEM service onto a matplotlib Axes / Figure the panel owns
+(gui/components/peem_xmcd_panel.py keeps the canvas, titles and redraws). Moved verbatim from the
+section mixins in gui/components/peem_tabs/ (analysis, drift, cleanup).
+"""
+from __future__ import annotations
+
+import numpy as np
+
+
+def line_profile(ax, pr: dict) -> None:
+    """Profile A->B (PeemService.line_profile)."""
+    ax.plot(pr["distance"], pr["values"], "k-", lw=1)
+    ax.set_xlabel(f"distance ({pr['unit']})")
+
+
+def profile_fit(ax, pr: dict, res: dict, edge: bool) -> None:
+    """Gaussian peak fit, or for an edge the derivative + its Gaussian fit on a twin axis."""
+    if edge:
+        ax2 = ax.twinx()
+        ax2.plot(pr["distance"], res["derivative"], color="0.6", lw=0.8)
+        ax2.plot(res["x"], res["fit"], "r-", lw=1.2)
+        ax2.set_ylabel("d/dx", color="0.5")
+    else:
+        ax.plot(res["x"], res["fit"], "r-", lw=1.2)
+
+
+def stack_line_profiles(ax, st: dict) -> None:
+    """Profile vs frame (or energy) image (PeemService.stack_line_profiles)."""
+    im = st["image"]
+    y = st.get("energy")
+    ext = [st["distance"][0], st["distance"][-1], len(im) - 0.5, -0.5]
+    if y is not None:
+        ext = [st["distance"][0], st["distance"][-1], float(y[-1]), float(y[0])]
+    fin = im[np.isfinite(im)]
+    lo, hi = np.percentile(fin, [1, 99]) if fin.size else (0, 1)
+    ax.imshow(im, aspect="auto", extent=ext, cmap="gray", vmin=lo, vmax=hi)
+    ax.set_xlabel(f"distance ({st['unit']})")
+    ax.set_ylabel("energy (eV)" if y is not None else "frame")
+
+
+def histogram(ax, h: dict) -> None:
+    """Pixel histogram (PeemService.histogram)."""
+    ax.bar(h["centers"], h["counts"], width=h["centers"][1] - h["centers"][0], color="0.3")
+    ax.set_xlabel("value")
+    ax.set_ylabel("pixels")
+
+
+def image_fft(fig, f: dict) -> None:
+    """2-D FFT magnitude and its azimuthal power (PeemService.image_fft); clears ``fig``."""
+    rad = f["radial"]
+    fig.clear()
+    a1 = fig.add_subplot(121)
+    ext = [f["fx"][0], f["fx"][-1], f["fy"][-1], f["fy"][0]]
+    a1.imshow(np.log10(f["magnitude"] + 1e-12), cmap="gray", extent=ext)
+    a1.set_xlabel("fx (1/px)")
+    a1.set_ylabel("fy (1/px)")
+    a2 = fig.add_subplot(122)
+    a2.semilogy(rad["f"][1:], rad["power"][1:], "k-", lw=1)
+    a2.axvline(rad["peak_f"], color="r", ls="--", lw=0.8)
+    a2.set_xlabel("spatial frequency (1/px)")
+    a2.set_ylabel("power (azimuthal mean)")
+
+
+def power_spectrum(ax, ps: dict) -> None:
+    """Power spectrum of a line profile (core.peem.image_analysis.power_spectrum)."""
+    ax.plot(ps["f"], ps["magnitude"], "k-", lw=1)
+    ax.axvline(ps["peak_f"], color="r", ls="--", lw=0.8)
+    ax.set_xlabel("spatial frequency (1/px)")
+
+
+def drift(ax, d: dict) -> None:
+    """Per-frame drift shifts (PeemService.get_drift), polarization changes marked, NCC on a twin axis."""
+    f = np.arange(len(d["dy"]))
+    ax.plot(f, d["dy"], "o-", ms=3, label="dy")
+    ax.plot(f, d["dx"], "s-", ms=3, label="dx")
+    pol = d.get("pol")
+    if pol:  # frame order of the stack: mark where the polarization changes
+        for i in range(1, len(pol)):
+            if pol[i] != pol[i - 1]:
+                ax.axvline(i - 0.5, color="0.6", ls="--", lw=0.8)
+        starts = [0] + [i for i in range(1, len(pol)) if pol[i] != pol[i - 1]]
+        for i in starts:
+            ax.annotate(pol[i], (i, 1.0), xycoords=("data", "axes fraction"), fontsize=8,
+                             va="top", color="0.4")
+        ax.set_xlabel("frame")
+    else:
+        ax.axvline(d["n_a"] - 0.5, color="0.6", ls="--", lw=0.8)
+        ax.set_xlabel("frame (polarization A, then B)")
+    ax.set_ylabel("shift applied (px)")
+    if d.get("score") is not None:
+        ax2 = ax.twinx()
+        ax2.plot(f, d["score"], color="0.5", lw=0.8, label="NCC")
+        ax2.set_ylim(0, 1.05)
+        ax2.set_ylabel("template match (NCC)", color="0.5")
+    ax.legend(frameon=False, loc="lower right")
+
+
+def frame_sharpness(ax, sd: np.ndarray, thr: float, rel: float) -> np.ndarray:
+    """Focus check: std in the box per raw frame vs the threshold; returns the frames below it."""
+    ax.plot(np.arange(len(sd)), sd, "o-", ms=3)
+    ax.axhline(thr, color="r", ls="--", lw=0.8, label=f"{rel:.2f} × median")
+    low = np.nonzero(sd < thr)[0]
+    ax.plot(low, sd[low], "rx", ms=8, label=f"{len(low)} below")
+    ax.set_xlabel("raw frame")
+    ax.set_ylabel("std in box (counts)")
+    ax.legend(frameon=False)
+    return low

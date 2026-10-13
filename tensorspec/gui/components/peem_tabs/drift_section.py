@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 
-import numpy as np
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -22,6 +21,7 @@ from PySide6.QtWidgets import (
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
 from tensorspec.gui.components.peem_tabs.common import _dspin
+from tensorspec.plotting import peem_plots
 
 
 class DriftSection:
@@ -181,31 +181,9 @@ class DriftSection:
         if d is None:
             self._err("No drift yet: click 'Run drift correction' first.")
             return
-        f = np.arange(len(d["dy"]))
         y0, y1, x0, x1 = d["box"]
         ax = self._plot(f"drift · {d.get('method') or d['source']} · box x {x0}-{x1}, y {y0}-{y1} px")
-        ax.plot(f, d["dy"], "o-", ms=3, label="dy")
-        ax.plot(f, d["dx"], "s-", ms=3, label="dx")
-        pol = d.get("pol")
-        if pol:  # frame order of the stack: mark where the polarization changes
-            for i in range(1, len(pol)):
-                if pol[i] != pol[i - 1]:
-                    ax.axvline(i - 0.5, color="0.6", ls="--", lw=0.8)
-            starts = [0] + [i for i in range(1, len(pol)) if pol[i] != pol[i - 1]]
-            for i in starts:
-                ax.annotate(pol[i], (i, 1.0), xycoords=("data", "axes fraction"), fontsize=8,
-                                 va="top", color="0.4")
-            ax.set_xlabel("frame")
-        else:
-            ax.axvline(d["n_a"] - 0.5, color="0.6", ls="--", lw=0.8)
-            ax.set_xlabel("frame (polarization A, then B)")
-        ax.set_ylabel("shift applied (px)")
-        if d.get("score") is not None:
-            ax2 = ax.twinx()
-            ax2.plot(f, d["score"], color="0.5", lw=0.8, label="NCC")
-            ax2.set_ylim(0, 1.05)
-            ax2.set_ylabel("template match (NCC)", color="0.5")
-        ax.legend(frameon=False, loc="lower right")
+        peem_plots.drift(ax, d)
         self.pfig.tight_layout()
         self.pcanvas.draw_idle()
 

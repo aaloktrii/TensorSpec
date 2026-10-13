@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 
-import numpy as np
 from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
@@ -23,6 +22,7 @@ from tensorspec.core.peem import stack_edits
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
 from tensorspec.gui.components.peem_tabs.common import _dspin
+from tensorspec.plotting import peem_plots
 
 
 class CleanupSection:
@@ -163,13 +163,7 @@ class CleanupSection:
         thr = self.defocus_rel.value() * med
         y0, y1, x0, x1 = r["box_y0y1x0x1"]
         ax = self._plot(f"focus check · std in box x {x0}-{x1}, y {y0}-{y1}")
-        ax.plot(np.arange(len(sd)), sd, "o-", ms=3)
-        ax.axhline(thr, color="r", ls="--", lw=0.8, label=f"{self.defocus_rel.value():.2f} × median")
-        low = np.nonzero(sd < thr)[0]
-        ax.plot(low, sd[low], "rx", ms=8, label=f"{len(low)} below")
-        ax.set_xlabel("raw frame")
-        ax.set_ylabel("std in box (counts)")
-        ax.legend(frameon=False)
+        low = peem_plots.frame_sharpness(ax, sd, thr, self.defocus_rel.value())
         self.pfig.tight_layout()
         self.pcanvas.draw_idle()
         self._log(f"Defocused (below threshold): {low.tolist()}")

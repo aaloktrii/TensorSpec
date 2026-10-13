@@ -72,6 +72,7 @@ tensorspec/
 │   │   ├── pyvista_engine.py    # Fast GPU rendering for 3D crystal structures & volumes
 │   │   └── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
 │   ├── viewers/               # Reusable Qt widgets for suites to embed (where present)
+│   ├── peem_plots.py          # PEEM XMCD-tab plots (profiles, fits, histogram, FFT, drift, focus check)
 │   └── ue49_preview.py        # Matplotlib preview figures for the XPEEM batch scripts
 └── gui/
     ├── __init__.py

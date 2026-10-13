@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
 from tensorspec.gui.components.peem_tabs.common import _dspin
+from tensorspec.plotting import peem_plots
 
 
 class AnalysisSection:
@@ -187,8 +188,7 @@ class AnalysisSection:
             return None
         self._last_profile = pr
         ax = self._plot(f"Profile A→B · {kind}/{var} · half-width {pr['halfwidth']} px")
-        ax.plot(pr["distance"], pr["values"], "k-", lw=1)
-        ax.set_xlabel(f"distance ({pr['unit']})")
+        peem_plots.line_profile(ax, pr)
         self.pfig.tight_layout()
         self.pcanvas.draw_idle()
         return pr
@@ -201,14 +201,7 @@ class AnalysisSection:
         res = self._an_call(ia.diff_gauss_fit if edge else ia.gauss_fit, pr["distance"], pr["values"])
         if res is None:
             return
-        ax = self.pfig.axes[0]
-        if edge:
-            ax2 = ax.twinx()
-            ax2.plot(pr["distance"], res["derivative"], color="0.6", lw=0.8)
-            ax2.plot(res["x"], res["fit"], "r-", lw=1.2)
-            ax2.set_ylabel("d/dx", color="0.5")
-        else:
-            ax.plot(res["x"], res["fit"], "r-", lw=1.2)
+        peem_plots.profile_fit(self.pfig.axes[0], pr, res, edge)
         u = pr["unit"]
         txt = (f"{'edge' if edge else 'peak'} at {res['x0']:.3f} {u}, FWHM {res['fwhm']:.3f} ± "
                f"{res['fwhm_err']:.3f} {u}")
@@ -226,16 +219,7 @@ class AnalysisSection:
         if st is None:
             return
         ax = self._plot(f"Profile vs frame · {kind} · half-width {self.line_hw.value()} px")
-        im = st["image"]
-        y = st.get("energy")
-        ext = [st["distance"][0], st["distance"][-1], len(im) - 0.5, -0.5]
-        if y is not None:
-            ext = [st["distance"][0], st["distance"][-1], float(y[-1]), float(y[0])]
-        fin = im[np.isfinite(im)]
-        lo, hi = np.percentile(fin, [1, 99]) if fin.size else (0, 1)
-        ax.imshow(im, aspect="auto", extent=ext, cmap="gray", vmin=lo, vmax=hi)
-        ax.set_xlabel(f"distance ({st['unit']})")
-        ax.set_ylabel("energy (eV)" if y is not None else "frame")
+        peem_plots.stack_line_profiles(ax, st)
         self.pfig.tight_layout()
         self.pcanvas.draw_idle()
 
@@ -250,9 +234,7 @@ class AnalysisSection:
             return
         ax = self._plot(f"Histogram · {kind}/{var} · {'map ROI' if self._roi else 'whole image'} · n {h['n']} · "
                         f"mean {h['mean']:.4g} · std {h['std']:.4g}" + (f" · {h['outside_range']} outside" if h["outside_range"] else ""))
-        ax.bar(h["centers"], h["counts"], width=h["centers"][1] - h["centers"][0], color="0.3")
-        ax.set_xlabel("value")
-        ax.set_ylabel("pixels")
+        peem_plots.histogram(ax, h)
         self.pfig.tight_layout()
         self.pcanvas.draw_idle()
 
@@ -266,17 +248,7 @@ class AnalysisSection:
         rad = f["radial"]
         per = f"{rad['period_um']:.3f} µm" if rad["period_um"] else f"{rad['period_px']:.1f} px"
         self._plot(f"2-D FFT · {kind}/{var} · dominant period {per}")
-        self.pfig.clear()
-        a1 = self.pfig.add_subplot(121)
-        ext = [f["fx"][0], f["fx"][-1], f["fy"][-1], f["fy"][0]]
-        a1.imshow(np.log10(f["magnitude"] + 1e-12), cmap="gray", extent=ext)
-        a1.set_xlabel("fx (1/px)")
-        a1.set_ylabel("fy (1/px)")
-        a2 = self.pfig.add_subplot(122)
-        a2.semilogy(rad["f"][1:], rad["power"][1:], "k-", lw=1)
-        a2.axvline(rad["peak_f"], color="r", ls="--", lw=0.8)
-        a2.set_xlabel("spatial frequency (1/px)")
-        a2.set_ylabel("power (azimuthal mean)")
+        peem_plots.image_fft(self.pfig, f)
         self.pfig.tight_layout()
         self.pcanvas.draw_idle()
         self._log(f"FFT dominant period {per} (f = {rad['peak_f']:.4f} 1/px)")
@@ -290,9 +262,7 @@ class AnalysisSection:
         upp = self.service.xmcd_meta(self._name).get("um_per_px")
         per = f"{ps['period_px'] * upp:.3f} µm" if upp else f"{ps['period_px']:.1f} px"
         ax = self._plot(f"Power spectrum of the line · peak period {per}")
-        ax.plot(ps["f"], ps["magnitude"], "k-", lw=1)
-        ax.axvline(ps["peak_f"], color="r", ls="--", lw=0.8)
-        ax.set_xlabel("spatial frequency (1/px)")
+        peem_plots.power_spectrum(ax, ps)
         self.pfig.tight_layout()
         self.pcanvas.draw_idle()
 
