@@ -27,7 +27,7 @@ is Bernal bilayer. These are statistical calls against two references from
 one flake; check them against optical contrast or AFM.
 
 Moved from Raman_Classifier ``graphene_reference.py`` (statistics and prediction);
-its plots are in plotting/raman_figures.py.
+its plots are in plotting/backends/raman_matplotlib_engine.py.
 """
 from __future__ import annotations
 

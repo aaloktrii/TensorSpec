@@ -21,7 +21,7 @@ from tensorspec.gui.components.raman_tabs.layer_regions_dialog import LayerRegio
 from tensorspec.gui.components.raman_tabs.layout import Canvas, ThresholdTable, _fmt, export_figure
 from tensorspec.gui.components.raman_tabs.map_explorer_panel import MapExplorerTab
 from tensorspec.gui.components.raman_tabs.thickness_dialog import ThicknessDialog
-from tensorspec.plotting.raman_figures import class_rgba, frame_axes, na_color, orient_axes
+from tensorspec.plotting.backends.raman_matplotlib_engine import class_rgba, frame_axes, na_color, orient_axes
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel

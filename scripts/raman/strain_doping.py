@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tensorspec.core.raman import reference as gref  # noqa: E402
 from tensorspec.core.raman.strain_doping import analyse_folder, summarise, write_csv  # noqa: E402
-from tensorspec.plotting.raman_figures import plot_correlation  # noqa: E402
+from tensorspec.plotting.backends.raman_matplotlib_engine import plot_correlation  # noqa: E402
 
 
 def main():

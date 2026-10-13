@@ -16,7 +16,7 @@ from tensorspec.core.raman.classification import g_band_cfg, label_of, layer_fro
 from tensorspec.core.raman.map_geometry import band_height, describe_transform
 from tensorspec.core.raman.voigt_2d import asym_of
 from tensorspec.gui.components.raman_tabs.layout import Canvas
-from tensorspec.plotting.raman_figures import frame_axes, orient_axes, side_colorbar
+from tensorspec.plotting.backends.raman_matplotlib_engine import frame_axes, orient_axes, side_colorbar
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel

@@ -16,11 +16,11 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from tensorspec.core.raman.classification import windows_for
 from tensorspec.core.raman.constants import LAYERS
-from tensorspec.plotting.raman_figures import raman_style
+from tensorspec.plotting.backends.raman_matplotlib_engine import raman_style
 
 
 class FigureCanvas(FigureCanvasQTAgg):
-    """Qt canvas that draws in the Raman figure style (plotting.raman_figures.GUI_RC), which
+    """Qt canvas that draws in the Raman figure style (plotting.backends.raman_matplotlib_engine.GUI_RC), which
     the original application set globally; here it applies to the Raman suite only."""
 
     def draw(self):

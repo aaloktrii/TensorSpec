@@ -3,7 +3,7 @@
 cancel callbacks (process pool for large maps).
 
 Figures are not drawn here. Callers that want the original PDFs pass ``figures`` (the
-plotting/raman_figures module, or anything with fit_pdfs / plot_reference / plot_prediction).
+plotting/backends/raman_matplotlib_engine module, or anything with fit_pdfs / plot_reference / plot_prediction).
 
 Moved from Raman_Classifier: ``raman_peak_fit.py`` run(), ``graphene_reference.py`` build /
 predict_folder / write_predictions, and the fitting loop of ``FitWorker`` in

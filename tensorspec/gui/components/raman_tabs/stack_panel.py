@@ -1,7 +1,7 @@
 """Tab 4 · Stacked spectra: publication figure (closed frame, // axis breaks, no y ticks, Arial,
 8.7 cm, vector PDF) from files or from the loaded map. Nothing here fits anything.
 
-Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 4 - Stacked spectra); draw_stack is in plotting/raman_figures.py."""
+Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 4 - Stacked spectra); draw_stack is in plotting/backends/raman_matplotlib_engine.py."""
 from __future__ import annotations
 
 import os
@@ -18,7 +18,7 @@ from tensorspec.core.io.raman_loaders import (Spectrum, is_single_spectrum, pars
                                               read_single_spectrum, read_spot_folder, short_label)
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.gui.components.raman_tabs.layout import _EXPORT_DIR
-from tensorspec.plotting.raman_figures import draw_stack, raman_style
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_stack, raman_style
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
