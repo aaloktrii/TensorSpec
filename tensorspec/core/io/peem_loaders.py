@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -46,26 +45,8 @@ def _coerce_i0_value(value: Any) -> float | None:
     return None if pd.isna(match) else float(match)
 
 
-def match_pol_token(name: str, aliases) -> tuple[str, str] | None:
-    """Beamline polarization token of ``name`` as a whole word (split on non-alphanumerics), e.g.
-    UE49 'Cr_pos_0000' -> ('pos', 'CP'), BNL '..._Cr2p_CL_0deg' -> ('cl', 'CP'). ``aliases`` is a
-    sequence of (token, tag); whole words, so 'CR' does not match inside 'Cr2p'."""
-    words = set(re.split(r"[^0-9a-z]+", name.casefold()))
-    for token, tag in aliases:
-        if token.casefold() in words:
-            return token, tag
-    return None
-
-
-def infer_pol_from_name(name: str, aliases=None) -> str:
-    """Return 'CP'|'CM'|'LH'|'LV'|'unknown' via case-insensitive substring.
-
-    ``aliases`` (optional): beamline tokens (token, tag) checked first as whole words, e.g.
-    UE49 pos/neg or BNL CL/CR; without them the behaviour is unchanged."""
-    if aliases:
-        hit = match_pol_token(name, aliases)
-        if hit is not None:
-            return hit[1]
+def infer_pol_from_name(name: str) -> str:
+    """Return 'CP'|'CM'|'LH'|'LV'|'unknown' via case-insensitive substring."""
     folded = name.casefold()
     for tag in _POL_TAGS:
         if tag.casefold() in folded:
@@ -164,24 +145,16 @@ def package_stack(
     source: str,
     loader: str,
     csv_meta: dict[str, Any] | None = None,
-    pol: list[str] | None = None,
-    dtype=np.float64,
 ) -> TensorData:
-    """Shared builder: axes, labels, pol tags, merge csv_meta into metadata.
-
-    ``pol`` overrides the tags inferred from the frame names (beamline loaders that read the
-    polarization elsewhere, e.g. ALS EPU_POLARIZATION); ``dtype`` float32 halves the memory of
-    large stacks. Defaults keep the original behaviour."""
-    frames = np.asarray(frames, dtype=dtype)
+    """Shared builder: axes, labels, pol tags, merge csv_meta into metadata."""
+    frames = np.asarray(frames, dtype=np.float64)
     if frames.ndim == 2:
         frames = frames[np.newaxis, ...]
     if frames.ndim != 3:
         raise ValueError(f"Expected stack shape (n, y, x), got {frames.shape}")
 
     n_frames, ny, nx = frames.shape
-    pol = list(pol) if pol is not None else [infer_pol_from_name(name) for name in frame_names]
-    if len(pol) != n_frames:
-        raise ValueError("pol must have one tag per frame")
+    pol = [infer_pol_from_name(name) for name in frame_names]
 
     metadata: dict[str, Any] = {
         "frame_names": frame_names,

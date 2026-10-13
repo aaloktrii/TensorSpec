@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlide
                                QComboBox, QPushButton, QCheckBox, QFrame, QMenu, QSpinBox, 
                                QFileDialog, QMessageBox, QDoubleSpinBox, QGridLayout, QMainWindow, QSplitter,
                                QInputDialog)
-from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer, Signal
+from PySide6.QtCore import Qt, QFileSystemWatcher, QTimer
 from PySide6.QtGui import QCursor
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -58,21 +58,6 @@ def ml_label_spatial_map(layer_data: np.ndarray, value_shape: tuple) -> np.ndarr
         return np.argmax(arr, axis=2)
     return None
 
-def plane_layer(layer_data, shape: tuple, y_idx: int, x_idx: int) -> np.ndarray | None:
-    """A 2-D layer that matches the displayed (y, x) dimensions of an N-D tensor, oriented
-    (rows = y). Lets maps (e.g. an XMCD asymmetry over a frame x y x x stack) be shown as
-    layers whatever the other axes are."""
-    arr = np.asarray(layer_data)
-    if arr.ndim != 2:
-        return None
-    ny, nx = shape[y_idx], shape[x_idx]
-    if arr.shape == (ny, nx):
-        return arr
-    if arr.shape == (nx, ny) and nx != ny:
-        return arr.T
-    return None
-
-
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=4, height=4, dpi=100):
         fig = Figure(figsize=(width, height), dpi=dpi, layout='constrained')
@@ -87,7 +72,6 @@ class SliceWidget(QFrame):
         super().__init__(parent_panel)
         self.parent_panel = parent_panel
         self.tensor_data = parent_panel.tensor_data
-        self.fixed_limits = None  # (vmin, vmax) typed by a host panel; None = automatic (contrast / Sym)
         
         self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
         self.setLineWidth(2)
@@ -151,21 +135,11 @@ class SliceWidget(QFrame):
         btn_close.setStyleSheet("background-color: #d9534f; color: white;")
         btn_close.clicked.connect(self.close_widget)
         row1.addWidget(btn_close)
-        self.btn_close = btn_close
 
         # ROW display: profiles / contrast / sync (was crowding row1)
         self.row_display = QWidget()
         row_disp = QHBoxLayout(self.row_display)
         row_disp.setContentsMargins(0, 0, 0, 0)
-
-        row_disp.addWidget(QLabel("Colormap:"))
-        self.combo_cmap = QComboBox()
-        self.combo_cmap.addItems(["magma", "viridis", "plasma", "inferno", "cividis", "hot", "cool", "gray", "twilight",
-                                  "bwr", "RdBu_r"])
-        self.combo_cmap.setToolTip("bwr = RWB (blue -, white centre, red +); use with Sym ±")
-        self.combo_cmap.setCurrentText("magma")
-        self.combo_cmap.currentIndexChanged.connect(self.redraw)
-        row_disp.addWidget(self.combo_cmap)
 
         self.chk_profiles = QCheckBox("XY Profiles")
         self.chk_profiles.stateChanged.connect(self.toggle_profiles)
@@ -199,20 +173,6 @@ class SliceWidget(QFrame):
         self.spin_gamma.valueChanged.connect(self.redraw)
         row_disp.addWidget(self.spin_gamma)
 
-        self.chk_sym = QCheckBox("Sym ±")
-        self.chk_sym.setToolTip("Symmetric colour limits c ± L (white = c with bwr); L = contrast % of the 99th percentile of |v - c|")
-        self.chk_sym.toggled.connect(self.redraw)
-        row_disp.addWidget(self.chk_sym)
-        self.combo_center = QComboBox()
-        self.combo_center.addItems(["0", "median"])
-        self.combo_center.setToolTip("Centre of the symmetric limits")
-        self.combo_center.currentIndexChanged.connect(self.redraw)
-        row_disp.addWidget(self.combo_center)
-        self.chk_image_origin = QCheckBox("Top-left origin")
-        self.chk_image_origin.setToolTip("Image convention: first row at the top (PEEM / camera images)")
-        self.chk_image_origin.toggled.connect(self.redraw)
-        row_disp.addWidget(self.chk_image_origin)
-
         self.chk_sync = QCheckBox("Sync")
         self.chk_sync.setChecked(False)
         self.chk_sync.setToolTip(
@@ -231,9 +191,6 @@ class SliceWidget(QFrame):
         self.chk_sync.toggled.connect(self.spin_sync_group.setEnabled)
         row_disp.addWidget(self.chk_sync)
         row_disp.addWidget(self.spin_sync_group)
-        if getattr(self.parent_panel, "_compact", False):  # embedded single view: no sync / close
-            for w in (self.chk_sync, self.spin_sync_group, self.btn_close):
-                w.setVisible(False)
         row_disp.addStretch(1)
 
         # ROW 2 (collapsible via Toggle UI): Δ + ortho
@@ -393,16 +350,8 @@ class SliceWidget(QFrame):
                 )
             )
             
-            slider.setMinimumWidth(120)  # stays draggable / visible in a narrow window
-            row.addWidget(lbl); row.addWidget(spin); row.addWidget(slider, 1)
+            row.addWidget(lbl); row.addWidget(spin); row.addWidget(slider)
             self.sliders_layout.addLayout(row)
-            if len(ax_arr) > 1:
-                # Play on its own line so it never squeezes the slider; "frame n / N" shows it running
-                from tensorspec.gui.components.stack_player import StackPlayer
-                play_row = QHBoxLayout()
-                play_row.addSpacing(80)
-                play_row.addWidget(StackPlayer(slider), 1)
-                self.sliders_layout.addLayout(play_row)
             self.slider_widgets[i] = slider
             self.spin_widgets[i] = spin
 
@@ -541,12 +490,7 @@ class SliceWidget(QFrame):
                 
         layer_text = self.combo_layer.currentText()
         layers = self.tensor_data.metadata.get('layers', {}) if self.tensor_data.metadata else {}
-        plane = None
         if layer_text != "Intensity" and layer_text in layers:
-            plane = plane_layer(layers[layer_text], self.tensor_data.value.shape, self.y_idx, self.x_idx)
-        if plane is not None:
-            sliced = np.asarray(plane, dtype=float)
-        elif layer_text != "Intensity" and layer_text in layers:
             layer_data = layers[layer_text]
             spatial = ml_label_spatial_map(np.asarray(layer_data), self.tensor_data.value.shape)
             if spatial is not None and {self.x_idx, self.y_idx} <= {2, 3}:
@@ -597,16 +541,8 @@ class SliceWidget(QFrame):
                 vmax = vmin + 1.0
             c_scale = max(0.01, float(self.sl_contrast.value()) / 100.0)
             vmax_adj = vmin + (vmax - vmin) * c_scale + 1e-8
-            if self.chk_sym.isChecked() and finite.size:
-                c = float(np.median(finite)) if self.combo_center.currentText() == "median" else 0.0
-                half = float(np.percentile(np.abs(finite - c), 99)) * c_scale or 1.0  # robust to outliers
-                vmin, vmax_adj = c - half, c + half
-            if self.fixed_limits is not None:
-                vmin, vmax_adj = self.fixed_limits
-            self.shown_limits = (float(vmin), float(vmax_adj))
             gamma = float(self.spin_gamma.value())
-            cmap_name = self.combo_cmap.currentText()
-            self.im_main.set_cmap(cmap_name)
+            self.im_main.set_cmap("magma")
             if abs(gamma - 1.0) < 1e-6:
                 self.im_main.set_norm(mcolors.Normalize(vmin=vmin, vmax=vmax_adj))
             else:
@@ -692,128 +628,12 @@ class SliceWidget(QFrame):
             self.ax_prof_ortho.relim(); self.ax_prof_ortho.autoscale_view()
         
         self.ax_main.set_xlim(extent[0], extent[1])
-        if self.chk_image_origin.isChecked():
-            self.ax_main.set_ylim(extent[3], extent[2])
-        else:
-            self.ax_main.set_ylim(extent[2], extent[3])
-        self._last_sliced = sliced
-        self._draw_overlays()
+        self.ax_main.set_ylim(extent[2], extent[3])
         self.canvas.draw_idle()
 
     
 
-    # ------------------------------------------------------------- tools / overlays
-    def _axis_to_index(self, val: float, dim: int) -> float:
-        """Axis value -> fractional index along ``dim`` (axes assumed uniform)."""
-        a = np.asarray(self.tensor_data.axes[dim], float)
-        if a.size < 2 or a[-1] == a[0]:
-            return 0.0
-        return float((val - a[0]) / (a[-1] - a[0]) * (a.size - 1))
-
-    def _index_to_axis(self, idx: float, dim: int) -> float:
-        a = np.asarray(self.tensor_data.axes[dim], float)
-        if a.size < 2:
-            return float(a[0]) if a.size else 0.0
-        return float(a[0] + idx * (a[-1] - a[0]) / (a.size - 1))
-
-    def start_tool(self, kind: str, callback, color: str = "magenta") -> None:
-        """Draw a shape on this view: kind 'rect' | 'polygon' | 'line'. ``callback(shape)``
-        receives a dict in pixel-index coordinates of the displayed dims:
-        rect {kind, x0, x1, y0, y1}; polygon {kind, points: [[x, y], ...]};
-        line {kind, a: (y, x), b: (y, x)}. The crosshair is paused while the tool is active."""
-        from matplotlib.widgets import PolygonSelector, RectangleSelector
-
-        self.cancel_tool()
-        self._tool_cb = callback
-        if kind == "rect":
-            def done(press, release):
-                xs = sorted((self._axis_to_index(press.xdata, self.x_idx), self._axis_to_index(release.xdata, self.x_idx)))
-                ys = sorted((self._axis_to_index(press.ydata, self.y_idx), self._axis_to_index(release.ydata, self.y_idx)))
-                self._finish_tool({"kind": "rect", "x0": int(round(xs[0])), "x1": int(round(xs[1])),
-                                   "y0": int(round(ys[0])), "y1": int(round(ys[1]))})
-            self._tool = RectangleSelector(self.ax_main, done, useblit=True, interactive=False,
-                                           props=dict(ec=color, fill=False, lw=1.2))
-        elif kind == "polygon":
-            def done(verts):
-                pts = [[self._axis_to_index(x, self.x_idx), self._axis_to_index(y, self.y_idx)] for x, y in verts]
-                self._finish_tool({"kind": "polygon", "points": pts})
-            self._tool = PolygonSelector(self.ax_main, done, useblit=True)
-        elif kind == "line":
-            self._tool_pts = []
-
-            def click(ev):
-                if ev.inaxes is not self.ax_main or ev.xdata is None:
-                    return
-                self._tool_pts.append((self._axis_to_index(ev.ydata, self.y_idx), self._axis_to_index(ev.xdata, self.x_idx)))
-                if len(self._tool_pts) == 2:
-                    a, b = self._tool_pts
-                    self._finish_tool({"kind": "line", "a": a, "b": b})
-            self._tool = ("cid", self.canvas.mpl_connect("button_press_event", click))
-        else:
-            raise ValueError("tool must be 'rect', 'polygon' or 'line'")
-
-    def _finish_tool(self, shape: dict) -> None:
-        cb = getattr(self, "_tool_cb", None)
-        self.cancel_tool()
-        if cb is not None:
-            cb(shape)
-
-    def cancel_tool(self) -> None:
-        tool = getattr(self, "_tool", None)
-        if isinstance(tool, tuple):
-            self.canvas.mpl_disconnect(tool[1])
-        elif tool is not None:
-            try:
-                tool.set_active(False)
-                tool.disconnect_events()
-            except Exception:
-                pass
-        self._tool = None
-        self._tool_cb = None
-
-    @property
-    def tool_active(self) -> bool:
-        return getattr(self, "_tool", None) is not None
-
-    def _draw_overlays(self) -> None:
-        """Shapes from parent_panel.overlays drawn on views showing their (y, x) dims."""
-        for art in getattr(self, "_overlay_artists", []):
-            try:
-                art.remove()
-            except (ValueError, NotImplementedError):
-                pass
-        self._overlay_artists = []
-        for ov in getattr(self.parent_panel, "overlays", []) or []:
-            if tuple(ov.get("dims", (self.y_idx, self.x_idx))) != (self.y_idx, self.x_idx):
-                continue
-            col = ov.get("color", "yellow")
-            kind = ov.get("kind")
-            fx = lambda i: self._index_to_axis(i, self.x_idx)  # noqa: E731
-            fy = lambda i: self._index_to_axis(i, self.y_idx)  # noqa: E731
-            if kind == "rect":
-                art = patches.Rectangle((fx(ov["x0"]), fy(ov["y0"])), fx(ov["x1"]) - fx(ov["x0"]),
-                                        fy(ov["y1"]) - fy(ov["y0"]), fill=False, ec=col, lw=1.2)
-                self.ax_main.add_patch(art)
-            elif kind == "polygon":
-                art = patches.Polygon([(fx(x), fy(y)) for x, y in ov["points"]], closed=True, fill=False, ec=col, lw=1.2)
-                self.ax_main.add_patch(art)
-            elif kind == "ellipse":
-                art = patches.Ellipse((fx(ov["cx"]), fy(ov["cy"])), fx(ov["cx"] + ov["rx"]) - fx(ov["cx"] - ov["rx"]),
-                                      fy(ov["cy"] + ov["ry"]) - fy(ov["cy"] - ov["ry"]), fill=False, ec=col, lw=1.2)
-                self.ax_main.add_patch(art)
-            elif kind == "line":
-                (y1, x1), (y2, x2) = ov["a"], ov["b"]
-                art, = self.ax_main.plot([fx(x1), fx(x2)], [fy(y1), fy(y2)], "-", color=col, lw=1.2)
-            elif kind == "points":
-                art, = self.ax_main.plot([fx(x) for y, x in ov["points"]], [fy(y) for y, x in ov["points"]],
-                                         "x", color=col, ms=5)
-            else:
-                continue
-            self._overlay_artists.append(art)
-
     def _on_click(self, event):
-        if self.tool_active:
-            return
         if event.inaxes != self.ax_main: return
         if event.xdata is None or event.ydata is None: return
         
@@ -902,8 +722,6 @@ class SliceWidget(QFrame):
     
     def _on_drag(self, event):
         """Allows the crosshair to update continuously while clicking and dragging."""
-        if self.tool_active:
-            return
         # event.button == 1 ensures this only triggers if the left mouse button is held down
         if event.inaxes == self.ax_main and event.button == 1:
             self._on_click(event)
@@ -1061,13 +879,10 @@ class DataViewerPanel(QWidget):
     
     # --- NEW: Global registry for Cross-Dataset Sync ---
     _active_instances = weakref.WeakSet()
-    coordsChanged = Signal()  # cursor / slider position changed (e.g. the frame shown)
-
-    def __init__(self, parent=None, compact: bool = False):
+    
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.tensor_data = None
-        self.overlays: list[dict] = []
-        self._compact = bool(compact)
         self.views = []
         self.detached_windows = [] 
         
@@ -1195,8 +1010,7 @@ class DataViewerPanel(QWidget):
         self._last_floor_dir = str(_default_floor_ref_dir())
 
         top_bar = QHBoxLayout()
-        self.title_label = QLabel("<b>Dynamic Cross-Correlated Dashboard</b>")
-        top_bar.addWidget(self.title_label)
+        top_bar.addWidget(QLabel("<b>Dynamic Cross-Correlated Dashboard</b>"))
         top_bar.addStretch()
         self.btn_save_condition = QPushButton("Save this condition…")
         self.btn_save_condition.setToolTip(
@@ -1210,9 +1024,6 @@ class DataViewerPanel(QWidget):
         self.btn_save_condition.clicked.connect(self.save_condition_dialog)
         top_bar.addWidget(self.btn_save_condition)
         self.main_layout.addLayout(top_bar)
-        if self._compact:  # embedded in another panel: no title / ARPES floor-reference button
-            self.title_label.setVisible(False)
-            self.btn_save_condition.setVisible(False)
 
         # Root splitter for vertical rows
         self.v_splitter = QSplitter(Qt.Vertical)
@@ -1597,80 +1408,6 @@ class DataViewerPanel(QWidget):
         
         if broadcast:
             self.broadcast_redraw()
-        self.coordsChanged.emit()
-
-    # ------------------------------------------------------------- host-panel API
-    def set_layers(self, layers: dict, select: str | None = None) -> None:
-        """Replace the extra layers (name -> array; 2-D (y, x) maps work for any N-D data) and
-        refresh the layer menus; ``select`` shows that layer ('Intensity' = the data)."""
-        if self.tensor_data is None:
-            return
-        meta = dict(self.tensor_data.metadata or {})
-        meta["layers"] = dict(layers)
-        self.tensor_data.metadata = meta
-        for view in self._iter_slice_widgets():
-            current = select or view.combo_layer.currentText()
-            view.combo_layer.blockSignals(True)
-            view.combo_layer.clear()
-            view.combo_layer.addItem("Intensity")
-            for name in layers:
-                view.combo_layer.addItem(name)
-            i = view.combo_layer.findText(current)
-            view.combo_layer.setCurrentIndex(i if i >= 0 else 0)
-            view.combo_layer.blockSignals(False)
-            view.redraw()
-
-    def primary_view(self) -> "SliceWidget | None":
-        return self.views[0] if self.views else None
-
-    def start_tool(self, kind: str, callback, color: str = "magenta") -> None:
-        """Draw a shape on the first view (see SliceWidget.start_tool)."""
-        view = self.primary_view()
-        if view is None:
-            raise ValueError("no data shown")
-        view.start_tool(kind, callback, color)
-
-    def set_overlays(self, overlays: list[dict]) -> None:
-        """Shapes to draw (pixel-index coords; optional 'dims': (y_idx, x_idx), 'color')."""
-        self.overlays = list(overlays or [])
-        for view in self._iter_slice_widgets():
-            view._draw_overlays()
-            view.canvas.draw_idle()
-
-    def current_image(self) -> np.ndarray | None:
-        """The 2-D array the first view shows (layer or intensity slice), rows = y."""
-        view = self.primary_view()
-        return None if view is None else getattr(view, "_last_sliced", None)
-
-    def color_limits(self) -> tuple[float, float] | None:
-        """(vmin, vmax) of the colour scale the first view shows now."""
-        view = self.primary_view()
-        return None if view is None else getattr(view, "shown_limits", None)
-
-    def configure_view(self, cmap: str | None = None, symmetric: bool | None = None, center: str | None = None,
-                       image_origin: bool | None = None, aspect_equal: bool | None = None,
-                       limits: tuple[float, float] | str | None = None) -> None:
-        """Set display options on every view (host panels, e.g. PEEM XMCD maps).
-        limits: (vmin, vmax) fixes the colour range; "auto" goes back to the automatic one."""
-        for v in self._iter_slice_widgets():
-            if limits is not None:
-                v.fixed_limits = None if limits == "auto" else (float(limits[0]), float(limits[1]))
-            for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect):
-                w.blockSignals(True)
-            if cmap is not None and v.combo_cmap.findText(cmap) >= 0:
-                v.combo_cmap.setCurrentText(cmap)
-            if symmetric is not None:
-                v.chk_sym.setChecked(symmetric)
-            if center is not None:
-                v.combo_center.setCurrentText(center)
-            if image_origin is not None:
-                v.chk_image_origin.setChecked(image_origin)
-            if aspect_equal is not None:
-                v.combo_aspect.setCurrentIndex(1 if aspect_equal else 0)
-            for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect):
-                w.blockSignals(False)
-            v.update_aspect()
-            v.redraw()
 
     def get_widget_position(self, widget):
         if widget not in self.views:
