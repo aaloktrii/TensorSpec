@@ -29,6 +29,7 @@ tensorspec/
 │   │   ├── __init__.py
 │   │   ├── peem_loaders.py   # TIF / ZIP / folder PEEM stacks
 │   │   ├── xas_loaders.py    # 1D XAS/XMCD CSV/TXT (single or paired channels)
+│   │   ├── raman_loaders.py  # LabRAM/LabSpec maps, single spectra, .h5, spot folders
 │   │   └── loaders/
 │   │       └── maestro/      # MAESTRO HDF5 kinds (xy_fine_4d, focus_xy_fine_5d, …)
 │   ├── dft_engine.py         # MAIN ROUTER: Routes calculation to chinook_tb or qe_generator
@@ -50,6 +51,12 @@ tensorspec/
 │   │   ├── bg.py             # Background models (also used by XAS 1D)
 │   │   ├── roi.py            # ROI helpers for drift / NCC
 │   │   └── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
+│   ├── raman_engine.py       # MAIN ROUTER: voigt / lorentz_n / lorentz_auto / g_2d → core/raman/*
+│   ├── raman/                # Raman science (no Qt, no plotting)
+│   │   ├── tools.py          # Si calibration, backgrounds, peak fits + auto count, shapes
+│   │   ├── fit_model.py      # Step-1 FitModel + fit_spectrum
+│   │   ├── classification.py / voigt_2d.py / strain_doping.py / reference.py / …
+│   │   └── data/graphene_reference.json  # shipped read-only 1L/2L reference
 │   ├── transport_engine.py   # PLANNED: magnetoresistance, Hall, R-T scaling
 │   └── ml/                   # SSL models, clustering, training workers (no Qt)
 ├── plotting/
@@ -58,20 +65,25 @@ tensorspec/
 │   │   ├── __init__.py
 │   │   ├── matplotlib_engine.py # Safe CPU rendering for 1D lines & static 2D maps
 │   │   ├── pyvista_engine.py    # Fast GPU rendering for 3D crystal structures & volumes
-│   │   └── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
+│   │   ├── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
+│   │   ├── raman_matplotlib_engine.py  # Raman figure style + shared map helpers
+│   │   └── raman_views/         # One renderer module per Raman tab
 │   └── viewers/               # Reusable Qt widgets for suites to embed (where present)
+│       └── raman_canvas.py      # Canvas, compact toolbar, vector export
 └── gui/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon
     ├── services/             # Non-HTTP service layer between panels and core
     │   ├── peem_service.py
-    │   └── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
+    │   ├── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
+    │   └── raman_service.py  # Qt-free Raman back-end API (all state; one method per action)
     ├── components/           # Reusable, isolated UI panels
     │   ├── __init__.py
     │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
     │   ├── peem_panel.py / xas_panel.py  # PEEM: left forms; right Frame|BG|Sum Rule tabs
+    │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)
     │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows
     │   └── ml_tabs/               # Extracted ML suite tabs
     ├── ml/                   # MaestroAI workers, warehouse, session helpers
@@ -81,6 +93,7 @@ tensorspec/
         ├── arpes_suite.py
         ├── peem_suite.py
         ├── xas_suite.py
+        ├── raman_suite.py        # Tabs: 1 · Spectra | 2 · Map | 3 · Analysis
         ├── transport_suite.py    # Shell until transport_engine ships
         └── ml_suite.py
 

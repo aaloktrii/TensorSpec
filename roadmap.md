@@ -7,7 +7,7 @@ Grand App
 	- Tab layout (left panel, 2026-10): **View** | **CDW** | **Stack** | **BZ**
 		- **View** (`gui/components/crystal_panel.py` `TabViewEdit`): sub-tabs Structure (CIF/load, backend, geometry, styles, eraser, colors, Render) | Camera (projection, presets, az/el, hkl align, cut plane) | Export (3ds Max/Blender, high-res image, CIF)
 		- **CDW**: wavevector / amplitude / phase modulator
-		- **Stack**: 2D templates, bulk exfoliator, layer rows, Bernevig twist, moiré (scrollable)
+		- **Stack**: 2D templates, bulk exfoliator, layer rows; builder Plain (native lattices) | Bernevig (homobilayer twist); Push never auto-strains (Bernevig opt-in dialog only); moiré period report on Plain (scrollable)
 		- **BZ**: bulk / surface Brillouin zone + export to workspace
 	- [x] **Refactor Architectural Modularity:** Decouple monolithic `crystal_viewer.py` into modular architecture (`core/crystallography.py`, `plotting/pyvista_engine.py`, `plotting/matplotlib_engine.py`, and `gui/components/crystal_panel.py`).
 	- [x] File loader panel & "Draw" button.
@@ -78,10 +78,15 @@ Grand App
 	- [x] background subtraction (shared BG core) applied across stack / channels
 	- [x] XMCD sum-rule analysis for CP/CM (and related pairs)
 	- [x] Layout: left forms-only; right tabs Frame | BG | Sum Rule (previews no longer crowd left scroll)
-- [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/DFT/ARPES/Transport/ML (prevent drag-to-zero)
+- [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/Raman/DFT/ARPES/Transport/ML (prevent drag-to-zero)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)
 	- [x] background subtraction + XMCD sum rule via **shared PEEM BG / sum-rule core** (no separate `xas_engine.py` yet)
+- [x] Raman Suite (`core/raman_engine.py`, `core/io/raman_loaders.py`, `core/raman/`, `plotting/backends/raman_matplotlib_engine.py` + `raman_views/`, `plotting/viewers/raman_canvas.py`, `gui/services/raman_service.py`, `gui/components/raman_panel.py` + `raman_tabs/`, `gui/suites/raman_suite.py`)
+	- [x] 1 · Spectra: overlay, typed ranges, auto / N / manual peaks, Lorentzian / Gaussian / pseudo-Voigt, Si calibration, backgrounds; stacked figure
+	- [x] 2 · Map: total intensity, band integrals, movable area + fit, fit every pixel → peak maps, compare cells
+	- [x] 3 · Analysis (graphene): 2D-band Voigt map, layer number + ABA/ABC, 1L/2L reference prediction, strain/doping
+	- [ ] Published strain/doping constants; more layers (≥3L references, shear modes); neutral compare-cells defaults
 - [ ] Transport Suite (`gui/suites/transport_suite.py` shell only)
 	- [x] PEEM-style split panel + demo R(H) / Hall / R(T) curves
 	- [ ] `core/transport_engine.py` (load PPMS/csv, symmetrize, Hall BG, parameter extraction)
