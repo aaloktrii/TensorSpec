@@ -40,6 +40,9 @@ MIN_SNR_PRESENT = 5.0   # ...and the band's strongest peak this tall, or n = 0
 MIN_SEP_FRAC = 0.6     # two Lorentzians show a dip only beyond ~FWHM/sqrt(3)
 MIN_AREA_FRAC = 0.05
 BACKGROUNDS = ["none", "linear", "polynomial", "als"]
+#: Peak shapes. 'voigt' is a pseudo-Voigt: eta·Lorentzian + (1-eta)·Gaussian of one FWHM, eta fitted.
+SHAPES = ("lorentzian", "gaussian", "voigt")
+_G = 4.0 * np.log(2.0)                    # Gaussian of FWHM w: exp(-_G (x-x0)^2 / w^2)
 
 
 # ---------------------------------------------------------------------------
@@ -141,8 +144,43 @@ def _jac(x, xc, *p):
     return J
 
 
-def _fit(x, y, starts, wmin, wmax, xc):
-    """starts: [(x0, w, h), ...]. Returns (params, cov, rss) or None."""
+def _profile(x, x0, w, shape, eta=0.5):
+    """Unit-height peak of FWHM w."""
+    if shape == "gaussian":
+        return np.exp(-_G * (x - x0) ** 2 / w ** 2)
+    lor = (w / 2) ** 2 / ((x - x0) ** 2 + (w / 2) ** 2)
+    if shape == "lorentzian":
+        return lor
+    return eta * lor + (1 - eta) * np.exp(-_G * (x - x0) ** 2 / w ** 2)
+
+
+def _npp(shape):
+    """Parameters per peak: x0, w, h (+ eta for the pseudo-Voigt)."""
+    return 4 if shape == "voigt" else 3
+
+
+def _model_s(x, xc, shape, *p):
+    """_model for any shape: linear baseline about xc plus peaks."""
+    if shape == "lorentzian":
+        return _model(x, xc, *p)
+    y = p[0] * (x - xc) + p[1]
+    k = _npp(shape)
+    for i in range(2, len(p), k):
+        y = y + p[i + 2] * _profile(x, p[i], p[i + 1], shape, *(p[i + 3:i + 4]))
+    return y
+
+
+def _area_factor(shape, eta=0.5):
+    """area = factor · height · FWHM."""
+    lor, gau = np.pi / 2, np.sqrt(np.pi / _G)
+    return {"lorentzian": lor, "gaussian": gau}.get(shape, eta * lor + (1 - eta) * gau)
+
+
+def _fit(x, y, starts, wmin, wmax, xc, shape="lorentzian", centre_tol=None):
+    """starts: [(x0, w, h), ...]. Returns (params, cov, rss, at_bound) or None.
+    centre_tol: hold each centre within ± this of its start (manual peaks)."""
+    if shape != "lorentzian" or centre_tol is not None:
+        return _fit_general(x, y, starts, wmin, wmax, xc, shape, centre_tol)
     lo, hi = x.min(), x.max()
     p0, lb, ub = [0.0, 0.0], [-np.inf, -np.inf], [np.inf, np.inf]
     for x0, w, h in starts:
@@ -168,13 +206,49 @@ def _fit(x, y, starts, wmin, wmax, xc):
     return p, cov, rss, at_bound
 
 
+def _fit_general(x, y, starts, wmin, wmax, xc, shape, centre_tol):
+    """_fit for Gaussian / pseudo-Voigt peaks and for centres held within ± centre_tol
+    (numerical Jacobian)."""
+    lo, hi = x.min(), x.max()
+    p0, lb, ub = [0.0, 0.0], [-np.inf, -np.inf], [np.inf, np.inf]
+    for x0, w, h in starts:
+        c = float(np.clip(x0, lo + 0.1, hi - 0.1))
+        clo, chi = (lo, hi) if centre_tol is None else (max(lo, c - centre_tol), min(hi, c + centre_tol))
+        p0 += [c, float(np.clip(w, wmin * 1.01, wmax * 0.99)), max(float(h), 1e-9)]
+        lb += [clo, wmin, 0.0]
+        ub += [chi, wmax, np.inf]
+        if shape == "voigt":
+            p0 += [0.5]
+            lb += [0.0]
+            ub += [1.0]
+    f = lambda xx, *p: _model_s(xx, xc, shape, *p)
+    p = None
+    for maxfev in (3000, 30000):
+        try:
+            p, cov = curve_fit(f, x, y, p0=p0, bounds=(lb, ub), maxfev=maxfev, x_scale="jac")
+            break
+        except Exception:
+            continue
+    if p is None:
+        return None
+    rss = float(np.sum((y - f(x, *p)) ** 2))
+    k = _npp(shape)
+    at_bound = any(np.isclose(p[i], lb[i], rtol=0, atol=1e-6 * max(1, abs(lb[i])))
+                   or np.isclose(p[i], ub[i], rtol=0, atol=1e-6 * max(1, abs(ub[i])))
+                   for i in range(2, len(p)) if (i - 2) % k < 3          # eta may sit at 0 or 1
+                   and np.isfinite(lb[i]) and np.isfinite(ub[i]))
+    return p, cov, rss, at_bound
+
+
 def fit_peaks(x, y, n="auto", nmax=4, resolution=None, wmax=150.0, noise=None,
-              starts=None):
+              starts=None, shape="lorentzian", centre_tol=None):
     """Lorentzians on a residual linear baseline. y should already have its
     background removed (a small leftover slope/offset is fitted anyway).
 
     n       int for a fixed number of peaks, or 'auto' (1..nmax, see module doc)
     starts  optional [(x0, w, h), ...] starting values for a fixed n
+    shape   'lorentzian' (default), 'gaussian' or 'voigt' (pseudo-Voigt, eta fitted per peak)
+    centre_tol  with starts: hold each centre within ± this of its start (manual peaks)
     Returns dict: ok, n, comps [{pos, fwhm, height, area, *_err}], r2, bic,
     tried {k: bic}, why, curve (x, y, fit), components [arrays].
     """
@@ -198,18 +272,25 @@ def fit_peaks(x, y, n="auto", nmax=4, resolution=None, wmax=150.0, noise=None,
     def bic(rss, k):
         return N * np.log(max(rss, 1e-12) / N) + k * np.log(N)
 
+    npp = _npp(shape)
+
     def describe(res):
         p, cov, rss, _ = res
         err = np.sqrt(np.clip(np.diag(cov), 0, np.inf)) if np.all(np.isfinite(cov)) \
             else np.full(len(p), np.nan)
         comps = []
-        for k in range(2, len(p), 3):
+        for k in range(2, len(p), npp):
             x0, w, h = p[k:k + 3]
             ex, ew, eh = err[k:k + 3]
-            comps.append(dict(pos=float(x0), fwhm=float(w), height=float(h),
-                              area=float(np.pi * h * w / 2), pos_err=float(ex),
-                              fwhm_err=float(ew), height_err=float(eh),
-                              area_err=float(np.pi / 2 * np.hypot(h * ew, w * eh))))
+            eta = float(p[k + 3]) if shape == "voigt" else None
+            a = _area_factor(shape, eta if eta is not None else 0.5)
+            c = dict(pos=float(x0), fwhm=float(w), height=float(h),
+                     area=float(a * h * w), pos_err=float(ex),
+                     fwhm_err=float(ew), height_err=float(eh),
+                     area_err=float(a * np.hypot(h * ew, w * eh)))
+            if eta is not None:
+                c["eta"] = eta
+            comps.append(c)
         comps.sort(key=lambda c: c["pos"])
         return comps
 
@@ -236,12 +317,12 @@ def fit_peaks(x, y, n="auto", nmax=4, resolution=None, wmax=150.0, noise=None,
             top = x[y >= y.max() / 3] if y.max() > 0 else x
             c0 = np.linspace(top.min(), top.max(), n + 2)[1:-1] if n > 1 else [x[np.argmax(y)]]
             starts = [(c, 20.0 if n == 1 else 12.0, max(y.max(), noise) / n) for c in c0]
-        res = _fit(x, y, starts, wmin, wmax, xc)
+        res = _fit(x, y, starts, wmin, wmax, xc, shape, centre_tol)
         if res is None:
             out["why"] = "fit failed"
             return out
         best, best_n = res, n
-        out["tried"][n] = bic(res[2], 2 + 3 * n)
+        out["tried"][n] = bic(res[2], 2 + npp * n)
     else:
         best, best_n = None, 0
         prev_starts = []
@@ -253,7 +334,7 @@ def fit_peaks(x, y, n="auto", nmax=4, resolution=None, wmax=150.0, noise=None,
             if best is None:
                 layouts.append([(x[np.argmax(y)], 20.0, max(y.max(), noise))])
             else:
-                resid = y - _model(x, xc, *best[0])
+                resid = y - _model_s(x, xc, shape, *best[0])
                 j = int(np.argmax(resid))
                 layouts.append(prev_starts + [(x[j], max(wmin * 2, 8.0), max(resid[j], noise))])
                 cs = np.linspace(top.min(), top.max(), k + 2)[1:-1]
@@ -261,7 +342,7 @@ def fit_peaks(x, y, n="auto", nmax=4, resolution=None, wmax=150.0, noise=None,
                 layouts.append([(c, w0, max(float(np.interp(c, x, y)), noise)) for c in cs])
             cand = None
             for lay in layouts:
-                res = _fit(x, y, lay, wmin, wmax, xc)
+                res = _fit(x, y, lay, wmin, wmax, xc, shape)
                 if res is None:
                     continue
                 comps = describe(res)
@@ -275,7 +356,7 @@ def fit_peaks(x, y, n="auto", nmax=4, resolution=None, wmax=150.0, noise=None,
                 out["stopped"] = out.get("rejected", {}).get(k, "fit failed")
                 break
             res, comps = cand
-            out["tried"][k] = bic(res[2], 2 + 3 * k)
+            out["tried"][k] = bic(res[2], 2 + npp * k)
             if best is not None and out["tried"][k] > out["tried"][best_n] - MIN_DBIC:
                 out["stopped"] = "BIC did not improve by %g" % MIN_DBIC
                 break
@@ -290,19 +371,22 @@ def fit_peaks(x, y, n="auto", nmax=4, resolution=None, wmax=150.0, noise=None,
         out["tried"] = {}
         return out
     p = best[0]
-    fit = _model(x, xc, *p)
+    fit = _model_s(x, xc, shape, *p)
     r2 = 1 - best[2] / np.sum((y - y.mean()) ** 2)
     comps = describe(best)
     out.update(ok=True, n=best_n, comps=comps, r2=float(r2), bic=out["tried"][best_n],
                noise=noise, wmin=wmin, curve=(x, y, fit),
                baseline=p[0] * (x - xc) + p[1],
                components=[c["height"] * (c["fwhm"] / 2) ** 2 /
-                           ((x - c["pos"]) ** 2 + (c["fwhm"] / 2) ** 2) for c in comps])
+                           ((x - c["pos"]) ** 2 + (c["fwhm"] / 2) ** 2) for c in comps]
+               if shape == "lorentzian" else
+               [c["height"] * _profile(x, c["pos"], c["fwhm"], shape, c.get("eta", 0.5))
+                for c in comps], shape=shape)
     return out
 
 
 def analyse_band(wn, y, lo, hi, n="auto", nmax=4, bg="linear", bg_opts=None,
-                 resolution=None, noise=None, starts=None):
+                 resolution=None, noise=None, starts=None, shape="lorentzian", centre_tol=None):
     """Background-subtract [lo, hi] and fit it. Returns the fit_peaks dict
     plus 'x', 'raw', 'bg'."""
     s = (wn >= lo) & (wn <= hi)
@@ -311,6 +395,6 @@ def analyse_band(wn, y, lo, hi, n="auto", nmax=4, bg="linear", bg_opts=None,
         return {"ok": False, "n": 0, "comps": [], "why": "range not covered", "tried": {}}
     b = background(x, v, bg, **(bg_opts or {}))
     r = fit_peaks(x, v - b, n=n, nmax=nmax, resolution=resolution, noise=noise,
-                  starts=starts)
+                  starts=starts, shape=shape, centre_tol=centre_tol)
     r.update(x=x, raw=v, bg=b)
     return r

@@ -72,8 +72,9 @@ def draw_correlation_figure(fig, rows, params):
 
 
 def draw_spectra_overlay(fig, items, bands, max_legend=12):
-    """All loaded spectra on one axes (raw counts), the fit bands shaded and named.
-    ``items``: [{label, wn, y}]; ``bands``: the fit model's (name, lo, hi, ...) rows."""
+    """All loaded spectra on one axes (raw counts), the fit bands shaded and named, and the
+    centres of Manual bands as dotted lines.
+    ``items``: [{label, wn, y}]; ``bands``: the fit model's (name, lo, hi, peaks, ...) rows."""
     import matplotlib.transforms as mtransforms
     ax = fig.add_subplot(111)
     many = len(items) > max_legend
@@ -82,9 +83,12 @@ def draw_spectra_overlay(fig, items, bands, max_legend=12):
                 color="#555" if many else COMP_COLORS[k % len(COMP_COLORS)],
                 alpha=0.35 if many else 1.0, label=None if many else it["label"])
     trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
-    for name, lo, hi, *_ in bands:
+    for name, lo, hi, *rest in bands:
         ax.axvspan(lo, hi, color="#ffd54f", alpha=0.25, lw=0)
         ax.text(0.5 * (lo + hi), 1.0, name, transform=trans, ha="center", va="bottom", fontsize=8)
+        if len(rest) >= 4 and rest[0] == "manual":
+            for c in rest[3]:
+                ax.axvline(c, color="#d81b60", lw=0.9, ls=":")
     ax.set_xlabel("Raman shift (cm$^{-1}$)")
     ax.set_ylabel("Intensity (counts)")
     ax.set_title("%d spectr%s" % (len(items), "um" if len(items) == 1 else "a"), fontsize=9, pad=14)

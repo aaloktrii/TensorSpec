@@ -182,3 +182,29 @@ def test_peak_maps_count_and_number_peaks_by_position(tmp_path):
     assert abs(maps["G_p1_pos"][0, 1] - 1585) < 1.5 and abs(maps["G_p2_pos"][0, 1] - 1603) < 1.5
     assert np.isnan(maps["G_p2_pos"][0, 0])                  # no second peak in the single-G pixel
     assert single >= 0 and split >= 0
+
+
+def test_line_shapes_recover_true_peak():
+    from tensorspec.core.raman import tools
+    x = np.linspace(1500, 1700, 800)
+    rng = np.random.default_rng(3)
+    gauss = 500 * np.exp(-4 * np.log(2) * (x - 1580) ** 2 / 15 ** 2)
+    lor = 500 * 7.5 ** 2 / ((x - 1580) ** 2 + 7.5 ** 2)
+    for shape, y in (("gaussian", gauss), ("lorentzian", lor), ("voigt", 0.4 * lor + 0.6 * gauss)):
+        r = tools.analyse_band(x, y + 100 + rng.normal(0, 3, x.size), 1500, 1700, n=1, shape=shape)
+        c = r["comps"][0]
+        assert r["ok"] and abs(c["pos"] - 1580) < 0.3 and abs(c["fwhm"] - 15) < 0.5, shape
+    assert abs(c["eta"] - 0.4) < 0.1                           # the pseudo-Voigt mixing
+
+
+def test_manual_peaks_are_held_within_tolerance():
+    from tensorspec.core.raman.fit_model import FitModel, fit_spectrum
+    y = graphene(split_g=True)                                   # G- 1585, G+ 1603
+    near = FitModel(bands=[("G", 1500, 1680, "manual", 4, "lorentzian", (1590, 1600))], centre_tol=10)
+    got = [c["pos"] for c in fit_spectrum(WN, y, near)["bands"]["G"]["comps"]]
+    assert abs(got[0] - 1585) < 1 and abs(got[1] - 1603) < 1
+    far = FitModel(bands=[("G", 1500, 1680, "manual", 4, "lorentzian", (1570, 1620))], centre_tol=5)
+    got = [c["pos"] for c in fit_spectrum(WN, y, far)["bands"]["G"]["comps"]]
+    assert 1565 <= got[0] <= 1575 and 1615 <= got[1] <= 1625    # cannot leave ±5
+    none = FitModel(bands=[("G", 1500, 1680, "manual", 4, "lorentzian", ())])
+    assert fit_spectrum(WN, y, none)["bands"]["G"]["why"] == "no peaks placed in this band"
