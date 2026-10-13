@@ -4,8 +4,8 @@
         --dead "<Procedure files>/deadpixel_*.tif" --norm "<Procedure files>/NormImage_*.tif"
 
 The beamtime folder must contain logbook_sessions.csv and logbook_conditions.csv.
-Outputs go to <day>/tensorspec_xpeem/ (clusters/, spectra/, index.csv); the
-beamtime folder gets tensorspec_xpeem_index.csv, _catalog.csv and _logbook_check.csv.
+Outputs go to <day>/tensorspec_peem/ (clusters/, spectra/, index.csv); the
+beamtime folder gets tensorspec_peem_index.csv, _catalog.csv and _logbook_check.csv.
 --plan only prints the plan; --days limits processing; existing outputs are skipped
 unless --redo.
 """
@@ -75,7 +75,7 @@ def overview(root: Path) -> None:
 
     from tensorspec.plotting.ue49_preview import session_overview
 
-    with open(root / "tensorspec_xpeem_index.csv", newline="") as fh:
+    with open(root / "tensorspec_peem_index.csv", newline="") as fh:
         rows = list(csv.DictReader(fh))
     # rows of skipped (existing) clusters carry no condition; recover them from cluster.json
     import json
@@ -89,7 +89,7 @@ def overview(root: Path) -> None:
                       "log_ccs_mA": c["ccs_mA"], "log_pulse_before": c["pulse_before"],
                       "log_rotation_deg": c["rotation_deg"]})
     for session in sorted({r["session"] for r in rows if r.get("session")}):
-        n = session_overview(root, session, rows, root / f"tensorspec_xpeem_overview_{session}.png")
+        n = session_overview(root, session, rows, root / f"tensorspec_peem_overview_{session}.png")
         print(f"overview {session}: {n} clusters", flush=True)
 
 

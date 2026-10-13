@@ -2,9 +2,9 @@
 
     python scripts/esm/process_beamtime.py "<data>/BNL/<proposal>" [--plan] [--redo]
 
-Outputs go to <date>_<sample>/tensorspec_xpeem/ (clusters/, ld_splits/, spectra/,
-leem/, index.csv); the beamtime folder gets tensorspec_xpeem_index.csv and
-tensorspec_xpeem_catalog.csv. Existing cluster outputs are reused unless --redo.
+Outputs go to <date>_<sample>/tensorspec_peem/ (clusters/, ld_splits/, spectra/,
+leem/, index.csv); the beamtime folder gets tensorspec_peem_index.csv and
+tensorspec_peem_catalog.csv. Existing cluster outputs are reused unless --redo.
 """
 from __future__ import annotations
 

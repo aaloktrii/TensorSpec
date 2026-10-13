@@ -37,7 +37,7 @@ from tensorspec.core.io import ue49_loaders as loaders
 from tensorspec.core.peem import dichroism, domains, registration
 from tensorspec.core.peem.ue49 import detector
 
-OUT_DIRNAME = "tensorspec_xpeem"
+OUT_DIRNAME = "tensorspec_peem"
 _NUM = re.compile(r"(\d+)$")
 # Cr d3 (Cr3+): 7 holes. Spin sum rule at the Cr L edge needs a jj-mixing
 # correction (~2x); values are reported raw.
@@ -803,8 +803,8 @@ def run(root: str | Path, settings: Settings, *, days: Iterable[str] | None = No
     p = plan(root, sessions, conditions)
     days = set(days) if days else None
     issues = validate(p, conditions)
-    write_csv_rows(root / "tensorspec_xpeem_logbook_check.csv", issues)
-    write_csv_rows(root / "tensorspec_xpeem_catalog.csv", [asdict(s) for s in sorted(
+    write_csv_rows(root / "tensorspec_peem_logbook_check.csv", issues)
+    write_csv_rows(root / "tensorspec_peem_catalog.csv", [asdict(s) for s in sorted(
         p["catalog"].values(), key=lambda s: (s.session, s.kind, s.number))])
     rows: list[dict[str, Any]] = []
     todo = [("cluster", c) for c in p["clusters"]] + [("spectra", j) for j in p["spectra"]]
@@ -831,7 +831,7 @@ def run(root: str | Path, settings: Settings, *, days: Iterable[str] | None = No
         if str(row.get("status", "")).startswith("ok"):
             _json(target / "index_row.json", row)
         log(f"[{i}/{len(todo)}] {jid}: {row.get('status')}")
-    write_csv_rows(root / "tensorspec_xpeem_index.csv", rows)
+    write_csv_rows(root / "tensorspec_peem_index.csv", rows)
     for day in sorted({r["day"] for r in rows}):
         d = root / day / OUT_DIRNAME
         if d.is_dir():

@@ -34,7 +34,7 @@ from tensorspec.core.io import uview_loaders as uview
 from tensorspec.core.peem.ue49 import batch as ub
 from tensorspec.core.peem import dichroism
 
-OUT_DIRNAME = "tensorspec_xpeem"
+OUT_DIRNAME = "tensorspec_peem"
 _XPEEM = re.compile(r"^XPEEM_(?P<fov>[\d.]+)um_(?P<ap>.+?)_(?P<e>[\d.]+)eV_(?P<edge>\w+?)_(?P<pol>CL|CR|LH|LV)"
                     r"_(?P<az>[+-]?\d+)deg(?:_(?P<rep>\d+))?$")
 _XAS = re.compile(r"^XAS_(?P<fov>[\d.]+)um_(?P<ap>.+?)_(?P<e0>[\d.]+)eV_(?P<e1>[\d.]+)eV_(?P<step>[\d.]+)eV-step"
@@ -397,7 +397,7 @@ def run(root: str | Path, st: Settings | None = None, preview=None, log=print, s
     st = st or Settings()
     cat = catalog(root)
     groups = plan(cat)
-    ub.write_csv_rows(root / "tensorspec_xpeem_catalog.csv", [asdict(a) for a in cat["acqs"]])
+    ub.write_csv_rows(root / "tensorspec_peem_catalog.csv", [asdict(a) for a in cat["acqs"]])
     rows: list[dict[str, Any]] = []
     for i, g in enumerate(groups, 1):
         target = _out_root(root, g.condition[0]) / "clusters" / g.gid
@@ -421,7 +421,7 @@ def run(root: str | Path, st: Settings | None = None, preview=None, log=print, s
         except Exception as exc:
             rows.append({"type": "spectra:XAS", "id": Path(a.path).name, "date": a.date, "status": f"error: {exc}"})
     rows += export_leem(cat["leem"], root, preview)
-    ub.write_csv_rows(root / "tensorspec_xpeem_index.csv", rows)
+    ub.write_csv_rows(root / "tensorspec_peem_index.csv", rows)
     for date in sorted({r["date"] for r in rows if r.get("date")}):
         d = _out_root(root, date)
         if d.is_dir():

@@ -74,7 +74,7 @@ def test_run_writes_outputs(beamtime):
     meta = json.loads((out / "cluster.json").read_text())
     assert meta["repeatability"]["mean_corr"] > 0.9  # identical synthetic repeats
     assert (beamtime / "20250602" / batch.OUT_DIRNAME / "index.csv").exists()
-    assert (beamtime / "tensorspec_xpeem_logbook_check.csv").exists()
+    assert (beamtime / "tensorspec_peem_logbook_check.csv").exists()
     # second run skips existing outputs
     again = batch.run(beamtime, st, preview=None, log=lambda *_: None)
     assert {r["status"] for r in again["rows"]} == {"ok (existing)"}

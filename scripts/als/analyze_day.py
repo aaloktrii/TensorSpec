@@ -14,7 +14,7 @@ the UE49 pipeline) and pcd = (I(+0.9) - I(-0.9)) / (I(+0.9) + I(-0.9)) is formed
 acquisitions at the same stage position, FOV and energy are merged into a cluster.
 XAS: ROI-mean / I0 per frame; an XMCD spectrum is formed from a + and a - sweep
 when both exist (flagged when they were taken at different positions / FOVs).
-Outputs go to ``<day>/tensorspec_xpeem/``.
+Outputs go to ``<day>/tensorspec_peem/``.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ FE = {"pre": (695.0, 704.0), "L3": (704.0, 715.0), "L2": (716.0, 728.0), "post":
 
 def acquisitions(day: Path) -> dict[str, list[Path]]:
     acqs: dict[str, list[Path]] = {}
-    for d in sorted(p for p in day.iterdir() if p.is_dir() and p.name != "tensorspec_xpeem"):
+    for d in sorted(p for p in day.iterdir() if p.is_dir() and p.name != "tensorspec_peem"):
         fs = p3b.frame_files(d)
         if fs:
             acqs[d.name] = fs
@@ -99,7 +99,7 @@ def main() -> int:
                     help="cp_minus_cm: pcd = (I(+) - I(-))/(I(+) + I(-))")
     a = ap.parse_args()
     day = Path(a.day)
-    out = day / "tensorspec_xpeem"
+    out = day / "tensorspec_peem"
     out.mkdir(exist_ok=True)
     from tensorspec.plotting.ue49_preview import Preview
 
