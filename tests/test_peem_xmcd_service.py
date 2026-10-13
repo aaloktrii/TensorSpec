@@ -118,3 +118,25 @@ def test_steps_logged_in_history_and_edits_kept_out_of_raw(xmcd_dataset):
     steps = [line.split("] ", 1)[1].split(":", 1)[0] for line in log if "] PEEM " in line]
     assert steps == ["PEEM load", "PEEM stack edits", "PEEM drift correct", "PEEM stack", "PEEM asymmetry"]
     assert '"method": "cross-correlation, central half (sub-pixel)"' in next(l for l in log if "PEEM drift" in l)
+
+
+def test_stack_step_shows_stacked_images_and_sums(qapp, xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    p = PeemXmcdPanel(service=svc)
+    p._run = lambda fn, done, *args, **kw: done(fn(*args, **kw))  # synchronous for the test
+    p._name = "synth_xmcd"
+    p._refresh_views(select="raw")
+    svc.drift_correct("synth_xmcd")
+    p._stack_step()
+    st = global_workspace.pull_analysis_data("synth_xmcd", "stack")
+    labels = [p.stack_out.itemText(i) for i in range(p.stack_out.count())]
+    assert labels[0] == "Show: CP stacked (mean, 3 frames)" and "CP + CM" in labels[2]
+    expect = {"a_mean": "mean_cp", "b_mean": "mean_cm", "data": "data", "a_sum": "sum_cp", "b_sum": "sum_cm"}
+    for i in range(p.stack_out.count()):
+        p.stack_out.setCurrentIndex(i)
+        var = expect[p.stack_out.currentData()]
+        assert p._view_kind() == "stack" and (p._view_var() or "data") == var
+        assert np.allclose(p._current_image(), st[var].values, equal_nan=True)
+    assert np.allclose(st["sum_cp"].values, 3 * st["mean_cp"].values)
+    assert np.allclose(st["data"].values, st["mean_cp"].values + st["mean_cm"].values)

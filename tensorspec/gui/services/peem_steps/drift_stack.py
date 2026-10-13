@@ -190,7 +190,9 @@ class PeemDriftStackSteps:
     def stack(self, name: str, pair: str = "xmcd") -> dict[str, Any]:
         """Step 2: average the drift-corrected frames of each polarization into one image, then
         align the B image onto the A image on edge images (opposite polarizations show reversed
-        magnetic contrast; edges are the same). Writes /analysis/stack."""
+        magnetic contrast; edges are the same). Writes /analysis/stack: data = A + B (the two
+        stacked images added), mean_<a> / mean_<b> (stacked images), sum_<a> / sum_<b> (sums of
+        the frames)."""
         tags = {"xmcd": ("CP", "CM"), "xld": ("LH", "LV")}.get(pair)
         if tags is None:
             raise ValueError('pair must be "xmcd" or "xld"')
@@ -210,7 +212,9 @@ class PeemDriftStackSteps:
         dy, dx = np.asarray(pmd["drift_dy_px"]), np.asarray(pmd["drift_dx_px"])
         ds = products.map_dataset(
             "stack", mean_a + mean_b,
-            extra={f"mean_{ta.lower()}": mean_a, f"mean_{tb.lower()}": mean_b},
+            extra={f"mean_{ta.lower()}": mean_a, f"mean_{tb.lower()}": mean_b,
+                   # sums of the frames (Igor co-adds are sums); same alignment as the means
+                   f"sum_{ta.lower()}": mean_a * len(ia), f"sum_{tb.lower()}": mean_b * len(ib)},
             attrs={"pair": pair, "channel_a": ta, "channel_b": tb,
                    "channel_a_name": src.get(ta, ta), "channel_b_name": src.get(tb, tb),
                    "n_a": len(ia), "n_b": len(ib), "source_node": "processed",

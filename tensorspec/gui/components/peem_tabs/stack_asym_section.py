@@ -36,6 +36,11 @@ class StackAsymSection:
         b.setToolTip("Average the drift-corrected frames of each polarization, then align the two images on edges")
         b.clicked.connect(self._stack_step)
         sk.addRow(b)
+        self.stack_out = QComboBox()
+        self._set_stack_labels("CP", "CM")
+        self.stack_out.setToolTip("Stacked images in the viewer (after Stack)")
+        self.stack_out.currentIndexChanged.connect(self._show_stack_output)
+        sk.addRow(self.stack_out)
         cl.addWidget(stk)
 
         # ---------------------------------------------------------------- 4. Asymmetry
@@ -103,8 +108,41 @@ class StackAsymSection:
     def _stack_step(self):
         name = self._require()
         if name:
-            self._run(self.service.stack, lambda r: self._show_result(r, "stack"), name,
-                      pair=self.pair_combo.currentData())
+            self._run(self.service.stack, self._on_stacked, name, pair=self.pair_combo.currentData())
+
+    def _set_stack_labels(self, a: str, b: str, n_a: int | None = None, n_b: int | None = None):
+        na = f", {n_a} frames" if n_a else ""
+        nb = f", {n_b} frames" if n_b else ""
+        cur = self.stack_out.currentData() or "a_mean"
+        self.stack_out.blockSignals(True)
+        self.stack_out.clear()
+        for label, key in ((f"Show: {a} stacked (mean{na})", "a_mean"), (f"Show: {b} stacked (mean{nb})", "b_mean"),
+                           (f"Show: {a} + {b} (sum of the two stacked images)", "data"),
+                           (f"Show: {a}, sum of frames", "a_sum"), (f"Show: {b}, sum of frames", "b_sum")):
+            self.stack_out.addItem(label, key)
+        self.stack_out.setCurrentIndex(max(0, self.stack_out.findData(cur)))
+        self.stack_out.blockSignals(False)
+
+    def _on_stacked(self, res: dict):
+        at = self.service.get_product_attrs(self._name, "stack")
+        self._set_stack_labels(at.get("channel_a_name", "A"), at.get("channel_b_name", "B"),
+                               at.get("n_a"), at.get("n_b"))
+        self._show_result(res, "stack")
+        self._show_stack_output()
+
+    def _show_stack_output(self, *_):
+        """Show the chosen stacked image (layer in the viewer)."""
+        if not self._name or "stack" not in self.service.list_products(self._name):
+            return
+        want = self.stack_out.currentData()
+        if want != "data":
+            at = self.service.get_product_attrs(self._name, "stack")
+            tag = at.get("channel_a" if want.startswith("a") else "channel_b", "")
+            want = f"{'mean' if want.endswith('mean') else 'sum'}_{str(tag).lower()}"
+            if want not in self.service.map_variables(self._name, "stack"):
+                self._err("Run Stack again to get the sums of the frames (older result).")
+                return
+        self._select("stack", want)
 
     def _show_asym_output(self, *_):
         """Show the chosen output of the asymmetry step (layer in the viewer)."""
