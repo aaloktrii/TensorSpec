@@ -317,49 +317,38 @@ class LoadSection:
             self._add_paths(direct)
 
     def _choose_acquisitions(self, root: str, found) -> list[str]:
-        """Checklist of the acquisitions inside ``root``; returns the ticked paths."""
+        """List of the acquisitions inside ``root``, all selected; returns the selected paths.
+        Select as in Finder: click, ⇧-click, ⌘-click, ⌘A."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Add from {os.path.basename(root)}")
         lay = QVBoxLayout(dlg)
-        lay.addWidget(QLabel(f"{len(found)} acquisition(s) found, all ticked. Untick the ones not to add "
-                             "(or select several and press Space / Tick selected)."))
+        lay.addWidget(QLabel(f"{len(found)} acquisition(s) found, all selected. Click / ⇧-click / ⌘-click "
+                             "to choose others."))
         lst = QListWidget()
         lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
         for fmt, p in found:
-            rel = os.path.relpath(str(p), root)
-            lst.addItem(f"[{fmt}] {rel}")
-            it = lst.item(lst.count() - 1)
-            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Checked)  # the whole folder by default; untick what is not wanted
-            it.setData(Qt.UserRole, str(p))
+            lst.addItem(f"[{fmt}] {os.path.relpath(str(p), root)}")
+            lst.item(lst.count() - 1).setData(Qt.UserRole, str(p))
+        lst.selectAll()  # the whole folder by default
         lst.setMinimumSize(560, 360)
-
-        def toggle_selected():
-            sel = lst.selectedItems()
-            on = any(i.checkState() != Qt.Checked for i in sel)
-            for i in sel:
-                i.setCheckState(Qt.Checked if on else Qt.Unchecked)
-
-        lst.itemActivated.connect(lambda _it: toggle_selected())
         lay.addWidget(lst)
-        row = QHBoxLayout()
-        for label, state in (("Tick all", Qt.Checked), ("Tick none", Qt.Unchecked)):
-            b = QPushButton(label)
-            b.clicked.connect(lambda _=False, s=state: [lst.item(i).setCheckState(s) for i in range(lst.count())])
-            row.addWidget(b)
-        b = QPushButton("Tick selected")
-        b.clicked.connect(toggle_selected)
-        row.addWidget(b)
-        row.addStretch(1)
-        lay.addLayout(row)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        bb.button(QDialogButtonBox.Ok).setText("Add ticked")
+        ok = bb.button(QDialogButtonBox.Ok)
         bb.accepted.connect(dlg.accept)
         bb.rejected.connect(dlg.reject)
+        lst.itemDoubleClicked.connect(lambda _it: dlg.accept())
+
+        def count():
+            n = len(lst.selectedItems())
+            ok.setText(f"Add selected ({n})")
+            ok.setEnabled(n > 0)
+
+        lst.itemSelectionChanged.connect(count)
+        count()
         lay.addWidget(bb)
         if self._exec_dialog(dlg) != QDialog.Accepted:
             return []
-        return [lst.item(i).data(Qt.UserRole) for i in range(lst.count()) if lst.item(i).checkState() == Qt.Checked]
+        return [lst.item(i).data(Qt.UserRole) for i in range(lst.count()) if lst.item(i).isSelected()]
 
     def _exec_dialog(self, dlg) -> int:
         return dlg.exec()

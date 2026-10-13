@@ -314,18 +314,20 @@ def test_find_acquisitions_in_a_folder_of_acquisitions(tmp_path):
 
 def test_add_several_at_once_checklist_and_drop(qapp, tmp_path):
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QDialog, QListWidget
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox, QListWidget
     from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
     cl, cr = uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)
     als = _p3b(tmp_path)
     p = PeemXmcdPanel()
 
-    def tick_uview(dlg):  # all start ticked; the user unticks the P3B folder and clicks "Add ticked"
+    def tick_uview(dlg):  # all start selected; the user ⌘-clicks the P3B folder off and clicks Add
         lst = dlg.findChild(QListWidget)
-        assert all(lst.item(i).checkState() == Qt.Checked for i in range(lst.count()))
+        assert all(lst.item(i).isSelected() for i in range(lst.count()))
         for i in range(lst.count()):
             if not lst.item(i).text().startswith("[uview]"):
-                lst.item(i).setCheckState(Qt.Unchecked)
+                lst.item(i).setSelected(False)
+        ok = dlg.findChild(QDialogButtonBox).button(QDialogButtonBox.Ok)
+        assert ok.text() == "Add selected (2)"
         return QDialog.Accepted
 
     p._exec_dialog = tick_uview
