@@ -7,6 +7,7 @@ Moved from gui/components/raman_tabs/layout.py (originally the "Small widgets" o
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Optional
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
@@ -22,7 +23,11 @@ class FigureCanvas(FigureCanvasQTAgg):
     the original application set globally; here it applies to the Raman suite only."""
 
     def draw(self):
-        with raman_style():
+        # Maps carry a colour bar glued on with axes_grid1, which tight_layout cannot place and
+        # warns about on every redraw; the layout is right regardless, so silence just that.
+        with raman_style(), warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*not compatible with tight_layout.*",
+                                    category=UserWarning)
             super().draw()
 
 # ---------------------------------------------------------------------------
