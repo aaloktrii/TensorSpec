@@ -1,5 +1,5 @@
 """Classification helper dialog: layer regions (terraces) from optical contrast, each given its
-layer count; save / load regions.
+layer count; save / load regions. Figures are drawn by plotting/backends/raman_views/classification.py.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 2 - Classification: LayerRegionsDialog)."""
 from __future__ import annotations
@@ -7,22 +7,20 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import matplotlib.colors as mcolors
 import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from tensorspec.core.raman.classification import terrace_edges
-from tensorspec.core.raman.constants import APP_NAME
+from tensorspec.core.raman.constants import APP_NAME, LAYER_NM
 from tensorspec.core.raman.map_geometry import describe_transform, kmeans_1d, optical_contrast
 from tensorspec.gui.components.raman_tabs.layout import fit_to_screen
-from tensorspec.plotting.backends.raman_matplotlib_engine import orient_axes
+from tensorspec.plotting.backends.raman_views import classification as views
+from tensorspec.plotting.backends.raman_views.classification import REGION_COLORS
 from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
 
-LAYER_NM = 0.335          # graphene interlayer spacing
-REGION_COLORS = ["#1e88e5", "#fb8c00", "#8e24aa", "#43a047", "#e53935", "#00acc1"]
 
 
 class LayerRegionsDialog(QtWidgets.QDialog):
@@ -169,29 +167,10 @@ class LayerRegionsDialog(QtWidgets.QDialog):
 
     # -- figure -------------------------------------------------------------
     def _build_figure(self):
-        mf = self.main.mapfile
         fig = self.canvas.figure
         fig.clear()
-        gsp = fig.add_gridspec(3, 1)
-        self.ax = fig.add_subplot(gsp[:2, 0])
-        self.axh = fig.add_subplot(gsp[2, 0])
-        opt = self.main.optical
-        if opt is not None and self.main.optical_image is not None:
-            self.ax.imshow(np.ma.masked_invalid(self.main.optical_image),
-                           origin="lower", extent=opt.extent, cmap="gray",
-                           aspect="equal", zorder=0)
-        ny, nx = mf.shape
-        self.overlay = self.ax.imshow(np.zeros((ny, nx, 4)), origin="lower",
-                                      extent=mf.extent, interpolation="nearest",
-                                      aspect="equal", zorder=1)
-        left, right, bottom, top = mf.extent
-        pad = 0.15 * max(right - left, top - bottom)
-        self.ax.set_xlim(left - pad, right + pad)
-        self.ax.set_ylim(bottom - pad, top + pad)
-        self.ax.set_xlabel("X [µm]")
-        self.ax.set_ylabel("Y [µm]")
-        self.ax.set_title("Regions (click one to select its row)", fontsize=10)
-        orient_axes(self.ax, self.main.cfg)
+        self.ax, self.axh, self.overlay = views.build_regions_figure(
+            fig, self.main.mapfile, self.main.cfg, self.main.optical, self.main.optical_image)
 
     def _n_by_spec(self) -> np.ndarray:
         n = np.zeros(self.main.mapfile.n_points, dtype=int)
@@ -202,54 +181,17 @@ class LayerRegionsDialog(QtWidgets.QDialog):
 
     def refresh_map(self):
         mf = self.main.mapfile
-        ny, nx = mf.shape
-        rgba = np.zeros((ny, nx, 4))
-        reg = np.full((ny, nx), -1, dtype=int)
-        ok = mf.index_map >= 0
-        reg[ok] = self.region_of[mf.index_map[ok]]
-        for j in range(len(self.rows)):
-            a = 0.85 if j == self.selected else 0.5
-            rgba[reg == j] = mcolors.to_rgba(REGION_COLORS[j % len(REGION_COLORS)], a)
+        edges = None
         if self.chk_edges.isChecked():
-            ng = np.zeros((ny, nx), dtype=int)
-            nb = self._n_by_spec()
-            ng[ok] = nb[mf.index_map[ok]]
-            rgba[terrace_edges(ng)] = (1.0, 1.0, 1.0, 0.85)
-        self.overlay.set_data(rgba)
-        for t in self._texts:
-            t.remove()
-        self._texts = []
-        for j in range(len(self.rows)):
-            m = self.region_of == j
-            if m.any():
-                self._texts.append(self.ax.text(
-                    float(np.median(mf.x[m])), float(np.median(mf.y[m])), "R%d" % (j + 1),
-                    ha="center", va="center", fontsize=11, fontweight="bold",
-                    color="white", zorder=5,
-                    bbox=dict(boxstyle="round,pad=0.2", fc=REGION_COLORS[j % 6],
-                              ec="none", alpha=0.9)))
-
-        self.axh.clear()
-        if self.contrast is not None:
-            fin = self.contrast[np.isfinite(self.contrast)]
-            if fin.size:
-                self.axh.hist(fin, bins=max(10, min(60, fin.size // 3)),
-                              color="#90a4ae", edgecolor="white", linewidth=0.4)
-            cut = self.spn_cut.value()
-            for v in (-cut, cut):
-                self.axh.axvline(v, color="#555", ls=":", lw=1)
-            if self.levels is not None:
-                top = self.axh.get_ylim()[1]
-                for j, c in enumerate(self.levels):
-                    self.axh.axvline(c, color=REGION_COLORS[j % 6], lw=1.6)
-                    self.axh.text(c, top * 0.92, " R%d" % (j + 1),
-                                  color=REGION_COLORS[j % 6], fontsize=9,
-                                  fontweight="bold")
-                srt = np.sort(self.levels)
-                for a, b in zip(srt[:-1], srt[1:]):
-                    self.axh.axvline(0.5 * (a + b), color="#555", ls="--", lw=0.8)
-            self.axh.set_xlabel(r"optical contrast  $(I - I_{\mathrm{SiO_2}})\,/\,I_{\mathrm{SiO_2}}$")
-            self.axh.set_ylabel("pixels")
+            ng = np.zeros(mf.shape, dtype=int)
+            ok = mf.index_map >= 0
+            ng[ok] = self._n_by_spec()[mf.index_map[ok]]
+            edges = terrace_edges(ng)
+        self.overlay.set_data(views.region_rgba(mf, self.region_of, len(self.rows),
+                                                self.selected, edges))
+        self._texts = views.draw_region_labels(self.ax, mf, self.region_of, len(self.rows),
+                                               self._texts)
+        views.draw_contrast_histogram(self.axh, self.contrast, self.spn_cut.value(), self.levels)
         self.canvas.draw()
 
     # -- segmentation --------------------------------------------------------

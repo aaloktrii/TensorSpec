@@ -1,5 +1,5 @@
 """Tab 3 · Spectra: pick grid cells, compare their spectra stacked, fit Lorentzians, suggest the
-peak count, CSV export.
+peak count, CSV export. Figures are drawn by plotting/backends/raman_views/spectra.py.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (SpectraTab)."""
 from __future__ import annotations
@@ -9,14 +9,12 @@ import os
 from typing import TYPE_CHECKING
 from typing import List, Tuple
 
-import matplotlib.colors as mcolors
-import matplotlib.patches as mpatches
 import numpy as np
-from matplotlib.patches import Patch
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from tensorspec.core.raman.classification import label_of
-from tensorspec.plotting.backends.raman_matplotlib_engine import class_rgba, n_color, na_color, orient_axes, side_colorbar
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_placeholder
+from tensorspec.plotting.backends.raman_views import spectra as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 if TYPE_CHECKING:
@@ -369,8 +367,7 @@ class SpectraTab(QtWidgets.QWidget):
         ax = cv.ax
         mf = self.main.mapfile
         if mf is None or mf.layout != "spectra":
-            ax.text(0.5, 0.5, "No map loaded", ha="center", va="center", color="#999")
-            ax.set_axis_off()
+            draw_placeholder(ax, "No map loaded")
             cv.draw()
             return
         cfg = self.main.cfg
@@ -380,88 +377,12 @@ class SpectraTab(QtWidgets.QWidget):
                     and self.main.optical_image is not None)
         alpha = self.sld_alpha.value() / 100.0 if with_opt else 1.0
         self.sld_alpha.setEnabled(with_opt)
-        if with_opt:
-            ax.imshow(np.ma.masked_invalid(self.main.optical_image), origin="lower",
-                      extent=opt.extent, cmap="gray", aspect="equal", zorder=0)
-        handles, note, title = [], "", view
-
-        if view == "Classification":
-            tc = self.main.tab_class
-            if tc.layers is None or tc.layers.shape != mf.shape:
-                note = "No classification yet —\nrun 'Classify map' in tab 2"
-            else:
-                rgba = class_rgba(tc.layers, tc.calls, cfg)
-                rgba[..., 3] *= alpha
-                ax.imshow(rgba, origin="lower", extent=mf.extent,
-                          interpolation="nearest", aspect="equal", zorder=1)
-                present = sorted({(int(tc.layers[r, c]), tc.calls[r, c])
-                                  for r in range(mf.shape[0]) for c in range(mf.shape[1])},
-                                 key=lambda t: (t[0] < 0, t[0], str(t[1])))
-                for lay, call in present:
-                    if call is None or (lay < 0 and call != "N/A"):
-                        continue
-                    col = (na_color(lay, cfg) if call == "N/A"
-                           else cfg["colors"][lay][call])
-                    handles.append(Patch(facecolor=col, edgecolor="#555",
-                                         label=label_of(lay, call)))
-                handles.append(Patch(facecolor=cfg["unclassified_color"],
-                                     edgecolor="#555", label="Unclassified"))
-                mode = {"manual": "Manual %dL" % int(cfg.get("manual_layer", 3)),
-                        "auto": "Auto, I(2D)/I(G)",
-                        "map": "layer regions"}.get(cfg.get("layer_mode"), "")
-                title = "Classification (%s)" % mode
-        elif view == "Layer map (N)":
-            g = self.main.layer_grid() if self.main.layer_by_spec is not None else None
-            if g is None or not (g > 0).any():
-                note = "No layer map yet —\ndefine layer regions in tab 2"
-            else:
-                rgba = np.zeros(g.shape + (4,))
-                for n in sorted(set(g[g > 0].tolist())):
-                    rgba[g == n] = mcolors.to_rgba(n_color(n, cfg), alpha)
-                    handles.append(Patch(facecolor=n_color(n, cfg), edgecolor="#555",
-                                         label="%dL" % n))
-                ax.imshow(rgba, origin="lower", extent=mf.extent,
-                          interpolation="nearest", aspect="equal", zorder=1)
-                title = "Layer map (N per region)"
-        if view == "FWHM(2D)" or note:
-            data = (self.main.fwhm_map if self.main.fwhm_map is not None
-                    else mf.greyscale())
-            im = ax.imshow(np.ma.masked_invalid(data), origin="lower", extent=mf.extent,
-                           cmap=cfg.get("cmap", "viridis"), interpolation="nearest",
-                           aspect="equal", alpha=alpha, zorder=1)
-            if not note:
-                cb = side_colorbar(cv.figure, ax, im, size="5%", pad=0.05)
-                cb.set_label("FWHM(2D) [cm$^{-1}$]", fontsize=7)
-                cb.ax.tick_params(labelsize=7)
-                title = "FWHM(2D)"
-        if note:
-            ax.text(0.5, 0.5, note, transform=ax.transAxes, ha="center", va="center",
-                    fontsize=9, color="#b71c1c", zorder=6,
-                    bbox=dict(boxstyle="round,pad=0.5", fc="white", ec="#b71c1c", alpha=0.9))
-
-        left, right, bottom, top = mf.extent
-        ny, nx = mf.shape
-        dx, dy = (right - left) / nx, (top - bottom) / ny
-        for xv in np.linspace(left, right, nx + 1):
-            ax.axvline(xv, color="w", lw=0.3, alpha=0.5, zorder=2)
-        for yv in np.linspace(bottom, top, ny + 1):
-            ax.axhline(yv, color="w", lw=0.3, alpha=0.5, zorder=2)
-        for it in self.items:
-            r, c = np.argwhere(mf.index_map == it["idx"])[0]
-            ax.add_patch(mpatches.Rectangle((left + c * dx, bottom + r * dy), dx, dy,
-                                            fill=False, edgecolor=it["color"],
-                                            lw=2.6 if it["visible"] else 1.0,
-                                            ls="-" if it["visible"] else ":", zorder=4))
-        pad = 0.08 * max(right - left, top - bottom) if with_opt else 0.0
-        ax.set_xlim(left - pad, right + pad)
-        ax.set_ylim(bottom - pad, top + pad)
-        ax.set_title(title + " — click cells", fontsize=9)
-        ax.tick_params(labelsize=7)
-        if handles:
-            ax.legend(handles=handles, fontsize=7, loc="upper center",
-                      bbox_to_anchor=(0.5, -0.08), ncol=min(4, len(handles)),
-                      frameon=False, handlelength=1.2, columnspacing=0.8)
-        orient_axes(ax, cfg)
+        tc = self.main.tab_class
+        layer_grid = (self.main.layer_grid() if view == "Layer map (N)"
+                      and self.main.layer_by_spec is not None else None)
+        views.draw_cell_picker(cv.figure, ax, mf, view, cfg, self.items, opt,
+                               self.main.optical_image, with_opt, alpha,
+                               tc.layers, tc.calls, layer_grid, self.main.fwhm_map)
         cv.draw()
 
     def redraw(self):
@@ -471,54 +392,15 @@ class SpectraTab(QtWidgets.QWidget):
         mf = self.main.mapfile
         vis = [it for it in self.items if it["visible"]]
         if mf is None or not vis:
-            ax.text(0.5, 0.5, "Select grid cells on the left to compare their spectra",
-                    ha="center", va="center", color="#999", transform=ax.transAxes)
-            ax.set_axis_off()
+            views.draw_no_selection(ax)
             cv.draw()
             self._fill_table()
             return
         lo, hi = self.rng()
-        m = (mf.axis >= lo) & (mf.axis <= hi)
-        x = mf.axis[m]
-        norm = self.chk_norm.isChecked()
-        scaled = []
-        for it in vis:
-            y = mf.data[it["idx"]][m]
-            ymin = float(np.nanpercentile(y, 2))
-            ymax = float(np.nanmax(y))
-            k = (ymax - ymin) if norm and ymax > ymin else 1.0
-            scaled.append((it, y, ymin if norm else 0.0, k))
-        span = max(((np.nanmax(y) - (b if norm else np.nanmin(y))) / k) for _, y, b, k in scaled)
-        step = self.sld_off.value() / 100.0 * span
-        for j, (it, y, b, k) in enumerate(scaled):
-            off = j * step
-            ax.plot(x, (y - b) / k + off, color=it["color"], lw=0.9, label=self._name(it["idx"]))
-            fr = it.get("fit")
-            txt = ""
-            if fr is not None and fr[0] == (lo, hi, self.spn_n.value()) and fr[1]["ok"]:
-                res = fr[1]
-                fx, fy = res["curve"]
-                if self.chk_fit.isChecked():
-                    ax.plot(fx, (fy - b) / k + off, color="k", lw=1.1, ls="--")
-                if self.chk_comp.isChecked() and len(res["peaks"]) > 1:
-                    sl, ic, xm = res["baseline"]
-                    basel = sl * (fx - xm) + ic
-                    for (h, c, w) in res["components"]:
-                        comp = h * (w / 2) ** 2 / ((fx - c) ** 2 + (w / 2) ** 2)
-                        ax.fill_between(fx, (basel - b) / k + off, (basel + comp - b) / k + off,
-                                        color=it["color"], alpha=0.18, lw=0)
-                txt = "FWHM " + " / ".join("%.1f" % p["fwhm"] for p in res["peaks"])
-                if len(res["peaks"]) > 1:
-                    txt += "  (band %.1f)" % res["band_fwhm"]
-            ax.text(x[-1], float(np.nanmedian((y[-8:] - b) / k)) + off, "  " + txt,
-                    color=it["color"], fontsize=8, va="bottom", ha="right")
-        ax.set_xlim(lo, hi)
-        ax.set_xlabel("Raman shift  [cm$^{-1}$]")
-        ax.set_ylabel("Intensity (normalised, stacked)" if norm else "Intensity [counts], stacked")
-        ax.legend(fontsize=7, loc="upper left", framealpha=0.85)
-        ax.set_title("%d spectra · %d Lorentzian peak%s · resolution %.1f cm$^{-1}$"
-                     % (len(vis), self.spn_n.value(), "" if self.spn_n.value() == 1 else "s",
-                        self.resolution()), fontsize=9)
+        views.draw_stacked_selection(ax, mf, vis, [self._name(it["idx"]) for it in vis], lo, hi,
+                                     self.spn_n.value(), self.chk_norm.isChecked(),
+                                     self.sld_off.value() / 100.0, self.chk_fit.isChecked(),
+                                     self.chk_comp.isChecked(), self.resolution())
         cv.draw()
         self._fill_table()
 

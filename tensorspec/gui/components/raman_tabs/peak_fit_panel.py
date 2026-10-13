@@ -3,7 +3,8 @@ data-chosen peak count, batch over files / folders / the loaded map, and the ome
 strain/doping correlation. Results for the loaded map are written to /analysis/raman_peakfit and
 /analysis/raman_strain_doping.
 
-Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 6 - Peak fitting); calls go through RamanEngineRouter (main.engine)."""
+Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 6 - Peak fitting); calls go through RamanEngineRouter (main.engine),
+figures through plotting/backends/raman_views/peak_fit.py."""
 from __future__ import annotations
 
 import csv
@@ -11,7 +12,6 @@ import os
 from typing import TYPE_CHECKING
 from typing import Dict, List
 
-import matplotlib
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
@@ -19,7 +19,8 @@ from tensorspec.core.io.raman_loaders import _SPOT_RE, is_single_spectrum, read_
 from tensorspec.core.raman import strain_doping
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.gui.components.raman_tabs.layout import _fmt, fit_to_screen
-from tensorspec.plotting.backends.raman_matplotlib_engine import draw_correlation, orient_axes
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
+from tensorspec.plotting.backends.raman_views import peak_fit as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 #: The strain/doping and peak-fit modules were optional next to the original script; they are
@@ -30,7 +31,6 @@ if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
 
 BAND_DEFAULTS = [("G", 1500.0, 1680.0, "Auto", 3), ("2D", 2560.0, 2810.0, "Auto", 4)]
-COMP_COLORS = ["#1f5fa8", "#e8402a", "#2a8c4a", "#8a5a00", "#7b3fa0", "#17becf"]
 
 
 class PeakFitTab(QtWidgets.QWidget):
@@ -307,7 +307,7 @@ class PeakFitTab(QtWidgets.QWidget):
     # -- drawing --------------------------------------------------------------
     def _placeholder(self):
         self.plot.figure.clear()
-        self.plot.figure.text(0.5, 0.5, "Add spectra", ha="center", va="center", color="#999")
+        draw_figure_message(self.plot.figure, "Add spectra")
         self.plot.draw()
 
     def draw_fit(self, i: int, res: dict):
@@ -317,45 +317,20 @@ class PeakFitTab(QtWidgets.QWidget):
         if not bands:
             self._placeholder()
             return
-        gs = fig.add_gridspec(2, len(bands), height_ratios=[3, 1], hspace=0.05)
+        views.draw_band_fits(fig, bands)
         self.tbl_peaks.setRowCount(0)
-        for j, (name, b) in enumerate(bands):
-            ax = fig.add_subplot(gs[0, j])
-            axr = fig.add_subplot(gs[1, j], sharex=ax)
-            if "x" not in b:
-                ax.text(0.5, 0.5, "%s: %s" % (name, b.get("why", "")), transform=ax.transAxes,
-                        ha="center", color="#999")
+        for name, b in bands:
+            if "x" not in b or not b.get("ok"):
                 continue
-            x, raw, bg = b["x"], b["raw"], b["bg"]
-            ax.plot(x, raw, color="#999", lw=0.7, label="data")
-            ax.plot(x, bg, color="k", lw=0.6, ls="--", label="background")
-            if b.get("ok"):
-                base = bg + b["baseline"]
-                ax.plot(x, base + b["curve"][2] - b["baseline"], color="#d81b60", lw=1.0,
-                        label="fit")
-                for k, comp in enumerate(b["components"]):
-                    ax.plot(x, base + comp, color=COMP_COLORS[k % 6], lw=0.7)
-                axr.plot(x, (b["curve"][1] - b["curve"][2]) / (b.get("noise") or 1),
-                         color="#555", lw=0.6)
-                for k, c in enumerate(b["comps"]):
-                    r = self.tbl_peaks.rowCount()
-                    self.tbl_peaks.insertRow(r)
-                    for col, txt in enumerate([name, str(k + 1),
-                                               "%.2f ± %.2f" % (c["pos"], c["pos_err"]),
-                                               "%.2f ± %.2f" % (c["fwhm"], c["fwhm_err"]),
-                                               "%.0f ± %.0f" % (c["height"], c["height_err"]),
-                                               "%.0f" % c["area"]]):
-                        self.tbl_peaks.setItem(r, col, QtWidgets.QTableWidgetItem(txt))
-            ax.set_title("%s: %d peak%s%s" % (name, b.get("n", 0), "" if b.get("n") == 1 else "s",
-                                              "" if b.get("ok") else " (failed)"), fontsize=9)
-            ax.tick_params(labelbottom=False, labelsize=7)
-            ax.set_yticks([])
-            axr.axhline(0, color="k", lw=0.4)
-            axr.set_xlabel("Raman shift (cm$^{-1}$)", fontsize=8)
-            axr.tick_params(labelsize=7)
-            if j == 0:
-                axr.set_ylabel("resid./σ", fontsize=7)
-                ax.legend(fontsize=7, frameon=False)
+            for k, c in enumerate(b["comps"]):
+                r = self.tbl_peaks.rowCount()
+                self.tbl_peaks.insertRow(r)
+                for col, txt in enumerate([name, str(k + 1),
+                                           "%.2f ± %.2f" % (c["pos"], c["pos_err"]),
+                                           "%.2f ± %.2f" % (c["fwhm"], c["fwhm_err"]),
+                                           "%.0f ± %.0f" % (c["height"], c["height_err"]),
+                                           "%.0f" % c["area"]]):
+                    self.tbl_peaks.setItem(r, col, QtWidgets.QTableWidgetItem(txt))
         notes = ["Si shift %+.2f cm⁻¹" % res["shift"] if self.chk_si.isChecked() else "no Si calibration",
                  "noise %.1f counts" % res["noise"]]
         for name, b in bands:
@@ -371,24 +346,12 @@ class PeakFitTab(QtWidgets.QWidget):
         fig.clear()
         names = [b[0] for b in self.bands()]
         has_xy = sum(np.isfinite(it["x"]) for it in self.items) > 3
-        axs = np.atleast_1d(fig.subplots(1, len(names)))
-        for ax, name in zip(axs, names):
-            n = np.array([self.results[i]["bands"].get(name, {}).get("n", 0)
-                          if self.results[i]["bands"].get(name, {}).get("ok") else 0
-                          for i in range(len(self.items))])
-            if has_xy:
-                x = np.array([it["x"] for it in self.items])
-                y = np.array([it["ypos"] for it in self.items])
-                cmap = matplotlib.colors.ListedColormap(["#eeeeee"] + COMP_COLORS)
-                sc = ax.scatter(x, y, c=n, cmap=cmap, vmin=-0.5, vmax=6.5, s=40, marker="s", lw=0)
-                ax.set_aspect("equal")
-                orient_axes(ax, self.main.cfg)
-                cb = fig.colorbar(sc, ax=ax, ticks=range(0, 7), shrink=0.8)
-                cb.set_label("peaks (0 = no fit)", fontsize=7)
-            else:
-                ax.hist(n, bins=np.arange(-0.5, 7.5, 1), color="#777")
-                ax.set_xlabel("peaks")
-            ax.set_title("%s peak count" % name, fontsize=9)
+        counts = [np.array([self.results[i]["bands"].get(name, {}).get("n", 0)
+                            if self.results[i]["bands"].get(name, {}).get("ok") else 0
+                            for i in range(len(self.items))]) for name in names]
+        xy = ((np.array([it["x"] for it in self.items]),
+               np.array([it["ypos"] for it in self.items])) if has_xy else None)
+        views.draw_peak_counts(fig, names, counts, xy, self.main.cfg)
         self.plot.draw()
 
     def correlation(self):
@@ -434,8 +397,7 @@ class PeakFitTab(QtWidgets.QWidget):
             except ValueError:
                 return
             cv.figure.clear()
-            ax = cv.figure.add_subplot(111)
-            draw_correlation(ax, rows, p)
+            views.draw_correlation_figure(cv.figure, rows, p)
             cv.draw()
             if self._from_map():
                 self.main.service.write_strain_doping(rows, p)
