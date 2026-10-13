@@ -356,12 +356,11 @@ class PeemPanel(QWidget):
     def _auto_pair_separate(self, name: str) -> str:
         """Pair CP/CM (or LH/LV) frames and separate the channels, as the background and sum rule need."""
         try:
-            paired = self.service.pair(name, "auto")
-            sep = self.service.separate(name)
+            res = self.service.prepare_sum_rule(name)
         except Exception as exc:  # noqa: BLE001 - e.g. one polarization only
             return f"not paired ({exc})"
         self._refresh_meta()
-        return f"paired {paired['n_pairs']} ({', '.join(sep['channels'])})"
+        return f"paired {res['n_pairs']} ({', '.join(res['channels'])})"
 
     def _attach_csv(self):
         name = self._require_dataset()

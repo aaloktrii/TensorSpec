@@ -902,6 +902,15 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
             "has_separated": True,
         }
 
+
+    def prepare_sum_rule(self, name: str, mode: str = "auto") -> dict[str, Any]:
+        """Pair the CP / CM (or LH / LV) frames and separate the two channels: the input the
+        background and sum-rule steps use. mode: auto / CP_CM / LH_LV.
+        Returns {n_pairs, unpaired_count, channels}; ValueError when no pairs can be formed."""
+        paired = self.pair(name, mode)
+        sep = self.separate(name)
+        return {"n_pairs": paired["n_pairs"], "unpaired_count": paired.get("unpaired_count", 0),
+                "channels": sep["channels"]}
     def drift(
         self,
         name: str,

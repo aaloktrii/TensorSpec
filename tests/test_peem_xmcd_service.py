@@ -251,3 +251,13 @@ def test_regions_and_profiles_live_in_the_back_end(qapp, xmcd_dataset):
     assert svc.list_profiles("synth_xmcd") == []
     log = global_workspace.get("synth_xmcd")["tree"]["history"].attrs["log"]
     assert any("PEEM set drift_box" in line for line in log) and any("PEEM add profile" in line for line in log)
+
+
+def test_prepare_sum_rule_is_one_back_end_call(xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    res = svc.prepare_sum_rule("synth_xmcd")
+    assert res == {"n_pairs": 3, "unpaired_count": 0, "channels": res["channels"]}
+    assert sorted(res["channels"]) == ["CM", "CP"]
+    assert global_workspace.pull_tensor_data("synth_xmcd", "processed/CP").value.shape[0] == 3
+    with pytest.raises(ValueError):
+        svc.prepare_sum_rule("synth_xmcd", "LH_LV")  # no linear frames

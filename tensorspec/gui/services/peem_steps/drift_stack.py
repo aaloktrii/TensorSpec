@@ -511,8 +511,7 @@ class PeemDriftStackSteps:
                             labels=raw.labels, units=raw.units, data_type="Experimental PEEM", metadata=md)
         label = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{name}_{pair}")[:64]
         global_workspace.push_spectroscopy_data(label, tensor)
-        self.pair(label, "CP_CM" if pair == "xmcd" else "LH_LV")
-        sep = self.separate(label)
+        sep = self.prepare_sum_rule(label, "CP_CM" if pair == "xmcd" else "LH_LV")
         out = {"name": label, "from": name, "pair": pair,
                "channels": [ta, tb], "separated": sep["channels"],
                "n_energies": len(points), "n_frames": int(len(stack)), "pol_summary": {ta: len(points), tb: len(points)},
@@ -555,8 +554,7 @@ class PeemDriftStackSteps:
                             labels=raw.labels, units=raw.units, data_type="Experimental PEEM", metadata=md)
         label = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{name}_{pair}_frames")[:64]
         global_workspace.push_spectroscopy_data(label, tensor)
-        paired = self.pair(label, "CP_CM" if pair == "xmcd" else "LH_LV")
-        sep = self.separate(label)
+        paired = sep = self.prepare_sum_rule(label, "CP_CM" if pair == "xmcd" else "LH_LV")
         ta, tb = tags
         out = {"name": label, "from": name, "pair": pair, "source": "drift-corrected frames",
                "channels": [ta, tb], "separated": sep["channels"], "n_frames": int(len(frames)),
