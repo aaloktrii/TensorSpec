@@ -12,6 +12,7 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.raman.classification import g_band_cfg, label_of, layer_from_ratio, pixel_ratio
+from tensorspec.core.raman.band_maps import EXTRA_WINDOWS
 from tensorspec.core.raman.map_geometry import band_height, describe_transform
 from tensorspec.core.raman.voigt_2d import asym_of
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_placeholder
@@ -74,11 +75,31 @@ class MapExplorerTab(QtWidgets.QWidget):
         bar.addSpacing(12)
         bar.addWidget(QtWidgets.QLabel("Map"))
         self.cmb_quantity = QtWidgets.QComboBox()
-        self.cmb_quantity.addItems(["FWHM(2D)", "G height", "2D height"])
+        self.cmb_quantity.addItems(["FWHM(2D)", "G height", "2D height", "Band integral"])
         self.cmb_quantity.setToolTip("G / 2D height: raw peak height above the "
-                                     "flanking baseline, no fitting")
-        self.cmb_quantity.currentIndexChanged.connect(self.refresh_map)
+                                     "flanking baseline, no fitting.\nBand integral: raw counts "
+                                     "integrated over a wavenumber window, no background removed")
+        self.cmb_quantity.currentIndexChanged.connect(self._quantity_changed)
         bar.addWidget(self.cmb_quantity)
+        # window of the band integral: a band of the 1 · Spectra fit model, D, Si, or custom
+        self.cmb_band = QtWidgets.QComboBox()
+        self.cmb_band.setToolTip("Window to integrate: the bands of 1 · Spectra ▸ Peak fitting, "
+                                 "D, Si, or Custom")
+        self.cmb_band.activated.connect(self._band_picked)
+        self.spn_w0 = QtWidgets.QDoubleSpinBox()
+        self.spn_w1 = QtWidgets.QDoubleSpinBox()
+        for sp, v in ((self.spn_w0, 2560.0), (self.spn_w1, 2810.0)):
+            sp.setRange(0, 10000)
+            sp.setDecimals(0)
+            sp.setSingleStep(10)
+            sp.setValue(v)
+            sp.setFixedWidth(72)
+            sp.setSuffix(" cm⁻¹")
+            sp.editingFinished.connect(self._window_edited)
+        self._band_row = (self.cmb_band, self.spn_w0, self.spn_w1)
+        for w in self._band_row:
+            bar.addWidget(w)
+            w.setVisible(False)
         bar.addWidget(QtWidgets.QLabel("Colour map"))
         bar.addWidget(self.cmb_cmap)
         bar.addStretch(1)
@@ -232,6 +253,55 @@ class MapExplorerTab(QtWidgets.QWidget):
         self.refresh_map()
         self.main.tab_class.refresh_map()
 
+    def _quantity_changed(self):
+        integral = self.cmb_quantity.currentText() == "Band integral"
+        for w in self._band_row:
+            w.setVisible(integral)
+        if integral:
+            self._fill_bands()
+        self.refresh_map()
+
+    def _window_choices(self):
+        """[(name, lo, hi)]: the step-1 fit bands, then D and Si."""
+        out = [(name, lo, hi) for name, lo, hi, *_ in self.main.tab_fit.bands()]
+        names = {n for n, _, _ in out}
+        out += [(n, lo, hi) for n, (lo, hi) in EXTRA_WINDOWS.items() if n not in names]
+        return out
+
+    def _fill_bands(self):
+        keep = self.cmb_band.currentText()
+        self.cmb_band.blockSignals(True)
+        self.cmb_band.clear()
+        for name, lo, hi in self._window_choices():
+            self.cmb_band.addItem("%s  %g–%g" % (name, lo, hi), (name, lo, hi))
+        self.cmb_band.addItem("Custom", None)
+        i = self.cmb_band.findText(keep)
+        self.cmb_band.setCurrentIndex(i if i >= 0 else 0)
+        self.cmb_band.blockSignals(False)
+        self._band_picked()
+
+    def _band_picked(self, *_):
+        choice = self.cmb_band.currentData()
+        if choice is not None:
+            for sp, v in ((self.spn_w0, choice[1]), (self.spn_w1, choice[2])):
+                sp.blockSignals(True)
+                sp.setValue(v)
+                sp.blockSignals(False)
+            self.refresh_map()
+
+    def _window_edited(self):
+        """Typing a window makes it Custom unless it matches the chosen band."""
+        choice = self.cmb_band.currentData()
+        if choice is not None and (self.spn_w0.value(), self.spn_w1.value()) != (choice[1], choice[2]):
+            self.cmb_band.setCurrentIndex(self.cmb_band.count() - 1)
+        self.refresh_map()
+
+    def window(self):
+        """(name, lo, hi) of the band integral currently chosen."""
+        choice = self.cmb_band.currentData()
+        lo, hi = sorted((self.spn_w0.value(), self.spn_w1.value()))
+        return (choice[0] if choice is not None else "window"), lo, hi
+
     def _cmap_changed(self, name):
         self.main.cfg["cmap"] = name
         self.refresh_map()
@@ -370,11 +440,18 @@ class MapExplorerTab(QtWidgets.QWidget):
 
         cv = self.map_canvas
         cv.clear()
-        data = self.main.fwhm_map if fwhm else self.height_grid(quantity)
+        cbar_label = title = None
+        if quantity == "Band integral":
+            name, lo, hi = self.window()
+            data = self.main.service.band_integral_map(name, lo, hi)
+            cbar_label = "∫ I dω  [counts·cm$^{-1}$]"
+            title = "%s integral, %g–%g cm$^{-1}$ (raw counts)" % (name, lo, hi)
+        else:
+            data = self.main.fwhm_map if fwhm else self.height_grid(quantity)
         views.draw_quantity_map(cv.figure, cv.ax, mf, data, quantity, self.main.fit_tally,
                                 self.main.cfg, self.main.optical, self.main.optical_image,
                                 self.chk_optical.isChecked(), self.chk_grid.isChecked(),
-                                self.sel, self.main.service.area_rect)
+                                self.sel, self.main.service.area_rect, cbar_label, title)
         # the selector belongs to the axes just drawn; a new one after every redraw
         self._area_selector = (views.make_area_selector(cv.ax, self._area_selected)
                                if self.chk_area.isChecked() else None)

@@ -111,6 +111,20 @@ def roi_dataset(axis, spectrum, rect, indices, mode: str, fit=None, model=None) 
                                                      {"units": "cm-1"})}, attrs=attrs)
 
 
+def band_maps_dataset(mapfile, maps: dict, latest: str) -> xr.Dataset:
+    """Window-integral maps on (y, x): one variable per window, ``data`` = the latest one.
+    ``maps``: {name: (lo, hi, grid)}."""
+    vars_ = {}
+    for name, (lo, hi, grid) in maps.items():
+        vars_[name] = (("y", "x"), np.asarray(grid, float),
+                       {"window_cm-1": [float(lo), float(hi)], "units": "counts cm-1",
+                        "long_name": "raw counts integrated over %g-%g cm-1" % (lo, hi)})
+    vars_["data"] = vars_[latest]
+    return xr.Dataset(vars_, coords=_grid_coords(mapfile),
+                      attrs={"kind": "raman_band_maps", "latest": latest,
+                             "integration": "trapezoid, raw counts, no background subtracted"})
+
+
 def strain_doping_rows(rows: list, decompose) -> list:
     """One row per correlation point (as in strain_doping.write_csv), with strain / doping."""
     out = []

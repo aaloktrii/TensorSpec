@@ -55,6 +55,8 @@ class RamanService:
         self.asym_maps: Dict[str, Optional[np.ndarray]] = {
             "hwhm": None, "area": None, "residual": None}
         self.name: Optional[str] = None                   # workspace key of the loaded map
+        self.band_maps = {}                               # key -> (lo, hi, grid, mapfile it is on)
+        self._band_written = None                         # band map shown as /analysis data
         self.clear_area()
 
     # -- naming --------------------------------------------------------------------------------
@@ -94,6 +96,8 @@ class RamanService:
         self.fits = []
         self.fwhm_map = None
         self.clear_area()
+        self.band_maps = {}
+        self._band_written = None
         self.name = workspace_name(mf.path)
         global_workspace.push_spectroscopy_data(self.name, raman_loaders.map_to_tensor(mf))
         return res
@@ -209,12 +213,31 @@ class RamanService:
             return False
         self.mapfile = apply_map_transform(self.mapfile_raw, self.current_transform())
         self.clear_area()                       # the rectangle was drawn in the old placement
+        self._band_written = None               # band maps are on the new grid now
         self.rebuild_maps()
         self.write_twod_fit()
         return True
 
     # -- map area (2 · Map) --------------------------------------------------------------------
     AREA_MODE = "sum"
+
+    # -- window-integral maps (2 · Map) -------------------------------------------------------
+    def band_integral_map(self, name: str, lo: float, hi: float):
+        """Raw counts integrated over [lo, hi] at every pixel of the current grid; kept, and written
+        to /analysis/raman_band_maps."""
+        key = "integral_%s_%g_%g" % (re.sub(r"[^A-Za-z0-9]+", "", name) or "window", lo, hi)
+        hit = self.band_maps.get(key)
+        if hit is not None and hit[3] is self.mapfile:
+            grid = hit[2]
+        else:
+            grid = self.engine.window_integral_map(self.mapfile, lo, hi)
+            self.band_maps[key] = (lo, hi, grid, self.mapfile)
+        if self.name is not None and key != self._band_written:
+            self._band_written = key
+            ds = products.band_maps_dataset(self.mapfile, {k: v[:3] for k, v in self.band_maps.items()
+                                                           if v[3] is self.mapfile}, key)
+            global_workspace.write_analysis_data(self.name, "raman_band_maps", ds)
+        return grid
 
     def clear_area(self):
         self.area_rect = None
