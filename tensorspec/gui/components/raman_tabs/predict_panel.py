@@ -16,9 +16,9 @@ from PySide6 import QtCore, QtWidgets
 from tensorspec.core.io.raman_loaders import short_label
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.core.raman.reference import DEFAULT_REF
-from tensorspec.gui.components.raman_tabs.layout import Canvas
 from tensorspec.plotting.backends import raman_matplotlib_engine
 from tensorspec.plotting.backends.raman_matplotlib_engine import REF_COLORS, draw_reference, orient_axes
+from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 #: The reference / prediction modules were optional next to the original script; they are part
 #: of tensorspec (core/raman/reference.py, core/raman/batch.py) now.

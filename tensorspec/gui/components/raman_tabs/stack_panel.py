@@ -17,8 +17,8 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from tensorspec.core.io.raman_loaders import (Spectrum, is_single_spectrum, parse_map_file,
                                               read_single_spectrum, read_spot_folder, short_label)
 from tensorspec.core.raman.constants import APP_NAME
-from tensorspec.gui.components.raman_tabs.layout import _EXPORT_DIR
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_stack, raman_style
+from tensorspec.plotting.viewers.raman_canvas import _EXPORT_DIR
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
