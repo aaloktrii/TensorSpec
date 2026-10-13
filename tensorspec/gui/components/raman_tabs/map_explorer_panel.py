@@ -11,9 +11,6 @@ from typing import List, Optional, Tuple
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from tensorspec.core.raman.classification import g_band_cfg, label_of, layer_from_ratio, pixel_ratio
-from tensorspec.core.raman.map_geometry import band_height, describe_transform
-from tensorspec.core.raman.voigt_2d import asym_of
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_placeholder
 from tensorspec.plotting.backends.raman_views import map_explorer as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
@@ -470,7 +467,7 @@ class MapExplorerTab(QtWidgets.QWidget):
                         else "from the #AxisType headers — unverified")
                        if self.main.cfg.get("map_transform") is None else "set")
                 self.lbl_transform.setText("Placement (%s):  %s"
-                                           % (src, describe_transform(t)))
+                                           % (src, self.main.service.describe_transform(t)))
         finally:
             self._syncing = False
 
@@ -495,16 +492,7 @@ class MapExplorerTab(QtWidgets.QWidget):
     # -- drawing ------------------------------------------------------------
     def height_grid(self, which: str) -> np.ndarray:
         """Raw G or 2D peak height on the current grid (no fitting)."""
-        mf = self.main.mapfile
-        if which == "G height":
-            v = band_height(mf.axis, mf.data, 1582.0, 22.0)
-        else:
-            c = 0.5 * (self.main.cfg["band_min"] + self.main.cfg["band_max"])
-            v = band_height(mf.axis, mf.data, c, 45.0)
-        g = np.full(mf.shape, np.nan)
-        ok = mf.index_map >= 0
-        g[ok] = v[mf.index_map[ok]]
-        return g
+        return self.main.service.height_map(which)
 
     def refresh_map(self):
         mf = self.main.mapfile
@@ -520,27 +508,23 @@ class MapExplorerTab(QtWidgets.QWidget):
 
         cv = self.map_canvas
         cv.clear()
-        cbar_label = title = None
+        svc = self.main.service
+        cbar_label = title = window = peak_key = None
         if quantity == "Peak map":
-            choice = self.peak_key() if self.main.service.peak_grids else None
+            choice = self.peak_key() if svc.peak_grids else None
             if choice is None:
                 self._show_placeholder("No pixel fits yet: define bands in 1 · Spectra > Peak fitting,"
                                        "\nthen press 'Fit every pixel'", spectrum_too=False)
                 return
-            key, cbar_label, title = choice
-            data = self.main.service.peak_map(key)
+            peak_key, cbar_label, title = choice
         elif quantity == "Total intensity":
-            data = self.main.service.band_integral_map("total", float(mf.axis.min()),
-                                                       float(mf.axis.max()))
             cbar_label = "∫ I dω  [counts·cm$^{-1}$]"
             title = "Total intensity, %g–%g cm$^{-1}$ (raw counts)" % (mf.axis.min(), mf.axis.max())
         elif quantity == "Band integral":
-            name, lo, hi = self.window()
-            data = self.main.service.band_integral_map(name, lo, hi)
+            window = self.window()
             cbar_label = "∫ I dω  [counts·cm$^{-1}$]"
-            title = "%s integral, %g–%g cm$^{-1}$ (raw counts)" % (name, lo, hi)
-        else:
-            data = self.main.fwhm_map if fwhm else self.height_grid(quantity)
+            title = "%s integral, %g–%g cm$^{-1}$ (raw counts)" % window
+        data = svc.quantity_map(quantity, window, peak_key)
         area_mode = self.chk_area.isChecked()
         area = self.main.service.area_rect
         views.draw_quantity_map(cv.figure, cv.ax, mf, data, quantity, self.main.fit_tally,
@@ -593,53 +577,37 @@ class MapExplorerTab(QtWidgets.QWidget):
         self.show_spectrum(row, col)
 
     def show_spectrum(self, row: int, col: int):
-        mf = self.main.mapfile
-        idx = mf.index_map[row, col]
+        px = self.main.service.pixel(row, col)
         cv = self.spec_canvas
         cv.clear()
         ax = cv.ax
-        if idx < 0:
+        if px is None:
             views.draw_no_spectrum(ax)
             cv.draw()
             return
-
-        wn, inten = mf.axis, mf.data[idx]
-        self._spec = dict(wn=wn, inten=inten, row=row, col=col)
-        lo, hi = self.main.cfg["band_min"], self.main.cfg["band_max"]
-
-        res = self.main.fits[idx] if self.main.fits else None
-        txt = ""
-        fit_curve, center = None, None
-        if res and np.isfinite(res.get("center", np.nan)):
-            m = (wn >= lo) & (wn <= hi)
-            if m.sum() > 3:
-                fit_curve = (wn[m], self.main.engine.rebuild_fit(wn[m], res))
-            center = res["center"]
-            asym = asym_of(res, self.main.cfg["asym_metric"])
-            err = res.get("fwhm_err", np.nan)
+        self._spec = dict(wn=px["wn"], inten=px["inten"], row=row, col=col)
+        res, txt = px["fit"], ""
+        if px["center"] is not None:
+            asym, err = px["asym"], res.get("fwhm_err", np.nan)
             txt = ("x = %.2f µm, y = %.2f µm\nFWHM = %.1f %s cm⁻¹   centre = %.1f cm⁻¹\n"
                    "asymmetry (%s) = %s   SNR = %.1f%s"
-                   % (mf.x[idx], mf.y[idx], res["fwhm"],
+                   % (px["x"], px["y"], res["fwhm"],
                       ("± %.1f" % err) if np.isfinite(err) else "",
                       res["center"],
                       self.main.cfg["asym_metric"],
                       "%.3f" % asym if np.isfinite(asym) else "n/a",
                       res["snr"],
                       "" if res["ok"] else "   [rejected: %s]" % res["note"]))
-
-        views.draw_pixel_spectrum(ax, wn, inten, (lo, hi), fit_curve, center, row, col)
+        views.draw_pixel_spectrum(ax, px["wn"], px["inten"], px["band"], px["fit_curve"],
+                                  px["center"], row, col)
         self._apply_view()
-        gf = self.main.g_fits[idx] if self.main.g_fits else None
+        gf = px["g_fit"]
         if gf is not None and txt:
-            r = pixel_ratio(res, gf, self.main.cfg.get("ratio_metric", "height"))
-            n = layer_from_ratio(r, self.main.cfg)
-            txt += ("\nI(2D)/I(G) = %.2f  →  %s" % (r, label_of(n, "N/A"))
-                    if n is not None else
+            txt += ("\nI(2D)/I(G) = %.2f  →  %s" % (px["ratio"], px["layer"])
+                    if px["layer"] is not None else
                     "\nI(2D)/I(G) unavailable (%s)" % (gf.get("why") or "G fit rejected"))
-            if gf.get("ok") and np.isfinite(gf.get("center", np.nan)):
-                gcfg = g_band_cfg(self.main.cfg)
-                gm = (wn >= gcfg["band_min"]) & (wn <= gcfg["band_max"])
-                views.draw_g_fit(ax, wn[gm], self.main.engine.rebuild_fit(wn[gm], gf))
+            if px["g_curve"] is not None:
+                views.draw_g_fit(ax, *px["g_curve"])
         cv.draw()
         self.info.setText(txt or "No fit available for this pixel.")
         rejected = bool(res) and not res.get("ok", False)

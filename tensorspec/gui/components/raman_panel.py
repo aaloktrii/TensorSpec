@@ -15,9 +15,9 @@ from typing import Optional
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from tensorspec.core.io.raman_loaders import MapFile, is_single_spectrum, parse_map_file, read_spot_folder
+from tensorspec.core.io.raman_loaders import MapFile
 from tensorspec.core.raman.constants import APP_NAME
-from tensorspec.core.raman.map_geometry import auto_align, describe_transform
+from tensorspec.core.raman.map_geometry import describe_transform
 from tensorspec.core.raman.presets import PRESETS
 from tensorspec.core.raman.voigt_2d import HAVE_LMFIT
 from tensorspec.gui.components.raman_tabs.area_panel import AreaTab
@@ -204,40 +204,33 @@ class RamanPanel(QtWidgets.QWidget):
             self.open_raman(path)
 
     def open_raman(self, path: str):
-        # A single spectrum is not a map: it goes to the stack tab instead.
-        if not os.path.isdir(path) and is_single_spectrum(path):
-            self.tab_stack.add_paths([path])
-            self.show_tab(self.tab_stack)
-            self.status("%s is a single spectrum — added to 1 · Spectra ▸ Stacked "
-                        "spectra." % os.path.basename(path))
-            return
+        layer_mode_was_map = self.cfg.get("layer_mode") == "map"
         try:
-            mf = read_spot_folder(path) if os.path.isdir(path) else parse_map_file(path)
+            info = self.service.load(path)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(
                 self, APP_NAME, "Could not parse the file:\n\n%s" % exc)
             return
-        if mf.layout == "image":
+        # A single spectrum is not a map: it goes to the stack tab instead.
+        if info["kind"] == "spectrum":
+            self.tab_stack.add_spectrum(info["obj"])
+            self.show_tab(self.tab_stack)
+            self.status("%s is a single spectrum — added to 1 · Spectra ▸ Stacked "
+                        "spectra." % os.path.basename(path))
+            return
+        if info["kind"] == "image":
             QtWidgets.QMessageBox.warning(
                 self, APP_NAME,
                 "This file is a camera image, not a Raman map — its rows carry "
                 "one spatial coordinate and a row of pixel values, with no "
                 "spectra to fit.\n\nLoading it as the optical image instead.")
-            self.service.set_optical(mf)
             self.tab_map.chk_optical.setChecked(True)
             self.tab_map.refresh_map()
             return
-        if mf.axis.max() < self.cfg["band_min"] or mf.axis.min() > self.cfg["band_max"]:
-            QtWidgets.QMessageBox.warning(
-                self, APP_NAME,
-                "The axis of this file spans %.0f–%.0f, which does not cover the "
-                "2D-band window %.0f–%.0f cm⁻¹.\n\nChange the window under "
-                "Analysis ▸ Fit parameters."
-                % (mf.axis.min(), mf.axis.max(),
-                   self.cfg["band_min"], self.cfg["band_max"]))
+        for msg in info["warnings"]:
+            QtWidgets.QMessageBox.warning(self, APP_NAME, msg)
+        mf, res = info["obj"], info["resolution"]
         self.tab_class.close_regions_dialog()
-        layer_mode_was_map = self.cfg.get("layer_mode") == "map"
-        res = self.service.set_map(mf)
         if layer_mode_was_map:
             self.tab_class.rb_manual.setChecked(True)
         self.tab_class.update_map_status()
@@ -271,12 +264,11 @@ class RamanPanel(QtWidgets.QWidget):
         if not path:
             return
         try:
-            opt = parse_map_file(path)
+            opt = self.service.load_optical(path)
         except Exception as exc:
             QtWidgets.QMessageBox.critical(
                 self, APP_NAME, "Could not parse the file:\n\n%s" % exc)
             return
-        self.service.set_optical(opt)
         kind = "camera image" if opt.is_optical else "image-like map"
         self.status("Loaded %s (%s) — %d × %d pixels, X %.1f–%.1f µm, "
                     "Y %.1f–%.1f µm%s"
@@ -405,6 +397,10 @@ class RamanPanel(QtWidgets.QWidget):
         """Re-place the same spectra under a new orientation / offset."""
         if not self.service.apply_transform(t):
             return
+        self._after_transform()
+
+    def _after_transform(self):
+        """Refresh the views after the backend re-placed the map."""
         # Regions were read from the camera image at the old placement; the
         # assigned layer counts survive (they are per spectrum), the dialog
         # does not.
@@ -422,7 +418,7 @@ class RamanPanel(QtWidgets.QWidget):
         self.status("Map placed as  %s%s" % (describe_transform(self.current_transform()), note))
 
     def run_auto_align(self):
-        """Fit the map's offset to the camera image.
+        """Fit the map's offset to the camera image (RamanService.auto_align).
 
         By default the orientation is locked to the current one (the
         instrument convention unless changed) and only the offset is searched.
@@ -437,45 +433,31 @@ class RamanPanel(QtWidgets.QWidget):
             return
         if self.mapfile_raw.layout != "spectra":
             return
-        t0 = self.current_transform()
-        rng = float(self.cfg.get("align_search_um", 15.0))
         full = bool(self.tab_map.chk_allorient.isChecked())
         self.status("Aligning map to the optical image…")
         QtWidgets.QApplication.processEvents()
-        orient = None if full else [(t0["swap"], t0["flip_x"], t0["flip_y"])]
         want = self.tab_map.cmb_contrast.currentIndex()   # 0 auto, 1 brighter, 2 darker
-        sign = {0: None, 1: 1, 2: -1}[want]
-        cands, sig = auto_align(self.mapfile_raw, self.optical, self.cfg,
-                                search_um=rng, orientations=orient, sign=sign)
-        cands = [c for c in cands if c[0] > 0]
-        if not cands:
+        out = self.service.auto_align(full, {0: None, 1: 1, 2: -1}[want])
+        if out is None:
             QtWidgets.QMessageBox.warning(
                 self, APP_NAME, "Could not find an alignment — is there a band "
                 "signal in this map and a flake in the optical image?")
             return
-        best = cands[0]
-        t = best[2]
-        at_edge = max(abs(t["dx"]), abs(t["dy"])) >= rng - 0.5
-        self.set_transform(t)
+        self._after_transform()
+        t = out["transform"]
         if full:
-            runner = next((c for c in cands[1:]
-                           if (c[2]["swap"], c[2]["flip_x"], c[2]["flip_y"]) !=
-                           (t["swap"], t["flip_x"], t["flip_y"])), None)
-            margin = best[0] - (runner[0] if runner else 0.0)
-            verdict = ("clear" if best[0] >= 0.5 and margin >= 0.2 else
-                       "tentative — check it by eye, or against LabSpec's overlay")
+            runner = out["runner"]
             extra = ("Next best orientation:  %s   (r = %+.2f)\n\n"
-                     % (describe_transform(runner[2]), runner[1]) if runner else "")
+                     % (describe_transform(runner[0]), runner[1]) if runner else "")
         else:
-            verdict = ("offset found" if best[0] >= 0.3 else
-                       "weak match — check it by eye")
-            extra = "Orientation locked; only the offset was searched (±%.0f µm).\n\n" % rng
+            extra = ("Orientation locked; only the offset was searched (±%.0f µm).\n\n"
+                     % out["search_um"])
         msg = ("Aligned using the %s height against the optical image.\n\n"
                "Placement:  %s   (r = %+.2f)\n%s"
                "Result: %s.%s"
-               % (sig, describe_transform(t), best[1], extra, verdict,
+               % (out["signal"], describe_transform(t), out["r"], extra, out["verdict"],
                   "\n\n⚠ The best offset lies at the edge of the search range — "
-                  "the true offset may be larger. Raise the search range." if at_edge else ""))
+                  "the true offset may be larger. Raise the search range." if out["at_edge"] else ""))
         QtWidgets.QMessageBox.information(self, "Auto-align", msg)
 
     # -- settings -----------------------------------------------------------

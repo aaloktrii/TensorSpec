@@ -69,3 +69,42 @@ def test_step1_spectra(spot_folder):
     svc.stack_add(Spectrum(WN, graphene(), "synthetic", ""))
     assert [t["label"] for t in svc.stack_traces()][1] == "synthetic"
     assert svc.stack_move(1, -1) and svc.stack_traces()[0]["label"] == "synthetic"
+
+
+def test_step2_map(spot_folder):
+    from tensorspec.gui.services.raman_service import RamanService
+    svc = RamanService()
+    info = svc.load(str(spot_folder))
+    assert info["kind"] == "map" and svc.mapfile.shape == (3, 4) and not svc.fits     # nothing fitted
+    total = svc.quantity_map("Total intensity")
+    assert total.shape == (3, 4) and np.isfinite(total).all()
+    assert svc.quantity_map("FWHM(2D)") is None                                   # needs the 2D fit
+    g = svc.quantity_map("Band integral", ("G", 1500.0, 1680.0))
+    assert np.isfinite(g).all()
+    px = svc.pixel(0, 0)
+    assert px["fit"] is None and px["inten"].shape == WN.shape
+    # area: the two right-hand columns of the middle row (display coordinates)
+    mf = svc.mapfile
+    cols = mf.ux[2:]
+    n = svc.set_area((cols.min() - 0.1, cols.max() + 0.1, mf.uy[1] - 0.1, mf.uy[1] + 0.1))
+    assert n == 2 and np.allclose(svc.area_spectrum, mf.data[svc.area_indices].sum(0))
+    svc.preset("Graphene")
+    res = svc.fit_area(svc.fit_model)
+    assert res["bands"]["G"]["n"] == 2                                            # split G
+    svc.add_area_to_spectra()
+    assert svc.spectra[-1]["label"].endswith("area (2 px)")
+    # fit every pixel -> peak maps
+    svc.set_peak_results(svc.engine.fit_pixels(mf, svc.fit_model, parallel=False), svc.fit_model)
+    counts = svc.quantity_map("Peak map", peak_key="G_n")
+    assert set(np.unique(counts)) == {1.0, 2.0}
+    # 2D-band Voigt fit of every pixel (what 'Fit 2D band on all pixels' runs)
+    assert svc.set_fits(svc.map_fitter().run()) == 12
+    assert np.isfinite(svc.quantity_map("FWHM(2D)")).all()
+    assert svc.pixel(1, 1)["center"] is not None
+    # compare cells
+    for idx in (0, 5):
+        assert svc.cells_add(idx) == ""
+    svc.cells_fit(2550.0, 2850.0, 1)
+    assert all(c["fit"][1]["ok"] for c in svc.cells)
+    picks, best = svc.cells_suggest(2550.0, 2850.0)
+    assert best == 1 and len(picks) == 2

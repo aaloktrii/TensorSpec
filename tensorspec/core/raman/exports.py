@@ -72,3 +72,35 @@ def peak_counts(entries, results, names):
     xy = ((np.array([it["x"] for it in entries]), np.array([it["ypos"] for it in entries]))
           if has_xy else None)
     return counts, xy
+
+
+def write_cells_csv(path: str, mf, cells, lo: float, hi: float, names) -> str:
+    """Spectra of the compared map cells in [lo, hi] (one column each) to ``path``, and their
+    n-Lorentzian fits to <path>_fits.csv. ``cells``: {idx, fit}; ``names``: one label per cell.
+    Returns the fits path."""
+    m = (mf.axis >= lo) & (mf.axis <= hi)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["raman_shift_cm-1"] + list(names))
+        for j, xv in enumerate(mf.axis[m]):
+            w.writerow(["%.3f" % xv] + ["%.3f" % mf.data[it["idx"]][m][j] for it in cells])
+    fpath = path[:-4] + "_fits.csv"
+    with open(fpath, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(["spectrum", "x_um", "y_um", "range_lo", "range_hi", "n_peaks", "peak",
+                    "centre_cm-1", "fwhm_cm-1", "fwhm_err_cm-1", "height", "area",
+                    "band_fwhm_cm-1", "r2", "bic"])
+        for it, name in zip(cells, names):
+            fr = it.get("fit")
+            if fr is None or not fr[1]["ok"]:
+                continue
+            (flo, fhi, n), r = fr
+            for k, pk in enumerate(r["peaks"]):
+                w.writerow([name, "%.3f" % mf.x[it["idx"]],
+                            "%.3f" % mf.y[it["idx"]], flo, fhi, n, k + 1,
+                            "%.2f" % pk["center"], "%.2f" % pk["fwhm"],
+                            "%.2f" % pk["err_fwhm"], "%.2f" % pk["height"],
+                            "%.1f" % pk["area"], "%.2f" % r["band_fwhm"],
+                            "%.5f" % r["r2"], "%.1f" % r["bic"]])
+    return fpath
+

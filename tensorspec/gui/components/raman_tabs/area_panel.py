@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtWidgets
 
-from tensorspec.core.io.raman_loaders import Spectrum, short_label
 from tensorspec.gui.components.raman_tabs.layout import fill_peak_table
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
 from tensorspec.plotting.backends.raman_views import peak_fit as views
@@ -74,8 +73,7 @@ class AreaTab(QtWidgets.QWidget):
         self.plot.draw()
 
     def _label(self) -> str:
-        svc = self.main.service
-        return "%s area (%d px)" % (short_label(self.main.mapfile.path), len(svc.area_indices))
+        return self.main.service.area_label()
 
     def fit(self):
         svc = self.main.service
@@ -103,17 +101,17 @@ class AreaTab(QtWidgets.QWidget):
         svc = self.main.service
         if svc.area_spectrum is None:
             return
-        tf = self.main.tab_fit
-        tf._add(self._label(), svc.area_axis, svc.area_spectrum, self.main.mapfile.path)
-        tf._added()
-        self.main.show_tab(tf)
+        svc.add_area_to_spectra()
+        self.main.tab_fit._added()
+        self.main.show_tab(self.main.tab_fit)
 
     def send_to_stack(self):
         svc = self.main.service
         if svc.area_spectrum is None:
             return
-        self.main.tab_stack.add_spectrum(Spectrum(svc.area_axis, svc.area_spectrum, self._label(),
-                                                  self.main.mapfile.path))
+        svc.stack_add_area()
+        self.main.tab_stack._rebuild()
+        self.main.tab_stack.redraw()
         self.main.show_tab(self.main.tab_stack)
         self.main.status("Added the area spectrum to 1 · Spectra ▸ Stacked spectra (%s)."
                          % os.path.basename(self.main.mapfile.path.rstrip(os.sep)))

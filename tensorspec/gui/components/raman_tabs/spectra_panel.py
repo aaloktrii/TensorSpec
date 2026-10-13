@@ -4,7 +4,6 @@ peak count, CSV export. Figures are drawn by plotting/backends/raman_views/spect
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (SpectraTab)."""
 from __future__ import annotations
 
-import csv
 import os
 from typing import TYPE_CHECKING
 from typing import List, Tuple
@@ -20,10 +19,6 @@ from tensorspec.plotting.viewers.raman_canvas import Canvas
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
 
-TRACE_COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
-                "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f"]
-
-
 class SpectraTab(QtWidgets.QWidget):
     """Pick grid cells, compare their spectra stacked, fit Lorentzians.
 
@@ -33,12 +28,10 @@ class SpectraTab(QtWidgets.QWidget):
 
     PRESETS = [("2D band", (2550.0, 2850.0)), ("G band", (1500.0, 1680.0)),
                ("D band", (1270.0, 1430.0)), ("Full spectrum", None), ("Custom", None)]
-    MAX_SPECTRA = 12
 
     def __init__(self, main: "RamanPanel"):
         super().__init__()
         self.main = main
-        self.items: List[dict] = []
         self._build()
 
     # -- UI ------------------------------------------------------------------
@@ -195,10 +188,13 @@ class SpectraTab(QtWidgets.QWidget):
         self.redraw()
 
     # -- helpers ------------------------------------------------------------
+    @property
+    def items(self) -> List[dict]:
+        """The compared cells, held by the service: {idx, color, visible, fit}."""
+        return self.main.service.cells
+
     def resolution(self) -> float:
-        mf = self.main.mapfile
-        return float((mf.spectral_resolution if mf is not None else None)
-                     or self.main.cfg.get("min_fwhm", 5.0))
+        return self.main.service.cells_resolution()
 
     def rng(self) -> Tuple[float, float]:
         lo, hi = self.spn_lo.value(), self.spn_hi.value()
@@ -215,14 +211,11 @@ class SpectraTab(QtWidgets.QWidget):
 
     # -- selection ---------------------------------------------------------------
     def add_spectrum(self, idx: int):
-        if any(it["idx"] == idx for it in self.items):
+        why = self.main.service.cells_add(idx)
+        if why:
+            if why != "already there":
+                self.main.status(why)
             return
-        if len(self.items) >= self.MAX_SPECTRA:
-            self.main.status("The comparison holds at most %d spectra." % self.MAX_SPECTRA)
-            return
-        used = {it["color"] for it in self.items}
-        color = next((c for c in TRACE_COLORS if c not in used), TRACE_COLORS[0])
-        self.items.append({"idx": int(idx), "color": color, "visible": True, "fit": None})
         if self.chk_auto.isChecked():
             self._fit_item(self.items[-1])
         self._rebuild_list()
@@ -230,25 +223,22 @@ class SpectraTab(QtWidgets.QWidget):
         self.redraw()
 
     def _toggle(self, idx: int):
-        for k, it in enumerate(self.items):
-            if it["idx"] == idx:
-                self.items.pop(k)
-                self._rebuild_list()
-                self.refresh_mini()
-                self.redraw()
-                return
+        if any(it["idx"] == idx for it in self.items):
+            self.main.service.cells_toggle(idx)
+            self._rebuild_list()
+            self.refresh_mini()
+            self.redraw()
+            return
         self.add_spectrum(idx)
 
     def clear(self):
-        self.items = []
+        self.items.clear()
         self._rebuild_list()
         self.refresh_mini()
         self.redraw()
 
     def _remove_selected(self):
-        rows = sorted({i.row() for i in self.lst.selectedIndexes()}, reverse=True)
-        for r in rows:
-            self.items.pop(r)
+        self.main.service.cells_remove({i.row() for i in self.lst.selectedIndexes()})
         self._rebuild_list()
         self.refresh_mini()
         self.redraw()
@@ -285,7 +275,7 @@ class SpectraTab(QtWidgets.QWidget):
             self._toggle(int(mf.index_map[row, col]))
 
     def reset(self):
-        self.items = []
+        self.items.clear()
         self._rebuild_list()
         self.refresh_mini()
         self.redraw()
@@ -321,39 +311,23 @@ class SpectraTab(QtWidgets.QWidget):
 
     # -- fitting ----------------------------------------------------------------
     def _fit_item(self, it):
-        mf = self.main.mapfile
-        lo, hi = self.rng()
-        m = (mf.axis >= lo) & (mf.axis <= hi)
-        it["fit"] = ((lo, hi, self.spn_n.value()),
-                     self.main.engine.fit_band("lorentz_n", mf.axis[m], mf.data[it["idx"]][m],
-                                                {"n": self.spn_n.value()}))
+        self.main.service.cell_fit(it, *self.rng(), self.spn_n.value())
 
     def fit_all(self, redraw=True):
         if self.main.mapfile is None:
             return
-        for it in self.items:
-            if it["visible"]:
-                self._fit_item(it)
+        self.main.service.cells_fit(*self.rng(), self.spn_n.value())
         self._fill_table()
         if redraw:
             self.redraw()
 
     def suggest(self):
-        mf = self.main.mapfile
-        if mf is None or not self.items:
+        if self.main.mapfile is None or not self.items:
             return
-        lo, hi = self.rng()
-        m = (mf.axis >= lo) & (mf.axis <= hi)
         res = self.resolution()
-        picks = []
-        for it in self.items:
-            if it["visible"]:
-                n, _ = self.main.engine.suggest_peak_count(mf.axis[m], mf.data[it["idx"]][m], res)
-                picks.append((it, n))
+        picks, best = self.main.service.cells_suggest(*self.rng())
         if not picks:
             return
-        counts = [n for _, n in picks]
-        best = max(set(counts), key=counts.count)
         self.spn_n.setValue(best)
         self.lbl.setText("Suggested peak counts (resolution %.1f cm⁻¹): %s  →  using %d."
                          % (res, ",  ".join("%s: %d" % (self._name(it["idx"]).split()[0], n)
@@ -455,29 +429,5 @@ class SpectraTab(QtWidgets.QWidget):
             return
         if not path.lower().endswith(".csv"):
             path += ".csv"
-        lo, hi = self.rng()
-        m = (mf.axis >= lo) & (mf.axis <= hi)
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            w = csv.writer(fh)
-            w.writerow(["raman_shift_cm-1"] + [self._name(it["idx"]) for it in vis])
-            for j, xv in enumerate(mf.axis[m]):
-                w.writerow(["%.3f" % xv] + ["%.3f" % mf.data[it["idx"]][m][j] for it in vis])
-        fpath = path[:-4] + "_fits.csv"
-        with open(fpath, "w", newline="", encoding="utf-8") as fh:
-            w = csv.writer(fh)
-            w.writerow(["spectrum", "x_um", "y_um", "range_lo", "range_hi", "n_peaks", "peak",
-                        "centre_cm-1", "fwhm_cm-1", "fwhm_err_cm-1", "height", "area",
-                        "band_fwhm_cm-1", "r2", "bic"])
-            for it in vis:
-                fr = it.get("fit")
-                if fr is None or not fr[1]["ok"]:
-                    continue
-                (flo, fhi, n), r = fr
-                for k, pk in enumerate(r["peaks"]):
-                    w.writerow([self._name(it["idx"]), "%.3f" % mf.x[it["idx"]],
-                                "%.3f" % mf.y[it["idx"]], flo, fhi, n, k + 1,
-                                "%.2f" % pk["center"], "%.2f" % pk["fwhm"],
-                                "%.2f" % pk["err_fwhm"], "%.2f" % pk["height"],
-                                "%.1f" % pk["area"], "%.2f" % r["band_fwhm"],
-                                "%.5f" % r["r2"], "%.1f" % r["bic"]])
+        fpath = self.main.service.cells_export(path, *self.rng(), [self._name(it["idx"]) for it in vis])
         self.main.status("Saved %s and %s" % (os.path.basename(path), os.path.basename(fpath)))

@@ -27,9 +27,11 @@ from tensorspec.core.io.raman_loaders import MapFile
 from tensorspec.core.raman import exports, presets, products, reference
 from tensorspec.core.raman import spectra as spectra_lists
 from tensorspec.core.raman.fit_model import FitModel
-from tensorspec.core.raman.classification import pixel_ratio, ratio_applicable
+from tensorspec.core.raman.classification import (g_band_cfg, label_of, layer_from_ratio, pixel_ratio,
+                                                  ratio_applicable)
 from tensorspec.core.raman.constants import default_config
-from tensorspec.core.raman.map_geometry import apply_map_transform, default_transform
+from tensorspec.core.raman.map_geometry import (apply_map_transform, auto_align, band_height,
+                                                default_transform, describe_transform)
 from tensorspec.core.raman.voigt_2d import asym_of
 from tensorspec.core.raman_engine import RamanEngineRouter
 from tensorspec.core.workspace import global_workspace
@@ -72,6 +74,8 @@ class RamanService:
         self.stack: List[dict] = []                       # {"spec": Spectrum, "color", "visible"}
         self.preset_windows: Dict[str, tuple] = {}        # extra band-integral windows of a preset
         self.strain_rows: Optional[list] = None
+        # 2 · Map ▸ Compare cells
+        self.cells: List[dict] = []                       # {"idx", "color", "visible", "fit"}
         self._band_written = None                         # band map shown as /analysis data
         self.clear_peak_maps()
         self.clear_area()
@@ -162,6 +166,69 @@ class RamanService:
         if self.strain_rows is not None and self.spectra_are_map():
             self.write_strain_doping(self.strain_rows, params)
 
+    # -- 2 · Map ▸ Compare cells ----------------------------------------------------------------
+    CELL_COLORS = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e", "#9467bd",
+                   "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f"]
+    MAX_CELLS = 12
+
+    def cells_add(self, idx: int) -> str:
+        """Add a map cell (spectrum index). Returns '' or why it was not added."""
+        if any(it["idx"] == idx for it in self.cells):
+            return "already there"
+        if len(self.cells) >= self.MAX_CELLS:
+            return "The comparison holds at most %d spectra." % self.MAX_CELLS
+        used = {it["color"] for it in self.cells}
+        color = next((c for c in self.CELL_COLORS if c not in used), self.CELL_COLORS[0])
+        self.cells.append({"idx": int(idx), "color": color, "visible": True, "fit": None})
+        return ""
+
+    def cells_toggle(self, idx: int) -> bool:
+        """Remove the cell if it is in the comparison, else add it. True when it was added."""
+        for k, it in enumerate(self.cells):
+            if it["idx"] == idx:
+                self.cells.pop(k)
+                return False
+        return self.cells_add(idx) == ""
+
+    def cells_remove(self, rows):
+        for r in sorted(rows, reverse=True):
+            self.cells.pop(r)
+
+    def cells_resolution(self) -> float:
+        mf = self.mapfile
+        return float((mf.spectral_resolution if mf is not None else None)
+                     or self.cfg.get("min_fwhm", 5.0))
+
+    def cell_fit(self, it, lo: float, hi: float, n: int):
+        """n Lorentzians on one compared cell over [lo, hi]; kept with the cell."""
+        mf = self.mapfile
+        m = (mf.axis >= lo) & (mf.axis <= hi)
+        it["fit"] = ((lo, hi, n), self.engine.fit_band("lorentz_n", mf.axis[m], mf.data[it["idx"]][m],
+                                                      {"n": n}))
+
+    def cells_fit(self, lo: float, hi: float, n: int):
+        for it in self.cells:
+            if it["visible"]:
+                self.cell_fit(it, lo, hi, n)
+
+    def cells_suggest(self, lo: float, hi: float):
+        """Peak count the data justify for each visible cell, and the most common one:
+        ([(cell, n), ...], best) or ([], None)."""
+        mf = self.mapfile
+        m = (mf.axis >= lo) & (mf.axis <= hi)
+        res = self.cells_resolution()
+        picks = [(it, self.engine.suggest_peak_count(mf.axis[m], mf.data[it["idx"]][m], res)[0])
+                 for it in self.cells if it["visible"]]
+        if not picks:
+            return [], None
+        counts = [n for _, n in picks]
+        return picks, max(set(counts), key=counts.count)
+
+    def cells_export(self, path: str, lo: float, hi: float, names) -> str:
+        """Visible cells' spectra and fits to CSV (names: one label per visible cell)."""
+        vis = [it for it in self.cells if it["visible"]]
+        return exports.write_cells_csv(path, self.mapfile, vis, lo, hi, names)
+
     # -- stacked figure ------------------------------------------------------------------------
     STACK_COLORS = ["#000000", "#e8402a", "#1f5fa8", "#2a8c4a", "#8a5a00",
                     "#7b3fa0", "#17becf", "#7f7f7f"]
@@ -225,6 +292,25 @@ class RamanService:
         return reference.preferred_reference(global_workspace.project_dir)
 
     # -- loading -------------------------------------------------------------------------------
+    def load(self, path: str) -> dict:
+        """Open any Raman file or spot folder. Returns {"kind": "spectrum" | "map" | "image",
+        "obj": Spectrum / MapFile, "warnings": [...], "resolution": header cutoff or None}.
+        A map becomes the current map (fits cleared, /raw written), a camera image the optical
+        image; a single spectrum is only read (the frontend decides where it goes)."""
+        kind, obj = raman_loaders.load_raman(path)
+        out = {"kind": kind, "obj": obj, "warnings": [], "resolution": None}
+        if kind == "image":
+            self.set_optical(obj)
+        elif kind == "map":
+            if obj.axis.max() < self.cfg["band_min"] or obj.axis.min() > self.cfg["band_max"]:
+                out["warnings"].append(
+                    "The axis of this file spans %.0f–%.0f, which does not cover the "
+                    "2D-band window %.0f–%.0f cm⁻¹.\n\nChange the window under "
+                    "Analysis ▸ Fit parameters."
+                    % (obj.axis.min(), obj.axis.max(), self.cfg["band_min"], self.cfg["band_max"]))
+            out["resolution"] = self.set_map(obj)
+        return out
+
     def set_map(self, mf: MapFile) -> Optional[float]:
         """Make ``mf`` the current map (fits cleared) and push it to the workspace (/raw).
         Returns the spectral resolution read from the header, if any."""
@@ -242,6 +328,7 @@ class RamanService:
         self.ratio_maps = {"height": None, "area": None}
         self.fits = []
         self.fwhm_map = None
+        self.cells = []
         self.clear_area()
         self.band_maps = {}
         self._band_written = None
@@ -249,6 +336,12 @@ class RamanService:
         self.name = workspace_name(mf.path)
         global_workspace.push_spectroscopy_data(self.name, raman_loaders.map_to_tensor(mf))
         return res
+
+    def load_optical(self, path: str) -> MapFile:
+        """Read a camera image (or image-like map) and make it the optical image."""
+        opt = raman_loaders.parse_map_file(path)
+        self.set_optical(opt)
+        return opt
 
     def set_optical(self, opt: MapFile):
         self.optical = opt
@@ -279,6 +372,101 @@ class RamanService:
                     "that the X and Y columns were read the right way round"
                     % over)
         return "  (the map reaches %.1f µm past the camera frame edge)" % over
+
+    # -- what a map view shows ----------------------------------------------------------------
+    def height_map(self, which: str) -> np.ndarray:
+        """Raw G or 2D peak height on the current grid (no fitting)."""
+        mf = self.mapfile
+        if which == "G height":
+            v = band_height(mf.axis, mf.data, 1582.0, 22.0)
+        else:
+            c = 0.5 * (self.cfg["band_min"] + self.cfg["band_max"])
+            v = band_height(mf.axis, mf.data, c, 45.0)
+        g = np.full(mf.shape, np.nan)
+        ok = mf.index_map >= 0
+        g[ok] = v[mf.index_map[ok]]
+        return g
+
+    def quantity_map(self, quantity: str, window=None, peak_key=None):
+        """The grid a map view shows: 'Total intensity', 'Band integral' (window = (name, lo, hi)),
+        'Peak map' (peak_key of peak_grids), 'FWHM(2D)', 'G height', '2D height'.
+        None when it needs a fit that has not been run."""
+        mf = self.mapfile
+        if quantity == "Total intensity":
+            return self.band_integral_map("total", float(mf.axis.min()), float(mf.axis.max()))
+        if quantity == "Band integral":
+            return self.band_integral_map(*window)
+        if quantity == "Peak map":
+            return self.peak_map(peak_key) if peak_key in self.peak_grids else None
+        if quantity == "FWHM(2D)":
+            return self.fwhm_map
+        return self.height_map(quantity)
+
+    def pixel(self, row: int, col: int) -> Optional[dict]:
+        """Everything known about one map pixel: its spectrum, the 2D-band fit (curve, centre,
+        FWHM, asymmetry, SNR) and, with a G fit, I(2D)/I(G) and the layer number it implies.
+        None if the pixel holds no spectrum."""
+        mf = self.mapfile
+        idx = mf.index_map[row, col]
+        if idx < 0:
+            return None
+        wn, inten = mf.axis, mf.data[idx]
+        lo, hi = self.cfg["band_min"], self.cfg["band_max"]
+        res = self.fits[idx] if self.fits else None
+        out = {"index": int(idx), "x": float(mf.x[idx]), "y": float(mf.y[idx]), "wn": wn,
+               "inten": inten, "band": (lo, hi), "fit": res, "fit_curve": None, "center": None,
+               "asym": None, "g_fit": None, "g_curve": None, "ratio": None, "layer": None}
+        if res and np.isfinite(res.get("center", np.nan)):
+            m = (wn >= lo) & (wn <= hi)
+            if m.sum() > 3:
+                out["fit_curve"] = (wn[m], self.engine.rebuild_fit(wn[m], res))
+            out["center"] = res["center"]
+            out["asym"] = asym_of(res, self.cfg["asym_metric"])
+        gf = self.g_fits[idx] if self.g_fits else None
+        out["g_fit"] = gf
+        if gf is not None and res:
+            r = pixel_ratio(res, gf, self.cfg.get("ratio_metric", "height"))
+            n = layer_from_ratio(r, self.cfg)
+            out["ratio"], out["layer"] = r, (label_of(n, "N/A") if n is not None else None)
+            if gf.get("ok") and np.isfinite(gf.get("center", np.nan)):
+                gcfg = g_band_cfg(self.cfg)
+                gm = (wn >= gcfg["band_min"]) & (wn <= gcfg["band_max"])
+                out["g_curve"] = (wn[gm], self.engine.rebuild_fit(wn[gm], gf))
+        return out
+
+    def auto_align(self, all_orientations: bool, sign=None) -> Optional[dict]:
+        """Fit the map's placement to the optical image and apply it. Returns {"transform", "r",
+        "signal", "verdict", "runner" (next-best candidate or None), "at_edge", "search_um",
+        "all_orientations"}, or None when nothing matched."""
+        t0 = self.current_transform()
+        rng = float(self.cfg.get("align_search_um", 15.0))
+        orient = None if all_orientations else [(t0["swap"], t0["flip_x"], t0["flip_y"])]
+        cands, sig = auto_align(self.mapfile_raw, self.optical, self.cfg,
+                                search_um=rng, orientations=orient, sign=sign)
+        cands = [c for c in cands if c[0] > 0]
+        if not cands:
+            return None
+        best = cands[0]
+        t = best[2]
+        self.apply_transform(t)
+        out = {"transform": t, "r": best[1], "signal": sig, "runner": None, "search_um": rng,
+               "at_edge": max(abs(t["dx"]), abs(t["dy"])) >= rng - 0.5,
+               "all_orientations": all_orientations}
+        if all_orientations:
+            runner = next((c for c in cands[1:]
+                           if (c[2]["swap"], c[2]["flip_x"], c[2]["flip_y"]) !=
+                           (t["swap"], t["flip_x"], t["flip_y"])), None)
+            margin = best[0] - (runner[0] if runner else 0.0)
+            out["verdict"] = ("clear" if best[0] >= 0.5 and margin >= 0.2 else
+                              "tentative — check it by eye, or against LabSpec's overlay")
+            out["runner"] = (runner[2], runner[1]) if runner else None
+        else:
+            out["verdict"] = ("offset found" if best[0] >= 0.3 else "weak match — check it by eye")
+        return out
+
+    @staticmethod
+    def describe_transform(t) -> str:
+        return describe_transform(t)
 
     # -- fitting -------------------------------------------------------------------------------
     def map_fitter(self, progress=None):
@@ -433,6 +621,17 @@ class RamanService:
         self.area_rect, self.area_indices = tuple(rect), idx
         self.area_axis, self.area_spectrum, self.area_fit = axis, spec, None
         return int(idx.size)
+
+    def area_label(self) -> str:
+        return "%s area (%d px)" % (raman_loaders.short_label(self.mapfile.path), len(self.area_indices))
+
+    def add_area_to_spectra(self):
+        """The area spectrum as a step-1 spectrum."""
+        self.add_spectrum(self.area_label(), self.area_axis, self.area_spectrum, self.mapfile.path)
+
+    def stack_add_area(self):
+        self.stack_add(raman_loaders.Spectrum(self.area_axis, self.area_spectrum, self.area_label(),
+                                              self.mapfile.path))
 
     def fit_area(self, model):
         """Fit the area spectrum with the step-1 model and write /analysis/raman_roi."""
