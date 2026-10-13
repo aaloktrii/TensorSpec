@@ -112,9 +112,39 @@ class LoadSection:
         lf.addRow(row)
         self._delete_key = _DeleteKey(self._remove_selected, self)
         self.scan_list.installEventFilter(self._delete_key)
-        self.btn_load = QPushButton("Load")
+        row = QHBoxLayout()
+        self.btn_load = QPushButton("Load all as one dataset")
+        self.btn_load.setToolTip("Every item in the list as one dataset")
         self.btn_load.clicked.connect(self._load)
-        lf.addRow(self.btn_load)
+        self.btn_load_sel = QPushButton("Load selected as one dataset")
+        self.btn_load_sel.setToolTip("Only the selected items (e.g. one CP / CM pair) as one dataset")
+        self.btn_load_sel.clicked.connect(lambda: self._load(selected=True))
+        self.btn_load_sel.setEnabled(False)
+        row.addWidget(self.btn_load)
+        row.addWidget(self.btn_load_sel)
+        lf.addRow(row)
+        self.btn_load_pairs = QPushButton("Load each pair separately")
+        self.btn_load_pairs.setToolTip("One dataset per polarization pair (e.g. CL/CR at each angle), all kept "
+                                       "loaded: pick one under Dataset, analyse it, save, unload, pick the next")
+        self.btn_load_pairs.clicked.connect(self._load_pairs)
+        lf.addRow(self.btn_load_pairs)
+        self.scan_list.itemSelectionChanged.connect(self._update_load_button)
+
+        row = QHBoxLayout()
+        self.dataset_combo = QComboBox()
+        self.dataset_combo.setToolTip("The dataset every step below works on")
+        self.dataset_combo.activated.connect(lambda *_: self._switch_dataset(self.dataset_combo.currentData()))
+        b_save = QPushButton("Save results…")
+        b_save.setToolTip("Every map (TIFF + PNG), drift.csv, history.txt and summary.json of this dataset "
+                          "into <folder>/<dataset>/")
+        b_save.clicked.connect(self._save_results)
+        b_unload = QPushButton("Unload")
+        b_unload.setToolTip("Remove this dataset from memory (save its results first)")
+        b_unload.clicked.connect(self._unload_current)
+        row.addWidget(self.dataset_combo, 1)
+        row.addWidget(b_save)
+        row.addWidget(b_unload)
+        lf.addRow("Dataset:", row)
         self.load_status = QLabel("Add files or a folder, then click Load.")
         self.load_status.setWordWrap(True)
         lf.addRow(self.load_status)
@@ -373,14 +403,19 @@ class LoadSection:
         if self._worker is not None and self._worker.isRunning():
             self._err("Busy: wait for the current operation to finish.")
             return
-        if self._name:
-            self.service.unload(self._name)
-            self._log(f"Unloaded '{self._name}'.")
+        for name in self.service.loaded_datasets():
+            self.service.unload(name)
+            self._log(f"Unloaded '{name}'.")
         self._name = None
         self._scan_paths.clear()
         self._scan_pol.clear()
         self._scan_detected.clear()
         self.scan_list.clear()
+        self._clear_view()
+        self._fill_datasets()
+        self._update_load_status()
+
+    def _clear_view(self):
         self.plot_box.setVisible(False)
         self.view_combo.blockSignals(True)
         self.view_combo.clear()
@@ -391,28 +426,128 @@ class LoadSection:
         self._viewer_key = None
         self._update_load_status()
 
-    def _load(self):
+    def _load(self, selected: bool = False):
         if not self._scan_paths:
             self._err("Add files or folders first.")
             return
+        if not self._ready_to_load():
+            return
+        paths = self._selected_paths() if selected else list(self._scan_paths)
+        if not paths:
+            self._err("Select the item(s) to load in the list first.")
+            return
+        self.load_status.setText(f"Loading {len(paths)} item(s)… (online-only Dropbox files download first)")
+        self._log("Loading: " + "; ".join(paths))
+        self._run(self.service.load_beamline, self._on_loaded, paths, None,  # dataset name is automatic
+                  pol={p: t for p, t in self._scan_pol.items() if p in paths} or None, **self._load_kw())
+
+    def _load_kw(self) -> dict:
+        return {"i0_normalize": self.chk_i0.isChecked() if self.chk_i0.isEnabled() else None,
+                "tpx3": self.chk_tpx3.isChecked(), "drop_bad_frames": self.chk_bad.isChecked()}
+
+    def _selected_paths(self) -> list[str]:
+        rows = sorted(self.scan_list.row(it) for it in self.scan_list.selectedItems())
+        return [self._scan_paths[r] for r in rows]
+
+    def _update_load_button(self):
+        n = len(self._selected_paths())
+        self.btn_load_sel.setEnabled(n > 0)
+        self.btn_load_sel.setText(f"Load selected ({n}) as one dataset" if n else "Load selected as one dataset")
+
+    def _load_pairs(self):
+        if not self._scan_paths:
+            self._err("Add files or folders first.")
+            return
+        if not self._ready_to_load():
+            return
+        self.load_status.setText(f"Loading {len(self._scan_paths)} item(s), one dataset per pair…")
+        self._log("Loading pairs: " + "; ".join(self._scan_paths))
+        self._run(self.service.load_pairs, self._on_loaded_pairs, list(self._scan_paths),
+                  pol=dict(self._scan_pol) or None, **self._load_kw())
+
+    def _on_loaded_pairs(self, results: list[dict]):
+        for res in results[1:]:
+            self._log(f"Loaded '{res['name']}': {res['shape'][0]} frames")
+        self._on_loaded(results[0])
+        names = ", ".join(r["name"] for r in results)
+        self.load_status.setText(f"Loaded {len(results)} datasets: {names}. Pick one under Dataset; "
+                                 "Save results, then Unload it before the next.")
+
+    def _ready_to_load(self) -> bool:
         try:
             self.service.set_detector_maps(self.dead_edit.text().strip() or None,
                                            self.norm_edit.text().strip() or None)
         except ValueError as exc:
             self._err(str(exc))
-            return
+            return False
         unset = self._unset_pol()
         if unset:
             self._err(f"Set the polarization of {', '.join(unset)} first: select it in the list and choose "
                       "Polarization (its files do not record it).")
+            return False
+        return True
+
+    # ------------------------------------------------------------- datasets
+    def _fill_datasets(self, select: str | None = None):
+        names = self.service.loaded_datasets()
+        self.dataset_combo.blockSignals(True)
+        self.dataset_combo.clear()
+        for n in names:
+            self.dataset_combo.addItem(n, n)
+        if not names:
+            self.dataset_combo.addItem("(none loaded)", None)
+        i = self.dataset_combo.findData(select or self._name)
+        self.dataset_combo.setCurrentIndex(max(0, i))
+        self.dataset_combo.blockSignals(False)
+
+    def _switch_dataset(self, name: str | None):
+        """Make ``name`` the dataset every step works on and show it."""
+        if not name or name == self._name:
             return
-        i0 = self.chk_i0.isChecked() if self.chk_i0.isEnabled() else None
-        self.load_status.setText(f"Loading {len(self._scan_paths)} item(s)… (online-only Dropbox files download first)")
-        self._log("Loading: " + "; ".join(self._scan_paths))
-        self._run(self.service.load_beamline, self._on_loaded, list(self._scan_paths),
-                  None, i0_normalize=i0,  # dataset name is automatic
-                  tpx3=self.chk_tpx3.isChecked(), drop_bad_frames=self.chk_bad.isChecked(),
-                  pol=dict(self._scan_pol) or None)
+        if self._worker is not None and self._worker.isRunning():
+            self._err("Busy: wait for the current operation to finish.")
+            self._fill_datasets()
+            return
+        self._name = name
+        meta = self.service.xmcd_meta(name)
+        self.drift_ref.setRange(0, max(0, int(meta.get("n_frames") or 1) - 1))
+        self._viewer_key = None
+        self._fill_show(self.stack_out, self.service.stack_outputs(name), "Show: (after Stack)")
+        self._refresh_asym_outputs()
+        products = self.service.list_products(name)
+        self._refresh_views(select="pcd" if "pcd" in products else "pld" if "pld" in products else "raw")
+        self._fill_datasets(name)
+        self.load_status.setText(f"Working on '{name}'.")
+        self._log(f"Dataset: {name}")
+
+    def _save_results(self):
+        name = self._require()
+        if not name:
+            return
+        folder = QFileDialog.getExistingDirectory(self, f"Save the results of '{name}' into (a sub-folder "
+                                                  f"'{name}' is made)", self._start_dir())
+        if folder:
+            self._run(self.service.save_results, lambda r: (
+                self._log(f"Saved {len(r['files'])} files to {r['folder']}"),
+                self.load_status.setText(f"Saved the results of '{name}' to {r['folder']}.")), name, folder)
+
+    def _unload_current(self):
+        name = self._require()
+        if not name:
+            return
+        if self._worker is not None and self._worker.isRunning():
+            self._err("Busy: wait for the current operation to finish.")
+            return
+        self.service.unload(name)
+        self._log(f"Unloaded '{name}'.")
+        rest = self.service.loaded_datasets()
+        self._name = None
+        if rest:
+            self._switch_dataset(rest[0])
+        else:
+            self._clear_view()
+            self._fill_datasets()
+            self.load_status.setText(f"Unloaded '{name}'. Nothing loaded.")
 
     def _on_loaded(self, res: dict):
         # regions of the previous dataset (or set before loading) carry over when the new one has none
@@ -430,4 +565,7 @@ class LoadSection:
             lo, hi = res["energy_range"]
             self.e_a.setValue(lo)
             self.e_b.setValue(hi)
+        self._fill_show(self.stack_out, self.service.stack_outputs(self._name), "Show: (after Stack)")
+        self._refresh_asym_outputs()
+        self._fill_datasets(self._name)
         self._show_result(res, show_kind="raw")

@@ -141,6 +141,38 @@ class PeemLoadSteps:
         energy, src = resolve_energy(tensor.value.shape[0], tensor.metadata or {})
         return None if src == "index" else [float(np.min(energy)), float(np.max(energy))]
 
+    def load_pairs(
+        self,
+        paths: list[str | Path],
+        *,
+        pol: dict[str, str] | None = None,
+        **load_kw,
+    ) -> list[dict[str, Any]]:
+        """Load a list as one dataset per polarization pair (peem_beamline_loaders.group_pairs), e.g.
+        CL/CR at -15, 0 and +15 deg -> three datasets that stay loaded side by side. ``pol`` and the
+        other options as in load_beamline. Returns the load_beamline result of each dataset."""
+        paths = [str(p) for p in paths]
+        known = {p: (pol or {}).get(p) or peem_beamline_loaders.detect_pol(p)[0] for p in paths}
+        out = []
+        for group in peem_beamline_loaders.group_pairs(paths, known):
+            gpol = {p: t for p, t in (pol or {}).items() if p in group} or None
+            out.append(self.load_beamline(group, None, pol=gpol, **load_kw))
+        return out
+
+    @staticmethod
+    def loaded_datasets() -> list[str]:
+        """Names of the PEEM datasets in the workspace loaded by load_beamline / load_pairs (not the
+        stacks made from them for the Sum Rule tab)."""
+        names = []
+        for name, item in list(getattr(global_workspace, "_data", {}).items()):
+            if item.get("type") != "spectroscopy_tree":
+                continue
+            raw = global_workspace.pull_tensor_data(name, "raw")
+            md = (raw.metadata or {}) if raw is not None else {}
+            if md.get("format") in peem_beamline_loaders.FORMATS and not md.get("derived_by"):
+                names.append(name)
+        return names
+
     def unload(self, name: str) -> None:
         """Remove a dataset (raw, processed and all maps) from the workspace and free its memory."""
         global_workspace.remove(name)
