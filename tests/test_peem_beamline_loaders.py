@@ -309,11 +309,12 @@ def test_add_several_at_once_checklist_and_drop(qapp, tmp_path):
     als = _p3b(tmp_path)
     p = PeemXmcdPanel()
 
-    def tick_uview(dlg):  # the user ticks the two UView folders and clicks "Add ticked"
+    def tick_uview(dlg):  # all start ticked; the user unticks the P3B folder and clicks "Add ticked"
         lst = dlg.findChild(QListWidget)
+        assert all(lst.item(i).checkState() == Qt.Checked for i in range(lst.count()))
         for i in range(lst.count()):
-            if lst.item(i).text().startswith("[uview]"):
-                lst.item(i).setCheckState(Qt.Checked)
+            if not lst.item(i).text().startswith("[uview]"):
+                lst.item(i).setCheckState(Qt.Unchecked)
         return QDialog.Accepted
 
     p._exec_dialog = tick_uview
@@ -324,3 +325,35 @@ def test_add_several_at_once_checklist_and_drop(qapp, tmp_path):
     assert p._scan_paths == [str(cl), str(cr)]
     p._add_any([str(als)])  # an acquisition itself is added directly (no checklist)
     assert p._scan_paths[-1] == str(als)
+
+
+
+def test_add_folders_dialog_takes_several_selected_folders(qapp, tmp_path):
+    from PySide6.QtCore import QItemSelectionModel
+    import os
+    from PySide6.QtWidgets import QApplication, QDialogButtonBox, QListView
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    cl, cr = uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)
+    p = PeemXmcdPanel()
+    p._start_dir = lambda: str(tmp_path)  # the dialog opens in the folder that holds both acquisitions
+
+    def select_two(dlg):  # the user cmd-clicks both folders and presses Choose
+        view = dlg.findChild(QListView, "listView")
+        model = view.model()
+        for _ in range(200):  # the file-system model fills in the background
+            QApplication.processEvents()
+            root = view.rootIndex()
+            rows = [model.index(r, 0, root) for r in range(model.rowCount(root))]
+            names = {i.data() for i in rows}
+            if {cl.name, cr.name} <= names:
+                break
+        sel = view.selectionModel()
+        for idx in rows:
+            if idx.data() in (cl.name, cr.name):
+                sel.select(idx, QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        dlg.findChild(QDialogButtonBox).accepted.emit()
+        return dlg.result()
+
+    p._exec_dialog = select_two
+    chosen = p._pick_folders()
+    assert sorted(map(os.path.realpath, chosen)) == sorted(map(os.path.realpath, [str(cl), str(cr)]))

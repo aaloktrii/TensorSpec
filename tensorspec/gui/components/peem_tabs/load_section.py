@@ -9,6 +9,8 @@ import os
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QListView,
+    QTreeView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -224,11 +226,45 @@ class LoadSection:
         self._add_paths(paths)
 
     def _add_folders(self):
-        """Native folder picker (multi-select folder dialogs are unreliable on macOS): an acquisition
-        is added directly; a folder of acquisitions opens a checklist of everything inside."""
-        path = QFileDialog.getExistingDirectory(self, "Acquisition, or a folder of acquisitions", self._start_dir())
-        if path:
-            self._add_any([path])
+        """Pick one or several folders (⌘ / ⇧-click): acquisitions are added directly; a folder of
+        acquisitions opens a checklist of everything inside (all ticked)."""
+        paths = self._pick_folders()
+        if paths:
+            self._add_any(paths)
+
+    def _pick_folders(self) -> list[str]:
+        """Qt folder dialog with multi-selection. Its own Choose button refuses several folders, so
+        Choose takes the selected rows directly (macOS native dialogs pick one folder only)."""
+        dlg = QFileDialog(self, "Select folders (⌘ / ⇧-click for several, or a parent folder)", self._start_dir())
+        dlg.setFileMode(QFileDialog.Directory)
+        dlg.setOption(QFileDialog.DontUseNativeDialog, True)
+        dlg.setOption(QFileDialog.ShowDirsOnly, True)
+        views = [v for v in (dlg.findChild(QListView, "listView"), dlg.findChild(QTreeView, "treeView")) if v is not None]
+        for v in views:
+            v.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        chosen: list[str] = []
+
+        def take():
+            paths: list[str] = []
+            here = dlg.directory().absolutePath()
+            for v in views:
+                if v.selectionModel() is None:
+                    continue
+                for idx in v.selectionModel().selectedRows():
+                    p = os.path.normpath(os.path.join(here, str(idx.data())))  # selected rows of the shown folder
+                    if os.path.isdir(p) and p not in paths:
+                        paths.append(p)
+            chosen[:] = paths or [p for p in dlg.selectedFiles() if os.path.isdir(p)]
+            dlg.done(QDialog.Accepted)
+
+        box = dlg.findChild(QDialogButtonBox)
+        if box is not None:
+            box.accepted.disconnect()
+            box.accepted.connect(take)
+        self._folder_dialog = dlg  # for tests
+        if self._exec_dialog(dlg) != QDialog.Accepted:
+            return []
+        return chosen
 
     def _add_any(self, paths):
         """Add files / folders; folders that hold several acquisitions open the checklist."""
@@ -250,8 +286,8 @@ class LoadSection:
         dlg = QDialog(self)
         dlg.setWindowTitle(f"Add from {os.path.basename(root)}")
         lay = QVBoxLayout(dlg)
-        lay.addWidget(QLabel(f"{len(found)} acquisition(s) found. Tick the ones to add "
-                             "(click, shift-click, or select several and press Space)."))
+        lay.addWidget(QLabel(f"{len(found)} acquisition(s) found, all ticked. Untick the ones not to add "
+                             "(or select several and press Space / Tick selected)."))
         lst = QListWidget()
         lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
         for fmt, p in found:
@@ -259,10 +295,8 @@ class LoadSection:
             lst.addItem(f"[{fmt}] {rel}")
             it = lst.item(lst.count() - 1)
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Unchecked)
+            it.setCheckState(Qt.Checked)  # the whole folder by default; untick what is not wanted
             it.setData(Qt.UserRole, str(p))
-            if str(p) in self._scan_paths:
-                it.setCheckState(Qt.Checked)
         lst.setMinimumSize(560, 360)
 
         def toggle_selected():
