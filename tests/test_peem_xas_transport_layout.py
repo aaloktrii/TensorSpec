@@ -21,6 +21,7 @@ def peem_suite(qapp):
     from tensorspec.gui.suites.peem_suite import PEEMSuite
 
     w = PEEMSuite()
+    w.tabs.setCurrentWidget(w.panel)  # these checks are for the Sum Rule tab (XPEEM map is the first tab)
     _show_and_pump(qapp, w)
     yield w
     w.close()
