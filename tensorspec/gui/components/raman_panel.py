@@ -57,12 +57,43 @@ class FitWorker(QtCore.QThread):
             self.failed.emit(str(exc))
 
 
+class PeakMapWorker(QtCore.QThread):
+    """The step-1 fit model on every map pixel, off the GUI thread (core.raman.peak_maps)."""
+
+    progress = QtCore.Signal(int, str)
+    done = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, service: RamanService, model, parent=None):
+        super().__init__(parent)
+        self.service, self.model = service, model
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        def tick(done, n):
+            self.progress.emit(int(100 * done / n), "Fitting every pixel: %d / %d" % (done, n))
+            return not self._cancel
+        try:
+            res = self.service.engine.fit_pixels(self.service.mapfile, self.model, tick)
+        except Exception as exc:                          # pragma: no cover - shown in the status bar
+            self.failed.emit("Pixel fits failed: %s" % exc)
+            return
+        if res is None:
+            self.failed.emit("Cancelled.")
+        else:
+            self.done.emit(res)
+
+
 class RamanPanel(QtWidgets.QWidget):
 
     def __init__(self, service: Optional[RamanService] = None, parent=None):
         super().__init__(parent)
         self.service = service or RamanService()
         self.worker: Optional[FitWorker] = None
+        self.peak_worker: Optional[PeakMapWorker] = None
         self.preset_windows = {}           # extra Band-integral windows from a material preset
 
         # The tabs refer to each other while building, so create them all first.
@@ -222,6 +253,7 @@ class RamanPanel(QtWidgets.QWidget):
         self.tab_class.update_auto_availability()
         self.tab_class.layers = None
         self.tab_area.clear()
+        self.tab_map.peak_maps_ready()
         bits = ["Loaded %s — %d spectra on a %d × %d grid"
                 % (os.path.basename(path), mf.n_points, mf.shape[1], mf.shape[0])]
         if mf.swapped:
@@ -329,6 +361,37 @@ class RamanPanel(QtWidgets.QWidget):
         self.tab_map.show_area()
         self.tab_area.show_area()
         self.status("Area: %d pixels summed — fit it in 2 · Map ▸ Area spectrum." % n)
+
+    # -- peak maps (fit every pixel) ------------------------------------------
+    def start_peak_maps(self):
+        """Apply the 1 · Spectra fit model to every pixel of the map (only when asked)."""
+        if self.mapfile is None:
+            QtWidgets.QMessageBox.information(self, APP_NAME, "Load a map first.")
+            return
+        model = self.tab_fit.fit_model()
+        if not model.bands:
+            QtWidgets.QMessageBox.information(
+                self, APP_NAME, "Define the bands to fit in 1 · Spectra ▸ Peak fitting "
+                "(or apply a preset) first.")
+            return
+        if self.peak_worker and self.peak_worker.isRunning():
+            self.peak_worker.cancel()
+            self.peak_worker.wait(5000)
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+        self.peak_worker = PeakMapWorker(self.service, model, self)
+        self.peak_worker.progress.connect(self._on_progress)
+        self.peak_worker.failed.connect(self._on_fit_failed)
+        self.peak_worker.done.connect(lambda res, m=model: self._on_peak_maps(res, m))
+        self.peak_worker.start()
+
+    def _on_peak_maps(self, results, model):
+        self.progress.setVisible(False)
+        self.service.set_peak_results(results, model)
+        self.tab_map.peak_maps_ready()
+        n_ok = sum(1 for r in results if any(b.get("ok") for b in r["bands"].values()))
+        self.status("Fitted every pixel with the 1 · Spectra model: %d / %d spectra with a fit. "
+                    "Map ▸ Peak map shows them." % (n_ok, len(results)))
 
     def rebuild_maps(self) -> int:
         return self.service.rebuild_maps()
@@ -542,6 +605,9 @@ class RamanPanel(QtWidgets.QWidget):
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(3000)
+        if self.peak_worker and self.peak_worker.isRunning():
+            self.peak_worker.cancel()
+            self.peak_worker.wait(5000)
 
     # Embedded in a suite window, the panel gets no closeEvent of its own: watch the window.
     def showEvent(self, event):
