@@ -6,10 +6,10 @@ if sys.version_info < (3, 11):
              f"You are currently running Python {sys.version_info.major}.{sys.version_info.minor}.\n"
              "Please upgrade your Python environment or create a new virtual environment using python3.11.\n")
              
-from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                               QTreeWidget, QTreeWidgetItem, QToolBar, 
-                               QSplitter, QTextEdit, QLabel, QApplication, 
-                               QPushButton, QListWidget, QMessageBox, QMenu)
+from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                               QTreeWidget, QTreeWidgetItem, QToolBar,
+                               QSplitter, QTextEdit, QLabel, QApplication,
+                               QPushButton, QListWidget, QMessageBox, QMenu, QDialog)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QAction, QIcon
 
@@ -18,8 +18,9 @@ from tensorspec.gui.suites.arpes_suite import ARPESSuite
 from tensorspec.gui.suites.dft_suite import DFTSuite
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.core.workspace import global_workspace
-from tensorspec.core.io.arpes_loader import ARPESLoader
+from tensorspec.core.io.arpes_loader import ARPESLoader, _pack_tensor_data
 from tensorspec.core.io.simulated_loader import SimulatedARPESLoader
+from tensorspec.core.io.loaders.matlab_loader import MatlabLoader
 
 import time
 import platform
@@ -429,7 +430,7 @@ class TensorSpecMainBrowser(QMainWindow):
             self,
             "Load ARPES / Maestro Data",
             "",
-            "ARPES Data (*.h5 *.hdf5 *.npz)",
+            "ARPES Data (*.h5 *.hdf5 *.npz *.mat)",
         )
         if not paths:
             return
@@ -440,6 +441,15 @@ class TensorSpecMainBrowser(QMainWindow):
             try:
                 if path.endswith('.npz'):
                     tensor_data = SimulatedARPESLoader.load(path)
+                elif path.endswith('.mat'):
+                    # For .mat files, show element selector
+                    element_name = self._select_mat_element(path)
+                    if element_name is None:
+                        continue  # User cancelled
+                    loader = MatlabLoader(path, element_name=element_name)
+                    raw_dict = loader.load()
+                    tensor_data = _pack_tensor_data(raw_dict)
+                    var_name = element_name  # Use element name, not filename
                 else:
                     tensor_data = ARPESLoader.load(path)
                 global_workspace.push_spectroscopy_data(var_name, tensor_data)
@@ -456,6 +466,64 @@ class TensorSpecMainBrowser(QMainWindow):
                 "Load Complete",
                 f"Successfully loaded {success_count} dataset(s) into the Workspace.",
             )
+
+    def _select_mat_element(self, filepath: str) -> str | None:
+        """Show dialog to select which element to load from .mat file.
+
+        Returns:
+            Element name if selected, None if cancelled
+        """
+        try:
+            elements = MatlabLoader.list_elements(filepath)
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"Failed to read .mat file:\n{str(e)}"
+            )
+            return None
+
+        if not elements:
+            QMessageBox.warning(
+                self, "No Data", "No numerical arrays found in .mat file"
+            )
+            return None
+
+        # Create simple selection dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Select MATLAB Array")
+        dialog.setGeometry(100, 100, 400, 300)
+
+        layout = QVBoxLayout()
+        label = QLabel("Select which array to load:")
+        layout.addWidget(label)
+
+        list_widget = QListWidget()
+        for name, shape in sorted(elements.items()):
+            list_widget.addItem(f"{name}  {shape}")
+
+        layout.addWidget(list_widget)
+
+        button_layout = QHBoxLayout()
+        ok_btn = QPushButton("Load")
+        cancel_btn = QPushButton("Cancel")
+
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        button_layout.addWidget(ok_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+
+        dialog.setLayout(layout)
+
+        if dialog.exec() == QDialog.Accepted:
+            item = list_widget.currentItem()
+            if item:
+                # Extract element name from "name  shape" format
+                text = item.text()
+                element_name = text.split()[0]
+                return element_name
+
+        return None
 
     def on_item_selected(self, current_item, previous_item):
         """Triggers preview update in the Inspector Panel upon selecting a variable."""

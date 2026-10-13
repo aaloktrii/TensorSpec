@@ -141,6 +141,13 @@ class SliceWidget(QFrame):
         row_disp = QHBoxLayout(self.row_display)
         row_disp.setContentsMargins(0, 0, 0, 0)
 
+        row1.addWidget(QLabel("Colormap:"))
+        self.combo_cmap = QComboBox()
+        self.combo_cmap.addItems(["magma", "viridis", "plasma", "inferno", "cividis", "hot", "cool", "gray", "twilight"])
+        self.combo_cmap.setCurrentText("magma")
+        self.combo_cmap.currentIndexChanged.connect(self.redraw)
+        row1.addWidget(self.combo_cmap)
+
         self.chk_profiles = QCheckBox("XY Profiles")
         self.chk_profiles.stateChanged.connect(self.toggle_profiles)
         row_disp.addWidget(self.chk_profiles)
@@ -542,7 +549,8 @@ class SliceWidget(QFrame):
             c_scale = max(0.01, float(self.sl_contrast.value()) / 100.0)
             vmax_adj = vmin + (vmax - vmin) * c_scale + 1e-8
             gamma = float(self.spin_gamma.value())
-            self.im_main.set_cmap("magma")
+            cmap_name = self.combo_cmap.currentText()
+            self.im_main.set_cmap(cmap_name)
             if abs(gamma - 1.0) < 1e-6:
                 self.im_main.set_norm(mcolors.Normalize(vmin=vmin, vmax=vmax_adj))
             else:

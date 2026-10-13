@@ -1,6 +1,11 @@
 import os
 from .loaders.mock_data_loader import MockDataLoader
 from .loaders.maestro_loader import MaestroLoader
+from .loaders.arpes_swept_loader import ARPESSweptLoader
+from .loaders.arpes_1d_loader import ARPES1DLoader
+from .loaders.arpes_fits_loader import ARPESFitsLoader
+from .loaders.netcdf_loader import NetCDFLoader
+from .loaders.matlab_loader import MatlabLoader
 from .loaders.maestro import MaestroSignatureError
 from tensorspec.core.data_models import TensorData
 
@@ -51,6 +56,11 @@ class ARPESLoader:
         available_loaders = [
             MockDataLoader,
             MaestroLoader,
+            ARPESSweptLoader,     # ARPES swept spectra (2D_Data HDF5 format) — WTe2 M28
+            ARPES1DLoader,        # ARPES fixed spectra (1D_Data HDF5 format)
+            ARPESFitsLoader,      # ARPES metadata (FITS format)
+            MatlabLoader,         # MATLAB .mat files (v4–v7.3)
+            NetCDFLoader,         # NetCDF format (scientific data)
         ]
 
         for LoaderClass in available_loaders:
@@ -61,8 +71,9 @@ class ARPESLoader:
 
             except MaestroSignatureError:
                 continue
-            except ValueError:
-                if LoaderClass is MockDataLoader:
+            except ValueError as e:
+                # Allow specific loaders to fail and try next loader
+                if LoaderClass is MockDataLoader or LoaderClass.__name__ in ('MaestroLoader', 'ARPESSweptLoader', 'ARPES1DLoader'):
                     continue
                 raise
             except Exception as e:
