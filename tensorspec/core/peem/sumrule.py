@@ -56,7 +56,7 @@ def _trapz_window(
     y_win = y[mask]
     if e_win.size < 2:
         return 0.0
-    trapz = getattr(np, "trapezoid", np.trapz)
+    trapz = getattr(np, "trapezoid", None) or np.trapz  # np.trapz is gone in NumPy >= 2.4
     return float(trapz(y_win, e_win))
 
 
@@ -72,7 +72,7 @@ def _trapz_union_windows(
     if indices.size < 2:
         return 0.0
 
-    trapz = getattr(np, "trapezoid", np.trapz)
+    trapz = getattr(np, "trapezoid", None) or np.trapz  # np.trapz is gone in NumPy >= 2.4
     total = 0.0
     seg_start = 0
     for i in range(1, indices.size):
