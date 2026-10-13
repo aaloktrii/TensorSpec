@@ -49,7 +49,7 @@ The Workspace Browser ribbon opens independent suites (Crystal, DFT, ARPES, PEEM
 | Crystal Viewer | Live | Tabs View (Structure/Camera/Export) · CDW · Stack · BZ; CIF, supercells, twist/Bernevig |
 | DFT | Live | Chinook TB, QE/Wannier helpers, SPR-KKR SCF |
 | ARPES | Live (sim) | Kinematics + three-step / Chinook B1 / SPR-KKR B3; MAESTRO loaders partial |
-| PEEM | Live | TIF/ZIP load, pair CP/CM·LH/LV, drift, BG, XMCD sum rule |
+| PEEM | Live | Tab *XMCD imaging*: UE49 / BNL UView / ALS P3B load, stack clean-up, drift (incl. SPEEM Igor methods), stack + asymmetry, image analysis, ROIs, SDA domain maps, in the TensorSpec data viewer. Tab *Stack · BG · sum rule*: TIF/ZIP load, pair CP/CM·LH/LV, NCC drift, BG, XMCD sum rule |
 | XAS / XMCD | Live | 1D spectra; shared PEEM BG + sum-rule core |
 | Transport | Shell | Demo R(H)/Hall/R(T) UI; `transport_engine` not built |
 | Machine Learning | Live | SSL / clustering / AL; domain maps → shared DataViewer |

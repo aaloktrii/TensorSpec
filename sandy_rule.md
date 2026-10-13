@@ -29,6 +29,10 @@ tensorspec/
 │   │   ├── __init__.py
 │   │   ├── peem_loaders.py   # TIF / ZIP / folder PEEM stacks
 │   │   ├── xas_loaders.py    # 1D XAS/XMCD CSV/TXT (single or paired channels)
+│   │   ├── xpeem_loaders.py  # ONE XPEEM entry: load_xpeem() detects UE49 / UView / P3B -> PEEM TensorData
+│   │   ├── ue49_loaders.py   # BESSY II UE49: scan .txt + TIFF folder + PolTable (TPX3/dead/flat/I0 via peem/ue49)
+│   │   ├── uview_loaders.py  # Elmitec UView .dat (BNL ESM): reader + CL/CR/LH/LV acquisition folders
+│   │   ├── p3b_loaders.py    # ALS 11.0.1 PEEM-3 .P3B frames + .dat logs; EPU ±0.9 -> CP/CM
 │   │   └── loaders/
 │   │       └── maestro/      # MAESTRO HDF5 kinds (xy_fine_4d, focus_xy_fine_5d, …)
 │   ├── dft_engine.py         # MAIN ROUTER: Routes calculation to chinook_tb or qe_generator
@@ -49,7 +53,15 @@ tensorspec/
 │   │   ├── engine.py         # Pairing, drift, channel separation orchestration helpers
 │   │   ├── bg.py             # Background models (also used by XAS 1D)
 │   │   ├── roi.py            # ROI helpers for drift / NCC
-│   │   └── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
+│   │   ├── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
+│   │   ├── drift.py          # XMCD imaging: align_stack() routes to every drift method (one entry point)
+│   │   ├── registration.py / igor_drift.py  # XMCD imaging: sub-pixel + ROI-tracking drift; SPEEM Igor drift ports
+│   │   ├── stack_edits.py    # non-destructive stack clean-up before drift
+│   │   ├── dichroism.py      # pcd / pld / pmld / pmnld maps, joint registration
+│   │   ├── image_analysis.py # profiles + fits, histogram, FFT, flatten, background (Igor ports)
+│   │   ├── roi_stats.py / domains.py / products.py / synthetic.py  # ROI stats, SDA domains, /analysis
+│   │   ├── ue49/             # BESSY II UE49 specifics: detector.py (TPX3, dead pixel, flat, I0), batch.py
+│   │   └── esm/              # NSLS-II ESM (BNL): batch.py (beamtime processing; readers in core/io/)
 │   ├── transport_engine.py   # PLANNED: magnetoresistance, Hall, R-T scaling
 │   └── ml/                   # SSL models, clustering, training workers (no Qt)
 ├── plotting/
@@ -59,12 +71,15 @@ tensorspec/
 │   │   ├── matplotlib_engine.py # Safe CPU rendering for 1D lines & static 2D maps
 │   │   ├── pyvista_engine.py    # Fast GPU rendering for 3D crystal structures & volumes
 │   │   └── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
-│   └── viewers/               # Reusable Qt widgets for suites to embed (where present)
+│   ├── viewers/               # Reusable Qt widgets for suites to embed (where present)
+│   └── ue49_preview.py        # Matplotlib preview figures for the XPEEM batch scripts
 └── gui/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon
     ├── services/             # Non-HTTP service layer between panels and core
-    │   ├── peem_service.py
+    │   ├── peem_service.py   # THE PEEM service (both PEEM-suite tabs): stack / pair / drift / BG / sum rule
+    │   ├── peem_steps/       # XMCD-imaging steps, mixins of PeemService: load, cleanup, drift_stack,
+    │   │                     #   image_analysis, maps_domains (+ common.py helpers)
     │   └── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     ├── components/           # Reusable, isolated UI panels
     │   ├── __init__.py
@@ -72,14 +87,17 @@ tensorspec/
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
     │   ├── peem_panel.py / xas_panel.py  # PEEM: left forms; right Frame|BG|Sum Rule tabs
-    │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows
+    │   ├── peem_xmcd_panel.py     # PEEM-suite XMCD tab: assembly + embedded data_viewer_panel (frames + map layers)
+    │   ├── peem_tabs/             # XMCD-tab sections (mixins): load, cleanup, drift, stack_asym, analysis, roi_domain
+    │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows (also embedded by the PEEM XMCD tab:
+    │   │                          #   compact mode, 2-D layers, drawing tools, overlays, Play)
     │   └── ml_tabs/               # Extracted ML suite tabs
     ├── ml/                   # MaestroAI workers, warehouse, session helpers
     └── suites/               # Independent roadmap suites + ML
         ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
         ├── dft_suite.py
         ├── arpes_suite.py
-        ├── peem_suite.py
+        ├── peem_suite.py         # Tabs: XMCD imaging (peem_xmcd_panel) · Stack / BG / sum rule (peem_panel)
         ├── xas_suite.py
         ├── transport_suite.py    # Shell until transport_engine ships
         └── ml_suite.py
