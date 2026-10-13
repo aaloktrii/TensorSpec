@@ -68,7 +68,7 @@ class RamanEngineRouter:
     def load_reference(self, path=reference.DEFAULT_REF):
         return reference.load(path)
 
-    def build_reference(self, refs, out_json=reference.DEFAULT_REF, figures=None):
+    def build_reference(self, refs, out_json, figures=None):
         return batch.build_reference(refs, out_json, figures)
 
     def predict_row(self, row, ref):

@@ -26,7 +26,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("folders", nargs="+")
     ap.add_argument("--out", help="folder for the combined plot (default: first folder's output)")
-    ap.add_argument("--json", default=gref.DEFAULT_REF)
+    ap.add_argument("--json", default=gref.preferred_reference(Path.cwd() / "TensorSpec_Workspace"),
+                    help="1L/2L reference (default: the workspace one if built, else the shipped one)")
     a = ap.parse_args()
     ref = gref.load(a.json)
     every = []
