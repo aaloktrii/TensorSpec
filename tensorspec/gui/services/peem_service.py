@@ -10,6 +10,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from tensorspec.core.data_models import TensorData
+from tensorspec.core.io import xpeem_loaders
 from tensorspec.core.io.peem_loaders import (
     find_beamline_csv,
     load_beamline_csv,
@@ -37,6 +38,11 @@ from tensorspec.core.peem.sumrule import (
     pick_source_kind,
 )
 from tensorspec.core.workspace import global_workspace
+from tensorspec.gui.services.peem_steps.cleanup import PeemCleanupSteps
+from tensorspec.gui.services.peem_steps.drift_stack import PeemDriftStackSteps
+from tensorspec.gui.services.peem_steps.image_analysis import PeemImageAnalysisSteps
+from tensorspec.gui.services.peem_steps.load import PeemLoadSteps
+from tensorspec.gui.services.peem_steps.maps_domains import PeemMapsDomainsSteps
 
 MAX_PEEM_BYTES = 512 * 1024 * 1024
 MAX_PEEM_FRAMES = 10_000
@@ -744,8 +750,13 @@ def _load_summary(
     }
 
 
-class PeemService:
-    """Qt-facing PEEM operations via global_workspace."""
+class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImageAnalysisSteps,
+                  PeemMapsDomainsSteps):
+    """Qt-facing PEEM operations via global_workspace.
+
+    The one PEEM service of the PEEM suite: the stack / pair / drift / BG / sum-rule methods below,
+    plus the XMCD-imaging steps (UE49 / UView / P3B load, clean-up, drift, stack, asymmetry, image
+    analysis, ROIs, domains) inherited from the mixins in gui/services/peem_steps/."""
 
     def load_path(
         self,
@@ -756,6 +767,8 @@ class PeemService:
         source_path = Path(path).expanduser().resolve()
         if not source_path.exists():
             raise ValueError(f"Path not found: {source_path}")
+        if not _tif_paths(source_path) and xpeem_loaders.is_xpeem_source(source_path):
+            return self._load_xpeem_path(source_path, name)
 
         _enforce_peem_size(source_path)
         load_directory = source_path if source_path.is_dir() else source_path.parent
@@ -806,6 +819,25 @@ class PeemService:
             csv_prompt=not attached and explicit_csv is None,
             csv_candidates=candidates,
         )
+
+    def _load_xpeem_path(self, source_path: Path, name: str | None) -> dict[str, Any]:
+        """UE49 scan / UView (BNL) / P3B (ALS) data through core/io/xpeem_loaders. A single-
+        polarization UView folder brings its partner (CL<->CR, LH<->LV) so pairing has both."""
+        paths = [source_path]
+        partner = xpeem_loaders.partner_folder(source_path)
+        if partner is not None:
+            paths.append(partner)
+        tensor = xpeem_loaders.load_xpeem(paths)
+        if tensor.value.shape[0] > MAX_PEEM_FRAMES:
+            raise ValueError(f"PEEM data exceeds the {MAX_PEEM_FRAMES}-frame limit.")
+        fallback = source_path.stem if source_path.is_file() else source_path.name
+        label = _safe_label(name, _safe_upload_name(fallback, "peem")) if name else _safe_label(
+            _safe_upload_name(fallback, "peem"), "peem")
+        global_workspace.push_spectroscopy_data(label, tensor)
+        out = _load_summary(label, tensor)
+        out["format"] = tensor.metadata.get("format")
+        out["partner_added"] = partner.name if partner is not None else None
+        return out
 
     def attach_csv(self, name: str, csv_path: Path | str) -> dict[str, Any]:
         _require_tensor(name)

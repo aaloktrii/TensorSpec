@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tensorspec.gui.components.stack_player import StackPlayer
 from tensorspec.gui.services.peem_service import PeemService
 
 
@@ -72,6 +73,13 @@ class PeemPanel(QWidget):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Dataset name (auto from path)")
         load_form.addRow("Name:", self.name_edit)
+        self.btn_from_xpeem = QPushButton("Load from XMCD-imaging tab")
+        self.btn_from_xpeem.setToolTip(
+            "Use the drift-corrected data of the XMCD-imaging tab: averaged per polarization and photon energy,\n"
+            "paired and separated, ready for background subtraction and the sum rule")
+        self.btn_from_xpeem.clicked.connect(self._load_from_xpeem)
+        self.btn_from_xpeem.setVisible(False)  # shown when the PEEM suite connects its XMCD-imaging tab
+        load_form.addRow(self.btn_from_xpeem)
         btn_row = QHBoxLayout()
         self.btn_load_stack = QPushButton("Load TIF Stack")
         self.btn_load_stack.clicked.connect(self._load_tif_stack)
@@ -243,6 +251,8 @@ class PeemPanel(QWidget):
         nav.addWidget(QLabel("Frame:"))
         nav.addWidget(self.frame_slider)
         view_layout.addLayout(nav)
+        self.player = StackPlayer(self.frame_slider)
+        view_layout.addWidget(self.player)
 
         contrast = QHBoxLayout()
         self.vmin_spin = QDoubleSpinBox()
@@ -309,7 +319,8 @@ class PeemPanel(QWidget):
             self._start_load(path)
 
     def _load_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Load TIF folder")
+        path = QFileDialog.getExistingDirectory(
+            self, "Load folder (TIF stack, UE49 scan, UView .dat or ALS .P3B)")
         if path:
             self._start_load(path)
 
@@ -329,6 +340,34 @@ class PeemPanel(QWidget):
         self._load_thread.finished_signal.connect(self._on_load_finished)
         self._load_thread.start()
 
+    def set_xpeem_source(self, source):
+        """source() -> summary dict of the hand-over (see PeemService.to_peem_stack, gui/services/peem_steps/drift_stack.py); set by the PEEM suite (XMCD-imaging tab)."""
+        self._xpeem_source = source
+        self.btn_from_xpeem.setVisible(source is not None)
+
+    def _load_from_xpeem(self):
+        source = getattr(self, "_xpeem_source", None)
+        if source is None:
+            return
+        self.setCursor(Qt.BusyCursor)
+        try:
+            summary = source()
+        except Exception as exc:  # noqa: BLE001 - shown to the user
+            QMessageBox.warning(self, "Load from XMCD-imaging tab", str(exc))
+            self.status_label.setText(f"Load from XMCD-imaging tab failed: {exc}")
+            return
+        finally:
+            self.unsetCursor()
+        summary.setdefault("csv_prompt", False)
+        self._on_load_finished(True, summary, "")
+        e = summary.get("energy_range_eV")
+        extra = [f"from XMCD-imaging tab '{summary['from']}'", f"{summary['n_energies']} energies"
+                 + (f" ({e[0]:.2f}-{e[1]:.2f} eV)" if e else ""),
+                 f"separated: {', '.join(summary['separated'])}"]
+        if summary.get("note"):
+            extra.append(summary["note"])
+        self.status_label.setText(self.status_label.text() + " | " + " | ".join(extra))
+
     def _on_load_finished(self, ok: bool, summary, message: str):
         self.btn_load_stack.setEnabled(True)
         self.btn_load_folder.setEnabled(True)
@@ -344,6 +383,8 @@ class PeemPanel(QWidget):
             f"{summary['n_frames']} frames",
             str(summary.get("pol_summary", {})),
         ]
+        if summary.get("partner_added"):
+            parts.append(f"+ partner folder {summary['partner_added']}")
         if summary.get("csv_prompt"):
             parts.append("Attach CSV if needed.")
         self.status_label.setText(" | ".join(parts))
