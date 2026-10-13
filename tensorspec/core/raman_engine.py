@@ -10,7 +10,8 @@ display as before; core/raman/products.py turns them into xr.Dataset for /analys
 """
 from __future__ import annotations
 
-from tensorspec.core.raman import batch, multi_lorentz, peak_fit, reference, strain_doping, tools, voigt_2d
+from tensorspec.core.raman import (batch, fit_model, multi_lorentz, peak_fit, reference, strain_doping,
+                                   tools, voigt_2d)
 
 
 class RamanEngineRouter:
@@ -44,6 +45,10 @@ class RamanEngineRouter:
             return peak_fit.analyse_spectrum(wavenumber, intensity, **config)
         else:
             raise ValueError(f"Unknown model choice: {model_choice}")
+
+    def fit_spectrum(self, wavenumber, intensity, model):
+        """Apply the step-1 fit model (Si calibration, background, every band) to one spectrum."""
+        return fit_model.fit_spectrum(wavenumber, intensity, model)
 
     def suggest_peak_count(self, x, y, resolution, nmax=4):
         return multi_lorentz.suggest_peak_count(x, y, resolution, nmax)

@@ -16,6 +16,7 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.io.raman_loaders import _SPOT_RE, is_single_spectrum, read_single_spectrum, short_label
+from tensorspec.core.raman.fit_model import FitModel
 from tensorspec.gui.components.raman_tabs.layout import _fmt
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
 from tensorspec.plotting.backends.raman_views import peak_fit as views
@@ -53,7 +54,8 @@ class PeakFitTab(QtWidgets.QWidget):
         left.addWidget(self.lst, 2)
         r = QtWidgets.QHBoxLayout()
         for text, fn in (("Add files…", self.add_files), ("Add folder…", self.add_folder),
-                         ("Use loaded map", self.use_map), ("Clear", self.clear)):
+                         ("Use loaded map", self.use_map), ("Plot all", self.plot_all),
+                         ("Clear", self.clear)):
             b = QtWidgets.QPushButton(text)
             b.clicked.connect(fn)
             r.addWidget(b)
@@ -156,6 +158,11 @@ class PeakFitTab(QtWidgets.QWidget):
                         self.tbl_bands.cellWidget(r, 4).value()))
         return out
 
+    def fit_model(self) -> FitModel:
+        """The fit defined here (Si calibration, background, bands); 2 · Map applies the same."""
+        return FitModel(bands=self.bands(), background=self.cmb_bg.currentText(),
+                        bg_opts=self.bg_opts(), si_calibrate=self.chk_si.isChecked())
+
     def bg_opts(self) -> dict:
         try:
             return {"order": self.spn_order.value(), "lam": float(self.ed_lam.text()),
@@ -178,8 +185,7 @@ class PeakFitTab(QtWidgets.QWidget):
                 self._add(s.label, s.wn, s.inten, p)
             except Exception as exc:
                 self.main.status("Skipped %s: %s" % (os.path.basename(p), exc))
-        if self.items and self.lst.currentRow() < 0:
-            self.lst.setCurrentRow(0)
+        self._added()
 
     def add_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Folder of spectra")
@@ -193,8 +199,7 @@ class PeakFitTab(QtWidgets.QWidget):
             m = _SPOT_RE.search(name)
             self._add(short_label(p), s.wn, s.inten, p,
                       float(m.group(1)) if m else np.nan, float(m.group(2)) if m else np.nan)
-        if self.items and self.lst.currentRow() < 0:
-            self.lst.setCurrentRow(0)
+        self._added()
 
     def use_map(self):
         mf = self.main.mapfile
@@ -204,8 +209,26 @@ class PeakFitTab(QtWidgets.QWidget):
         for i in range(mf.n_points):
             self._add("spot %d (%.1f, %.1f)" % (i, mf.x[i], mf.y[i]), mf.axis, mf.data[i],
                       mf.path, float(mf.x[i]), float(mf.y[i]))
-        if self.lst.currentRow() < 0:
-            self.lst.setCurrentRow(0)
+        self._added()
+
+    def _added(self):
+        """After adding spectra: plot them all first; clicking one in the list fits it."""
+        self.lst.blockSignals(True)
+        self.lst.setCurrentRow(-1)
+        self.lst.blockSignals(False)
+        self.plot_all()
+
+    def plot_all(self):
+        if not self.items:
+            self._placeholder()
+            return
+        fig = self.plot.figure
+        fig.clear()
+        views.draw_spectra_overlay(fig, self.items, self.bands())
+        self.tbl_peaks.setRowCount(0)
+        self.lbl.setText("%d spectra loaded. Select one in the list to fit it, or Fit all…"
+                         % len(self.items))
+        self.plot.draw()
 
     def clear(self):
         self.items, self.results = [], {}
@@ -216,16 +239,7 @@ class PeakFitTab(QtWidgets.QWidget):
     # -- fitting --------------------------------------------------------------
     def fit_item(self, i: int) -> dict:
         it = self.items[i]
-        wn, y = it["wn"], it["y"]
-        shift, si = self.main.engine.si_shift(wn, y) if self.chk_si.isChecked() else (0.0, None)
-        w = wn + shift
-        nz = self.main.engine.noise_level(w, y)
-        res = {"shift": shift, "si": si, "noise": nz, "bands": {}}
-        for name, lo, hi, n, nmax in self.bands():
-            res["bands"][name] = self.main.engine.fit_band(
-                "lorentz_auto", w, y, dict(lo=lo, hi=hi, n=n, nmax=nmax,
-                                           bg=self.cmb_bg.currentText(),
-                                           bg_opts=self.bg_opts(), noise=nz))
+        res = self.main.engine.fit_spectrum(it["wn"], it["y"], self.fit_model())
         self.results[i] = res
         return res
 
