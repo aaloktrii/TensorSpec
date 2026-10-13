@@ -1,0 +1,212 @@
+"""Tab 5 · Layer prediction: 1L/2L reference values (Lorentzian fits of the reference datasets,
+mean ± SD) and layer-number / stacking predictions for the loaded map or a folder. Map predictions
+are written to /analysis/raman_layer_prediction.
+
+Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 5 - Layer prediction); calls go through RamanEngineRouter
+(main.engine), figures through plotting/backends/raman_views/prediction.py."""
+from __future__ import annotations
+
+import os
+from typing import TYPE_CHECKING
+from typing import Dict, List, Optional
+
+from PySide6 import QtCore, QtWidgets
+
+from tensorspec.core.io.raman_loaders import short_label
+from tensorspec.core.raman.constants import APP_NAME
+from tensorspec.plotting.backends import raman_matplotlib_engine
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
+from tensorspec.plotting.backends.raman_views import prediction as views
+from tensorspec.plotting.viewers.raman_canvas import Canvas
+
+#: The reference / prediction modules were optional next to the original script; they are part
+#: of tensorspec (core/raman/reference.py, core/raman/batch.py) now.
+HAVE_GREF = True
+
+if TYPE_CHECKING:
+    from tensorspec.gui.components.raman_panel import RamanPanel
+
+REF_ROWS = [("2D_fwhm", "2D FWHM (cm⁻¹)"), ("I2D_IG", "I(2D)/I(G)"),
+            ("A2D_AG", "A(2D)/A(G)"), ("2D_pos", "2D position (cm⁻¹)"),
+            ("2D_height", "2D intensity"), ("G_pos", "G position (cm⁻¹)"),
+            ("G_fwhm", "G FWHM (cm⁻¹)"), ("G_height", "G intensity"),
+            ("Gminus_pos", "G⁻ position (cm⁻¹)"), ("Gplus_pos", "G⁺ position (cm⁻¹)")]
+
+
+class PredictTab(QtWidgets.QWidget):
+    """Reference values (Lorentzian fits of the 1L and 2L datasets, mean ±
+    SD) and layer-number / stacking predictions for new data."""
+
+    def __init__(self, main: "RamanPanel"):
+        super().__init__()
+        self.main = main
+        self.preds: Optional[List[dict]] = None
+        self.pred_title = ""
+        self._build()
+        ref_path = self.main.service.preferred_reference()
+        if HAVE_GREF and os.path.exists(ref_path):
+            self._set_ref(self.main.service.set_reference(ref_path), ref_path)
+
+    @property
+    def ref(self):
+        """The 1L / 2L reference in use (held by the service)."""
+        return self.main.service.reference
+
+    @property
+    def ref_path(self):
+        return self.main.service.reference_path
+
+    def _build(self):
+        root = QtWidgets.QHBoxLayout(self)
+        left = QtWidgets.QVBoxLayout()
+        r = QtWidgets.QHBoxLayout()
+        for text, fn in (("Build reference…", self.build_ref),
+                         ("Load reference…", self.load_ref)):
+            b = QtWidgets.QPushButton(text)
+            b.clicked.connect(fn)
+            b.setEnabled(HAVE_GREF)
+            r.addWidget(b)
+        left.addLayout(r)
+        self.lbl_ref = QtWidgets.QLabel("No reference loaded")
+        self.lbl_ref.setWordWrap(True)
+        self.lbl_ref.setStyleSheet("color:#555; font-size:11px;")
+        left.addWidget(self.lbl_ref)
+        self.tbl_ref = QtWidgets.QTableWidget(0, 0)
+        self.tbl_ref.verticalHeader().setDefaultSectionSize(22)
+        self.tbl_ref.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        left.addWidget(self.tbl_ref, 2)
+        r = QtWidgets.QHBoxLayout()
+        self.btn_map = QtWidgets.QPushButton("Predict loaded map")
+        self.btn_map.clicked.connect(self.predict_map)
+        self.btn_dir = QtWidgets.QPushButton("Predict folder…")
+        self.btn_dir.clicked.connect(self.predict_dir)
+        for b in (self.btn_map, self.btn_dir):
+            b.setEnabled(False)
+            r.addWidget(b)
+        left.addLayout(r)
+        self.tbl_pred = QtWidgets.QTableWidget(0, 2)
+        self.tbl_pred.setHorizontalHeaderLabels(["Prediction", "Spectra"])
+        self.tbl_pred.verticalHeader().setVisible(False)
+        self.tbl_pred.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.Stretch)
+        self.tbl_pred.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        left.addWidget(self.tbl_pred, 1)
+        lw = QtWidgets.QWidget()
+        lw.setLayout(left)
+        lw.setMinimumWidth(600)
+        lw.setMaximumWidth(640)
+        root.addWidget(lw)
+        self.plot = Canvas(figsize=(8, 5))
+        root.addWidget(self.plot, 1)
+        self.redraw()
+
+    # -- reference --------------------------------------------------------------
+    def _set_ref(self, ref, path):
+        ds = ref["datasets"]
+        self.lbl_ref.setText("Reference %s (built %s). Predictions use the 'matching' "
+                             "spots: fitted 2D FWHM %s." % (
+                                 os.path.basename(path), ref.get("created", "?"),
+                                 ", ".join("%s %g–%g" % (k, *v)
+                                           for k, v in ref["match_rule"].items())))
+        cols = []
+        for d in ds:
+            for which in ("all", "matching"):
+                cols.append((d, which))
+        self.tbl_ref.clear()
+        self.tbl_ref.setColumnCount(len(cols))
+        self.tbl_ref.setRowCount(len(REF_ROWS) + 1)
+        self.tbl_ref.setHorizontalHeaderLabels(
+            ["%s %s\n%s" % (d["label"], d["name"].split("_")[0], w) for d, w in cols])
+        self.tbl_ref.setVerticalHeaderLabels(["spectra"] + [lab for _, lab in REF_ROWS])
+        for j, (d, w) in enumerate(cols):
+            n = d["n_fitted"] if w == "all" else d["n_matching"]
+            self.tbl_ref.setItem(0, j, QtWidgets.QTableWidgetItem("%d" % n))
+            for i, (q, _) in enumerate(REF_ROWS, start=1):
+                s = d[w].get(q, {})
+                txt = "" if s.get("mean") is None else (
+                    "%.4g ± %.2g" % (s["mean"], s["std"] or 0))
+                self.tbl_ref.setItem(i, j, QtWidgets.QTableWidgetItem(txt))
+        self.tbl_ref.resizeColumnsToContents()
+        for b in (self.btn_map, self.btn_dir):
+            b.setEnabled(True)
+        self.redraw()
+
+    def build_ref(self):
+        f1 = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "1L reference dataset (folder of spectra, e.g. the ML map)")
+        if not f1:
+            return
+        f2 = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "2L reference dataset (folder of spectra, e.g. the BL map)")
+        if not f2:
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            out_json = self.main.service.build_reference(f1, f2, figures=raman_matplotlib_engine)
+            ref = self.ref
+        except Exception as exc:
+            QtWidgets.QApplication.restoreOverrideCursor()
+            QtWidgets.QMessageBox.critical(self, APP_NAME, "Could not build:\n\n%s" % exc)
+            return
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self._set_ref(ref, out_json)
+        self.main.status("Reference saved to %s" % os.path.dirname(out_json))
+
+    def load_ref(self):
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load reference", os.path.dirname(self.main.service.preferred_reference()),
+            "JSON (*.json)")
+        if path:
+            self._set_ref(self.main.service.set_reference(path), path)
+
+    # -- prediction -------------------------------------------------------------
+    def predict_map(self):
+        mf = self.main.mapfile
+        if mf is None:
+            self.main.status("Load a map first.")
+            return
+        prog = QtWidgets.QProgressDialog("Fitting G and 2D…", "Cancel", 0, mf.n_points, self)
+        prog.setWindowModality(QtCore.Qt.WindowModal)
+
+        def tick(k, n):
+            prog.setValue(k)
+            return not prog.wasCanceled()
+        done = self.main.service.predict_map(tick, figures=raman_matplotlib_engine)
+        prog.setValue(mf.n_points)
+        if done is not None:
+            self._show(*done)
+
+    def predict_dir(self):
+        folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Dataset to predict")
+        if not folder:
+            return
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            preds = self.main.service.predict_folder(folder, figures=raman_matplotlib_engine)
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        self._show(preds, short_label(folder), os.path.join(folder, "output"))
+
+    def _show(self, preds, title, out):
+        self.preds, self.pred_title = preds, title
+        counts: Dict[str, int] = {}
+        for p in preds:
+            key = p["layer"] + ("  " + p["polytype"] if p["polytype"] not in ("", "—") else "")
+            counts[key] = counts.get(key, 0) + 1
+        self.tbl_pred.setRowCount(len(counts))
+        for i, (k, n) in enumerate(sorted(counts.items(), key=lambda kv: -kv[1])):
+            self.tbl_pred.setItem(i, 0, QtWidgets.QTableWidgetItem(k))
+            self.tbl_pred.setItem(i, 1, QtWidgets.QTableWidgetItem("%d" % n))
+        self.redraw()
+        self.main.status("Predictions saved to %s" % os.path.join(out, "predictions.csv"))
+
+    # -- figure -----------------------------------------------------------------
+    def redraw(self):
+        fig = self.plot.figure
+        fig.clear()
+        if not HAVE_GREF or self.ref is None:
+            draw_figure_message(fig, "No reference" if HAVE_GREF else
+                                "raman_peak_fit.py / graphene_reference.py not found")
+            self.plot.draw()
+            return
+        views.draw_prediction(fig, self.ref, self.preds or [], self.pred_title, self.main.cfg)
+        self.plot.draw()
