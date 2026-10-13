@@ -6,6 +6,7 @@ section is a mixin in gui/components/peem_tabs/."""
 from __future__ import annotations
 
 import json
+import os
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -13,6 +14,7 @@ from matplotlib.figure import Figure
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -36,6 +38,7 @@ from tensorspec.gui.components.peem_tabs.drift_section import DriftSection
 from tensorspec.gui.components.peem_tabs.load_section import LoadSection
 from tensorspec.gui.components.peem_tabs.roi_domain_section import RoiDomainSection
 from tensorspec.gui.components.peem_tabs.stack_asym_section import StackAsymSection
+from tensorspec.plotting import peem_plots
 
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
@@ -127,6 +130,10 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         ph = QHBoxLayout()
         self.plot_title = QLabel("")
         ph.addWidget(self.plot_title, 1)
+        b = QPushButton("Export PDF…")
+        b.setToolTip("Vector PDF with editable text (Adobe Illustrator); profiles also as a .csv next to it")
+        b.clicked.connect(self._export_plot_pdf)
+        ph.addWidget(b)
         b = QPushButton("Close plot")
         b.clicked.connect(lambda: self.plot_box.setVisible(False))
         ph.addWidget(b)
@@ -203,6 +210,20 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         self._log(json.dumps(res, indent=1, default=lambda o: round(float(o), 6)
                              if isinstance(o, (np.floating, float)) else str(o)))
         self._refresh_views(select=show_kind)
+
+    def _export_plot_pdf(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export plot as PDF", os.path.expanduser("~/profile.pdf"), "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        peem_plots.save_pdf(self.pfig, path)
+        msg = f"Saved {path}"
+        if getattr(self, "_plot_kind", None) == "profiles" and getattr(self, "_profiles", None):
+            csv = path[:-4] + ".csv"
+            peem_plots.save_profiles_csv(self._profiles, csv)
+            msg += f" and {os.path.basename(csv)}"
+        self._log(msg)
 
     # ------------------------------------------------------------ ROI
     def _current_image(self) -> np.ndarray | None:
@@ -360,6 +381,8 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         box = self._drift_roi()
         if box:
             ov.append({**box, "color": "magenta"})
+        for i, pr in enumerate(getattr(self, "_profiles", None) or []):
+            ov.append({"kind": "line", "a": pr["line"][0], "b": pr["line"][1], "color": peem_plots.profile_color(i)})
         if getattr(self, "_line", None):
             ov.append({"kind": "line", "a": self._line[0], "b": self._line[1], "color": "orange"})
         if self._name:

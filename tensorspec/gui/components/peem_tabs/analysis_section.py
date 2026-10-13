@@ -53,12 +53,25 @@ class AnalysisSection:
         r, self.line_coords = _coords_row("x1, y1, x2, y2 (px)", self._set_line_coords)
         af.addRow("Line A→B:", r)
         r = QHBoxLayout()
-        for label, fn, tip in (("Profile", self._an_profile, "Igor LineProfile"),
-                               ("Gauss fit", lambda: self._an_fit(False), "Igor getGaussProfile: width (FWHM) of a peak/stripe"),
-                               ("Edge fit (d/dx)", lambda: self._an_fit(True), "Igor getDiffGaussProfile: wall / edge width"),
+        for label, fn, tip in (("Add profile", self._an_profile, "Profile of the current line, added to the plot "
+                                                                 "(draw or type another line and add again)"),
+                               ("Clear profiles", self._an_clear_profiles, "Remove all profiles and their lines"),
                                ("Profile vs frame", self._an_stack_profile, "Igor displayLines / stackLines")):
             b = QPushButton(label)
             b.setToolTip(tip)
+            b.clicked.connect(fn)
+            r.addWidget(b)
+        af.addRow(r)
+        r = QHBoxLayout()
+        r.addWidget(QLabel("offset between profiles"))
+        self.profile_offset = _dspin(-1e9, 1e9, 0.0, 0.01, 4)
+        self.profile_offset.setToolTip("Each next profile is shifted up by this much (0 = on top of each other)")
+        self.profile_offset.valueChanged.connect(lambda _v: self._draw_profiles())
+        r.addWidget(self.profile_offset)
+        for label, fn, tip in (("Gauss fit", lambda: self._an_fit(False), "Igor getGaussProfile: width (FWHM) of a peak/stripe"),
+                               ("Edge fit (d/dx)", lambda: self._an_fit(True), "Igor getDiffGaussProfile: wall / edge width")):
+            b = QPushButton(label)
+            b.setToolTip(tip + " (last profile)")
             b.clicked.connect(fn)
             r.addWidget(b)
         af.addRow(r)
@@ -152,6 +165,7 @@ class AnalysisSection:
         return (self._view_kind(), self._view_var() or "data", self._frame())
 
     def _plot(self, title: str):
+        self._plot_kind = None
         self.pfig.clear()
         self.plot_title.setText(title)
         self.plot_box.setVisible(True)
@@ -190,28 +204,60 @@ class AnalysisSection:
             return None
 
     def _an_profile(self):
+        """Profile of the current line, added to the profiles shown together."""
         if not self._need_line():
             return None
         kind, var, fr = self._view_args()
         pr = self._an_call(self.service.line_profile, self._name, kind, var, fr, *self._line, self.line_hw.value())
         if pr is None:
             return None
+        if not hasattr(self, "_profiles"):
+            self._profiles = []
+        (y1, x1), (y2, x2) = self._line
+        n = len(self._profiles) + 1
+        pr = {**pr, "line": self._line, "label": f"{n}: {kind}/{var} ({x1:.0f},{y1:.0f})→({x2:.0f},{y2:.0f})"}
+        self._profiles.append(pr)
         self._last_profile = pr
-        ax = self._plot(f"Profile A→B · {kind}/{var} · half-width {pr['halfwidth']} px")
-        peem_plots.line_profile(ax, pr)
-        self.pfig.tight_layout()
-        self.pcanvas.draw_idle()
+        self._draw_profiles()
+        self._refresh_view()  # the profile's line in its colour
         return pr
 
+    def _draw_profiles(self):
+        profiles = getattr(self, "_profiles", [])
+        if not profiles:
+            return
+        ax = self._plot(f"{len(profiles)} profile(s) · half-width {profiles[-1]['halfwidth']} px")
+        peem_plots.line_profiles(ax, profiles, self.profile_offset.value())
+        self._plot_kind = "profiles"
+        self.pfig.tight_layout()
+        self.pcanvas.draw_idle()
+
+    def _an_clear_profiles(self):
+        self._profiles = []
+        self._last_profile = None
+        self.plot_box.setVisible(False)
+        self._refresh_view()
+
+    def _current_profile(self):
+        """The last profile if it is of the current line, else the current line's profile (added)."""
+        last = getattr(self, "_last_profile", None)
+        if last is not None and last.get("line") == getattr(self, "_line", None) \
+                and last["halfwidth"] == self.line_hw.value():
+            return last
+        return self._an_profile()
+
     def _an_fit(self, edge: bool):
-        pr = self._an_profile()
+        pr = self._current_profile()
         if pr is None:
             return
         from tensorspec.core.peem import image_analysis as ia
         res = self._an_call(ia.diff_gauss_fit if edge else ia.gauss_fit, pr["distance"], pr["values"])
         if res is None:
             return
-        peem_plots.profile_fit(self.pfig.axes[0], pr, res, edge)
+        self._draw_profiles()
+        k = len(self._profiles) - 1
+        shift = 0.0 if edge else k * self.profile_offset.value()
+        peem_plots.profile_fit(self.pfig.axes[0], pr, {**res, "fit": np.asarray(res["fit"]) + shift}, edge)
         u = pr["unit"]
         txt = (f"{'edge' if edge else 'peak'} at {res['x0']:.3f} {u}, FWHM {res['fwhm']:.3f} ± "
                f"{res['fwhm_err']:.3f} {u}")
@@ -264,7 +310,7 @@ class AnalysisSection:
         self._log(f"FFT dominant period {per} (f = {rad['peak_f']:.4f} 1/px)")
 
     def _an_power(self):
-        pr = self._an_profile()
+        pr = self._current_profile()
         if pr is None:
             return
         from tensorspec.core.peem import image_analysis as ia

@@ -15,6 +15,48 @@ def line_profile(ax, pr: dict) -> None:
     ax.set_xlabel(f"distance ({pr['unit']})")
 
 
+PROFILE_COLORS = ("#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#8c564b", "#e377c2",
+                  "#7f7f7f", "#bcbd22")
+
+
+def profile_color(i: int) -> str:
+    return PROFILE_COLORS[i % len(PROFILE_COLORS)]
+
+
+def line_profiles(ax, profiles: list[dict], offset: float = 0.0) -> None:
+    """Several profiles in one plot (profile i shifted up by i x ``offset``), coloured like their lines."""
+    for i, pr in enumerate(profiles):
+        ax.plot(pr["distance"], np.asarray(pr["values"], float) + i * offset, "-", lw=1,
+                color=profile_color(i), label=pr.get("label", f"{i + 1}"))
+    if profiles:
+        ax.set_xlabel(f"distance ({profiles[-1]['unit']})")
+    if len(profiles) > 1:
+        ax.legend(frameon=False, fontsize=7, ncol=min(len(profiles), 5))
+
+
+def save_profiles_csv(profiles: list[dict], path) -> None:
+    """distance / value columns of every profile side by side (blank where a profile is shorter)."""
+    import csv
+
+    cols = []
+    for i, pr in enumerate(profiles):
+        cols += [(f"distance_{i + 1}_{pr['unit']}", list(pr["distance"])), (f"value_{i + 1}", list(pr["values"]))]
+    n = max(len(c) for _, c in cols)
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow([h for h, _ in cols])
+        for k in range(n):
+            w.writerow([f"{c[k]:.6g}" if k < len(c) else "" for _, c in cols])
+
+
+def save_pdf(fig, path) -> None:
+    """Vector PDF with editable text (TrueType fonts), readable in Adobe Illustrator."""
+    import matplotlib
+
+    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}):
+        fig.savefig(path, format="pdf", bbox_inches="tight", transparent=True)
+
+
 def profile_fit(ax, pr: dict, res: dict, edge: bool) -> None:
     """Gaussian peak fit, or for an edge the derivative + its Gaussian fit on a twin axis."""
     if edge:

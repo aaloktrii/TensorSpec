@@ -203,3 +203,29 @@ def test_sum_rule_tab_pairs_and_separates_on_load(qapp, xmcd_dataset):
     panel._on_load_finished(True, {"name": "synth_xmcd", "n_frames": 6, "pol_summary": {"CP": 3, "CM": 3}}, "")
     assert "paired 3 (" in panel.status_label.text()
     assert global_workspace.pull_tensor_data("synth_xmcd", "processed/CM") is not None
+
+
+def test_several_profiles_clear_and_illustrator_pdf(qapp, xmcd_dataset, tmp_path, monkeypatch):
+    svc, _, _ = xmcd_dataset
+    from PySide6.QtWidgets import QFileDialog
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    p = PeemXmcdPanel(service=svc)
+    p._name = "synth_xmcd"
+    p._refresh_views(select="raw")
+    for coords in ("4, 10, 60, 10", "4, 30, 60, 30", "4, 50, 60, 50"):
+        p.line_coords.setText(coords)
+        p._set_line_coords()
+        p._an_profile()
+    assert len(p._profiles) == 3 and len(p.pfig.axes[0].lines) == 3
+    assert sum(ov["kind"] == "line" for ov in p.viewer.overlays) >= 3  # each profile's line on the image
+    p.profile_offset.setValue(100.0)  # stacked with an offset
+    ys = [ln.get_ydata() for ln in p.pfig.axes[0].lines]
+    assert np.allclose(np.asarray(ys[1]) - np.asarray(p._profiles[1]["values"]), 100.0)
+    pdf = tmp_path / "profiles.pdf"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(pdf), "")))
+    p._export_plot_pdf()
+    data = pdf.read_bytes()
+    assert data.startswith(b"%PDF") and b"/FontFile2" in data  # TrueType embedded: text stays editable
+    assert (tmp_path / "profiles.csv").read_text().startswith("distance_1_")
+    p._an_clear_profiles()
+    assert p._profiles == [] and not any(ov.get("color") == "#1f77b4" for ov in p.viewer.overlays)
