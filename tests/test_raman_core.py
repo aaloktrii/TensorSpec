@@ -153,3 +153,12 @@ def test_window_integral_is_raw_trapezoid(tmp_path):
     assert g.shape == mf.shape and np.isfinite(g).all()
     i = mf.index_map[1, 2]
     np.testing.assert_allclose(g[1, 2], band_maps.window_integral(mf.axis, mf.data[i:i + 1], 2560, 2810)[0])
+
+
+def test_neutral_defaults_and_graphene_preset():
+    from tensorspec.core.raman.fit_model import FitModel
+    from tensorspec.core.raman.presets import PRESETS
+    m = FitModel()
+    assert m.bands == [] and m.si_calibrate is False          # universal start: nothing assumed
+    g = PRESETS["Graphene"]
+    assert [b[0] for b in g["bands"]] == ["G", "2D"] and g["si_calibrate"] is True

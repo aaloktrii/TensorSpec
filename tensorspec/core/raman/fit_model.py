@@ -16,7 +16,8 @@ from tensorspec.core.raman import tools
 #: (name, from cm-1, to cm-1, peaks: int or "auto", max peaks for "auto")
 Band = Tuple[str, float, float, object, int]
 
-DEFAULT_BANDS: List[Band] = [("G", 1500.0, 1680.0, "auto", 3), ("2D", 2560.0, 2810.0, "auto", 4)]
+#: Neutral start: no bands until the user (or a preset, core/raman/presets.py) defines them.
+DEFAULT_BANDS: List[Band] = []
 
 
 @dataclass
@@ -24,7 +25,7 @@ class FitModel:
     bands: List[Band] = field(default_factory=lambda: list(DEFAULT_BANDS))
     background: str = "linear"                      # one of tools.BACKGROUNDS
     bg_opts: dict = field(default_factory=lambda: {"order": 3, "lam": 1e5, "p": 0.01})
-    si_calibrate: bool = True                       # shift the axis so Si sits at tools.SI_REF
+    si_calibrate: bool = False                      # shift the axis so Si sits at tools.SI_REF
 
     def to_dict(self) -> dict:
         return {"bands": [list(b) for b in self.bands], "background": self.background,
@@ -35,7 +36,7 @@ class FitModel:
         return cls(bands=[tuple(b) for b in d.get("bands", DEFAULT_BANDS)],
                    background=d.get("background", "linear"),
                    bg_opts=dict(d.get("bg_opts", {})),
-                   si_calibrate=bool(d.get("si_calibrate", True)))
+                   si_calibrate=bool(d.get("si_calibrate", False)))
 
 
 def fit_spectrum(wn, y, model: FitModel) -> dict:

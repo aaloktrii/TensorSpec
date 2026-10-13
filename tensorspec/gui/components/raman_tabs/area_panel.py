@@ -30,7 +30,7 @@ class AreaTab(QtWidgets.QWidget):
         self.lbl.setWordWrap(True)
         self.lbl.setStyleSheet("color:#555;")
         left.addWidget(self.lbl)
-        for text, fn in (("Refit with Peak-fitting model", self.fit),
+        for text, fn in (("Fit with Peak-fitting model", self.fit),
                          ("Send to Peak fitting", self.send_to_fit),
                          ("Send to Stacked spectra", self.send_to_stack)):
             b = QtWidgets.QPushButton(text)
@@ -56,6 +56,23 @@ class AreaTab(QtWidgets.QWidget):
         draw_figure_message(self.plot.figure, "No area selected")
         self.plot.draw()
 
+    def show_area(self):
+        """The summed spectrum of the selected area, not fitted."""
+        svc = self.main.service
+        if svc.area_spectrum is None:
+            self.clear()
+            return
+        fig = self.plot.figure
+        fig.clear()
+        views.draw_spectra_overlay(fig, [{"label": self._label(), "wn": svc.area_axis,
+                                          "y": svc.area_spectrum}], self.main.tab_fit.bands())
+        self.tbl_peaks.setRowCount(0)
+        x0, x1, y0, y1 = svc.area_rect
+        self.lbl.setText("%d pixels, X %.1f–%.1f µm, Y %.1f–%.1f µm; spectra summed. Not fitted:\n"
+                         "'Fit with Peak-fitting model' uses the bands of 1 · Spectra ▸ Peak fitting."
+                         % (len(svc.area_indices), x0, x1, y0, y1))
+        self.plot.draw()
+
     def _label(self) -> str:
         svc = self.main.service
         return "%s area (%d px)" % (short_label(self.main.mapfile.path), len(svc.area_indices))
@@ -64,6 +81,10 @@ class AreaTab(QtWidgets.QWidget):
         svc = self.main.service
         if svc.area_spectrum is None:
             self.clear()
+            return
+        if not self.main.tab_fit.bands():
+            self.main.status("No bands to fit: define them in 1 · Spectra ▸ Peak fitting "
+                             "(or apply a preset).")
             return
         res = svc.fit_area(self.main.tab_fit.fit_model())
         bands = list(res["bands"].items())

@@ -91,7 +91,8 @@ class StackTab(QtWidgets.QWidget):
         left.addLayout(r)
 
         form = QtWidgets.QFormLayout()
-        self.ed_win = QtWidgets.QLineEdit("1450-1650, 2550-2800")
+        self.ed_win = QtWidgets.QLineEdit("")
+        self.ed_win.setPlaceholderText("e.g. 1450-1650, 2550-2800 — empty: full range")
         form.addRow("Ranges (cm⁻¹)", self.ed_win)
         self.spn_step = QtWidgets.QDoubleSpinBox()
         self.spn_step.setRange(0.0, 5.0)
@@ -104,7 +105,8 @@ class StackTab(QtWidgets.QWidget):
         self.chk_labels = QtWidgets.QCheckBox("Spectrum labels")
         form.addRow(self.chk_labels)
         self.chk_bands = QtWidgets.QCheckBox("Peak labels")
-        self.ed_bands = QtWidgets.QLineEdit("G 1583, 2D 2690")
+        self.ed_bands = QtWidgets.QLineEdit("")
+        self.ed_bands.setPlaceholderText("e.g. G 1583, 2D 2690")
         rb = QtWidgets.QHBoxLayout()
         rb.addWidget(self.chk_bands)
         rb.addWidget(self.ed_bands, 1)
@@ -273,7 +275,12 @@ class StackTab(QtWidgets.QWidget):
                   for it in self.items if it["visible"]]
         w = self.spn_w.value() / 2.54
         h = self.spn_h.value() / 2.54 or (2.6 + 1.25 * max(1, len(traces))) / 2.54
-        return stack_figure(w, h, traces, parse_windows(self.ed_win.text()),
+        windows = parse_windows(self.ed_win.text())
+        if not windows and traces:              # no ranges given: the whole common range
+            windows = [(max(float(t["wn"].min()) for t in traces),
+                        min(float(t["wn"].max()) for t in traces))]
+            windows = [w for w in windows if w[1] > w[0]]
+        return stack_figure(w, h, traces, windows,
                             step=self.spn_step.value(), normalise=self.chk_norm.isChecked(),
                             trace_labels=self.chk_labels.isChecked(),
                             band_labels=parse_band_labels(self.ed_bands.text())

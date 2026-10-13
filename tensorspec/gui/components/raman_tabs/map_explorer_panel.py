@@ -12,7 +12,6 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.raman.classification import g_band_cfg, label_of, layer_from_ratio, pixel_ratio
-from tensorspec.core.raman.band_maps import EXTRA_WINDOWS
 from tensorspec.core.raman.map_geometry import band_height, describe_transform
 from tensorspec.core.raman.voigt_2d import asym_of
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_placeholder
@@ -75,16 +74,20 @@ class MapExplorerTab(QtWidgets.QWidget):
         bar.addSpacing(12)
         bar.addWidget(QtWidgets.QLabel("Map"))
         self.cmb_quantity = QtWidgets.QComboBox()
-        self.cmb_quantity.addItems(["FWHM(2D)", "G height", "2D height", "Band integral"])
-        self.cmb_quantity.setToolTip("G / 2D height: raw peak height above the "
-                                     "flanking baseline, no fitting.\nBand integral: raw counts "
-                                     "integrated over a wavenumber window, no background removed")
+        self.cmb_quantity.addItems(["Total intensity", "Band integral", "FWHM(2D)",
+                                    "G height", "2D height"])
+        self.cmb_quantity.setToolTip("Total intensity / Band integral: raw counts integrated over "
+                                     "the whole spectrum / a window, no fitting, no background "
+                                     "removed.\nFWHM(2D): graphene 2D-band Voigt fit, after "
+                                     "'Fit 2D band on all pixels' (3 · Analysis ▸ Classification)."
+                                     "\nG / 2D height: raw graphene peak height above the "
+                                     "flanking baseline, no fitting.")
         self.cmb_quantity.currentIndexChanged.connect(self._quantity_changed)
         bar.addWidget(self.cmb_quantity)
         # window of the band integral: a band of the 1 · Spectra fit model, D, Si, or custom
         self.cmb_band = QtWidgets.QComboBox()
         self.cmb_band.setToolTip("Window to integrate: the bands of 1 · Spectra ▸ Peak fitting, "
-                                 "D, Si, or Custom")
+                                 "windows of an applied preset, or Custom")
         self.cmb_band.activated.connect(self._band_picked)
         self.spn_w0 = QtWidgets.QDoubleSpinBox()
         self.spn_w1 = QtWidgets.QDoubleSpinBox()
@@ -262,10 +265,10 @@ class MapExplorerTab(QtWidgets.QWidget):
         self.refresh_map()
 
     def _window_choices(self):
-        """[(name, lo, hi)]: the step-1 fit bands, then D and Si."""
+        """[(name, lo, hi)]: the step-1 fit bands, then any windows of the applied preset."""
         out = [(name, lo, hi) for name, lo, hi, *_ in self.main.tab_fit.bands()]
         names = {n for n, _, _ in out}
-        out += [(n, lo, hi) for n, (lo, hi) in EXTRA_WINDOWS.items() if n not in names]
+        out += [(n, lo, hi) for n, (lo, hi) in self.main.preset_windows.items() if n not in names]
         return out
 
     def _fill_bands(self):
@@ -408,9 +411,9 @@ class MapExplorerTab(QtWidgets.QWidget):
             "flip_y": self.chk_fy.isChecked(),
             "dx": self.spn_dx.value(), "dy": self.spn_dy.value()})
 
-    def _show_placeholder(self):
+    def _show_placeholder(self, text="No map loaded"):
         self.map_canvas.clear()
-        draw_placeholder(self.map_canvas.ax, "No map loaded")
+        draw_placeholder(self.map_canvas.ax, text)
         self.map_canvas.draw()
         self.spec_canvas.clear()
         draw_placeholder(self.spec_canvas.ax)
@@ -434,14 +437,23 @@ class MapExplorerTab(QtWidgets.QWidget):
         mf = self.main.mapfile
         quantity = self.cmb_quantity.currentText()
         fwhm = quantity == "FWHM(2D)"
-        if mf is None or (fwhm and self.main.fwhm_map is None):
+        if mf is None:
             self._show_placeholder()
+            return
+        if fwhm and self.main.fwhm_map is None:
+            self._show_placeholder("FWHM(2D) needs the 2D-band fit:\n3 · Analysis > Classification"
+                                   " > Fit 2D band on all pixels")
             return
 
         cv = self.map_canvas
         cv.clear()
         cbar_label = title = None
-        if quantity == "Band integral":
+        if quantity == "Total intensity":
+            data = self.main.service.band_integral_map("total", float(mf.axis.min()),
+                                                       float(mf.axis.max()))
+            cbar_label = "∫ I dω  [counts·cm$^{-1}$]"
+            title = "Total intensity, %g–%g cm$^{-1}$ (raw counts)" % (mf.axis.min(), mf.axis.max())
+        elif quantity == "Band integral":
             name, lo, hi = self.window()
             data = self.main.service.band_integral_map(name, lo, hi)
             cbar_label = "∫ I dω  [counts·cm$^{-1}$]"

@@ -87,6 +87,6 @@ def draw_spectra_overlay(fig, items, bands, max_legend=12):
         ax.text(0.5 * (lo + hi), 1.0, name, transform=trans, ha="center", va="bottom", fontsize=8)
     ax.set_xlabel("Raman shift (cm$^{-1}$)")
     ax.set_ylabel("Intensity (counts)")
-    ax.set_title("%d spectra — select one to fit it" % len(items), fontsize=9, pad=14)
+    ax.set_title("%d spectr%s" % (len(items), "um" if len(items) == 1 else "a"), fontsize=9, pad=14)
     if not many and items:
         ax.legend(fontsize=7, frameon=False)

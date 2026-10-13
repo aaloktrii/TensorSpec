@@ -29,7 +29,6 @@ HAVE_GREF = True
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
 
-BAND_DEFAULTS = [("G", 1500.0, 1680.0, "Auto", 3), ("2D", 2560.0, 2810.0, "Auto", 4)]
 
 
 class PeakFitTab(QtWidgets.QWidget):
@@ -63,7 +62,7 @@ class PeakFitTab(QtWidgets.QWidget):
 
         form = QtWidgets.QFormLayout()
         self.chk_si = QtWidgets.QCheckBox("Calibrate on Si (520.7 cm⁻¹)")
-        self.chk_si.setChecked(True)
+        self.chk_si.setChecked(False)
         form.addRow(self.chk_si)
         self.cmb_bg = QtWidgets.QComboBox()
         self.cmb_bg.addItems(["linear", "polynomial", "als", "none"])
@@ -85,12 +84,11 @@ class PeakFitTab(QtWidgets.QWidget):
         self.tbl_bands.verticalHeader().setVisible(False)
         self.tbl_bands.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
         self.tbl_bands.setMaximumHeight(140)
-        for band in BAND_DEFAULTS:
-            self._add_band_row(*band)
         left.addWidget(self.tbl_bands)
         r = QtWidgets.QHBoxLayout()
         for text, fn in (("Add band", lambda: self._add_band_row("band", 1000, 1100, "Auto", 3)),
-                         ("Remove band", self._remove_band)):
+                         ("Remove band", self._remove_band),
+                         ("Graphene preset", lambda: self.main.apply_preset("Graphene"))):
             b = QtWidgets.QPushButton(text)
             b.clicked.connect(fn)
             r.addWidget(b)
@@ -138,6 +136,13 @@ class PeakFitTab(QtWidgets.QWidget):
         sp.setRange(1, 6)
         sp.setValue(int(nmax))
         self.tbl_bands.setCellWidget(r, 4, sp)
+
+    def set_bands(self, bands, si_calibrate: bool):
+        """Replace the band table: rows of (name, from, to, peaks or "auto", max)."""
+        self.tbl_bands.setRowCount(0)
+        for name, lo, hi, n, nmax in bands:
+            self._add_band_row(name, lo, hi, "Auto" if n == "auto" else n, nmax)
+        self.chk_si.setChecked(bool(si_calibrate))
 
     def _remove_band(self):
         r = self.tbl_bands.currentRow()
@@ -212,7 +217,7 @@ class PeakFitTab(QtWidgets.QWidget):
         self._added()
 
     def _added(self):
-        """After adding spectra: plot them all first; clicking one in the list fits it."""
+        """After adding spectra: plot them all; nothing is fitted until a Fit button is pressed."""
         self.lst.blockSignals(True)
         self.lst.setCurrentRow(-1)
         self.lst.blockSignals(False)
@@ -226,8 +231,8 @@ class PeakFitTab(QtWidgets.QWidget):
         fig.clear()
         views.draw_spectra_overlay(fig, self.items, self.bands())
         self.tbl_peaks.setRowCount(0)
-        self.lbl.setText("%d spectra loaded. Select one in the list to fit it, or Fit all…"
-                         % len(self.items))
+        self.lbl.setText("%d spectra loaded. Define the bands to fit (or a preset), then "
+                         "'Fit selected' or 'Fit all…'." % len(self.items))
         self.plot.draw()
 
     def clear(self):
@@ -244,17 +249,33 @@ class PeakFitTab(QtWidgets.QWidget):
         return res
 
     def _selected(self, i: int):
-        if 0 <= i < len(self.items):
-            self.fit_selected()
+        """Show the chosen spectrum (with its fit, if it has been fitted); fitting is a button."""
+        if not (0 <= i < len(self.items)):
+            return
+        if i in self.results:
+            self.draw_fit(i, self.results[i])
+            return
+        fig = self.plot.figure
+        fig.clear()
+        views.draw_spectra_overlay(fig, [self.items[i]], self.bands())
+        self.tbl_peaks.setRowCount(0)
+        self.lbl.setText("Not fitted. Define bands (or a preset), then 'Fit selected' or 'Fit all…'.")
+        self.plot.draw()
 
     def fit_selected(self):
         i = self.lst.currentRow()
         if not (0 <= i < len(self.items)):
             return
+        if not self.bands():
+            self.main.status("No bands to fit: add a band (From/To, peaks) or apply a preset.")
+            return
         self.draw_fit(i, self.fit_item(i))
 
     def fit_all(self):
         if not self.items:
+            return
+        if not self.bands():
+            self.main.status("No bands to fit: add a band (From/To, peaks) or apply a preset.")
             return
         prog = QtWidgets.QProgressDialog("Fitting…", "Cancel", 0, len(self.items), self)
         prog.setWindowModality(QtCore.Qt.WindowModal)
