@@ -80,7 +80,8 @@ tensorspec/
     ├── services/             # Non-HTTP service layer between panels and core
     │   ├── peem_service.py   # THE PEEM service (both PEEM-suite tabs): stack / pair / drift / BG / sum rule
     │   ├── peem_steps/       # XPEEM-map steps, mixins of PeemService: load, cleanup, drift_stack,
-    │   │                     #   image_analysis, maps_domains, annotations (ROIs, profiles) + common.py
+    │   │                     #   image_analysis, maps_domains, annotations (ROIs, profiles), bg_sumrule
+    │   │                     #   (Sum Rule tab: background + sum rule), stack_nodes, common.py
     │   └── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     ├── components/           # Reusable, isolated UI panels
     │   ├── __init__.py
