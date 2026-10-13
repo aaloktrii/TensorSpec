@@ -196,7 +196,7 @@ def test_twist_commensurate_empty_tile_raises(monkeypatch):
 
 
 
-def _crystal_suite_stub(rows_twist=(0.0, 0.0), stacking="AA", max_cells=217):
+def _crystal_suite_stub(rows_twist=(0.0, 0.0), stacking="AA", max_cells=217, builder="plain"):
     from types import SimpleNamespace as NS
     from unittest import mock
 
@@ -227,6 +227,7 @@ def _crystal_suite_stub(rows_twist=(0.0, 0.0), stacking="AA", max_cells=217):
         rows.append(row)
     w = NS(
         stack_layer_rows=rows,
+        combo_stack_builder=NS(currentData=lambda: builder),
         spin_bernevig_theta=Spin(7.34),
         spin_stack_vacuum=Spin(20.0),
         spin_bernevig_max_cells=Spin(max_cells),
@@ -262,7 +263,7 @@ def test_gui_zero_twist_aa_push_stays_aligned_despite_default_spin():
 def test_gui_build_twisted_writes_row_twists_and_push_follows():
     from unittest import mock
 
-    cs, S, w = _crystal_suite_stub()
+    cs, S, w = _crystal_suite_stub(builder="bernevig")
     ok, err = S._try_bernevig_build(w)
     assert ok, err
     assert [r.spin_twist.v for r in w.stack_layer_rows] == [-3.67, 3.67]
@@ -280,7 +281,60 @@ def test_gui_build_twisted_writes_row_twists_and_push_follows():
 def test_gui_bernevig_build_failure_is_nonmodal_result():
     from unittest import mock
 
-    cs, S, w = _crystal_suite_stub(rows_twist=(0.0, 5.0), max_cells=1)
+    cs, S, w = _crystal_suite_stub(rows_twist=(0.0, 5.0), max_cells=1, builder="bernevig")
     ok, err = S._try_bernevig_build(w)
     assert not ok and "commensurate" in err
     assert S._bernevig_opted_in(w)
+
+
+class _Val:
+    def __init__(self, v):
+        self.v = v
+
+    def value(self):
+        return self.v
+
+
+def _moire_stub(twist2, builder="plain"):
+    from unittest import mock
+
+    cs, S, w = _crystal_suite_stub(rows_twist=(0.0, twist2), builder=builder)
+    for row, z in zip(w.stack_layer_rows, (0.0, 3.4)):
+        row.spin_z = _Val(z)
+    labels = []
+    w.lbl_moire = mock.Mock(setText=labels.append)
+    w.renderer = mock.Mock(spec=["draw_moire_envelope", "plotter"])
+    w.handle_draw_stack = mock.Mock()
+    w.handle_bernevig_twist = mock.Mock()
+    return S, w, labels
+
+
+def test_moire_button_plain_reports_period_and_draws_outline():
+    S, w, labels = _moire_stub(5.0)
+    S.handle_moire(w)
+    w.handle_bernevig_twist.assert_not_called()
+    w.handle_draw_stack.assert_called_once()
+    assert "Incommensurate" in labels[-1] and "28.20" in labels[-1]
+    m, z_lo, z_hi = w.renderer.draw_moire_envelope.call_args.args
+    assert np.isclose(np.linalg.norm(m[0]), 28.20, atol=0.01)
+    assert (z_lo, z_hi) == (-1.5, 4.9)
+
+
+def test_moire_button_plain_commensurate_counts_cells():
+    S, w, labels = _moire_stub(21.787)
+    S.handle_moire(w)
+    assert "Commensurate" in labels[-1] and "7 cells" in labels[-1]
+
+
+def test_moire_button_plain_zero_twist_no_crash_no_outline():
+    S, w, labels = _moire_stub(0.0)
+    S.handle_moire(w)
+    assert "No Moiré" in labels[-1]
+    w.renderer.draw_moire_envelope.assert_not_called()
+
+
+def test_moire_button_bernevig_runs_builder():
+    S, w, labels = _moire_stub(5.0, builder="bernevig")
+    S.handle_moire(w)
+    w.handle_bernevig_twist.assert_called_once()
+    w.renderer.draw_moire_envelope.assert_not_called()
