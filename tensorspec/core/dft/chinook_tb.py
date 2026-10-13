@@ -1134,7 +1134,7 @@ class ChinookTightBindingEngine:
                     
         # Format Gamma for matplotlib's LaTeX engine
         labels = ["$\Gamma$" if "Gamma" in lbl or lbl == "\\Gamma" else lbl for lbl in labels]
-        
+
         return np.array(high_sym_pts), labels
 
     def get_custom_kpath(self, coords_str, labels_str):
@@ -1224,13 +1224,14 @@ class ChinookTightBindingEngine:
         scf_out = os.path.join(work_dir, "scf.out")
         A_qe_found = False
 
-        from tensorspec.core.dft.qe_fermi import detect_qe_fermi_eV
+        from tensorspec.core.dft.qe_fermi import detect_plot_fermi_eV
 
         if qe_fermi is not None:
             ef = float(qe_fermi)
             print(f"QE Fermi from UI/caller: {ef:.4f} eV", flush=True)
         else:
-            ef, ef_src = detect_qe_fermi_eV(work_dir)
+            # Prefer W90 midgap@touch when QE EF sits off a Dirac/semimetal.
+            ef, ef_src = detect_plot_fermi_eV(work_dir)
             if ef_src != "none":
                 print(f"QE Fermi from {ef_src}: {ef:.4f} eV", flush=True)
             else:
@@ -1381,22 +1382,74 @@ class ChinookTightBindingEngine:
 
         T_mat = np.asarray(T_mat, dtype=np.float64)
         a_mat = np.asarray(a_mat, dtype=np.float64)
-        R_pm = R_qe_k @ T_mat
-        R_cart = R_pm @ a_mat
 
         pos = np.asarray(flat_pos, dtype=np.float64)
         n_pos = len(pos)
         if n_pos == 0:
             raise ValueError("No orbital positions for Wannier → Cartesian hop map.")
-        tau_i = pos[i_k % n_pos]
-        tau_j = pos[j_k % n_pos]
-        dR = R_cart + tau_j - tau_i
 
-        # Chinook list H expects Python rows [i, j, dx, dy, dz, complex]
-        # Build from pre-cast arrays (much faster than per-row int/float/complex in a tight loop).
+        # Wannier90 use_ws_distance (MDRS): remap in the W90/QE crystal frame
+        # (wsvec.dat keys = hr.dat R), then map to pymatgen via T_mat.
+        from tensorspec.core.dft.w90_ws_distance import (
+            expand_hoppings_ws,
+            parse_win_ws_settings,
+            parse_wsvec_dat,
+            resolve_wsvec_path,
+        )
+
+        ws_cfg = parse_win_ws_settings(win_path)
+        use_ws = bool(ws_cfg.get("use_ws_distance", True))
+        mp_grid = ws_cfg.get("mp_grid")
+        wsvec_table = None
+        wsvec_path = resolve_wsvec_path(work_dir, w90_filepath)
+        if use_ws and wsvec_path:
+            try:
+                wsvec_table = parse_wsvec_dat(wsvec_path)
+                print(
+                    f"W90 use_ws_distance: loaded {len(wsvec_table):,} shift "
+                    f"entries from {os.path.basename(wsvec_path)}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(f"WARN: could not parse wsvec.dat ({exc}); computing MDRS", flush=True)
+                wsvec_table = None
+
+        # Prefer .win unit_cell_cart for MDRS (matches W90 centres / wsvec frame).
+        A_ws = ws_cfg.get("unit_cell_cart")
+        if A_ws is None:
+            A_ws = self.A_qe if getattr(self, "A_qe", None) is not None else a_mat
+        A_ws = np.asarray(A_ws, dtype=np.float64)
+        if use_ws and n_pos > 0 and (mp_grid is not None or wsvec_table is not None):
+            R_qe_k, i_k, j_k, t_k = expand_hoppings_ws(
+                R_qe_k,
+                i_k,
+                j_k,
+                t_k,
+                pos,
+                A_ws,
+                mp_grid or (1, 1, 1),
+                search_size=int(ws_cfg.get("ws_search_size", 2)),
+                tol=float(ws_cfg.get("ws_distance_tol", 1e-5)),
+                wsvec_table=wsvec_table,
+            )
+            src = "wsvec.dat" if wsvec_table is not None else f"mp_grid={mp_grid}"
+            print(
+                f"W90 use_ws_distance: remapped to {len(t_k):,} hop images ({src})",
+                flush=True,
+            )
+        elif use_ws and mp_grid is None and wsvec_table is None:
+            print(
+                "W90 use_ws_distance requested but mp_grid/wsvec.dat missing — "
+                "using plain FT (re-run wannier90.x to write wsvec.dat).",
+                flush=True,
+            )
+
+        R_pm = R_qe_k @ T_mat
+        # Chinook FT: exp(i k·dR). W90 WS phases use (R+T)_cart only.
+        R_cart = R_pm @ a_mat
         ik = i_k.astype(np.int64, copy=False)
         jk = j_k.astype(np.int64, copy=False)
-        dr = dR.astype(np.float64, copy=False)
+        dr = R_cart.astype(np.float64, copy=False)
         tk = np.asarray(t_k, dtype=np.complex128, copy=False)
         n_hop = tk.shape[0]
         explicit_hopping = [

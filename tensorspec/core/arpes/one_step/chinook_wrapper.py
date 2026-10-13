@@ -155,17 +155,55 @@ class ChinookWrapper:
         from tensorspec.core.arpes.one_step.chinook_arpes_kmesh import (
             physics_from_experiment_kwargs,
             run_chinook_arpes,
+            run_grizzly_arpes,
         )
 
         physics = physics_from_experiment_kwargs(experiment_kwargs)
+        me_engine = str(experiment_kwargs.get("me_engine", "chinook") or "chinook").lower()
+        me_device = str(experiment_kwargs.get("me_device", "cpu") or "cpu").lower()
+        # Local Mac often has no CUDA — keep GrizzlyME on CPU rather than dying.
+        if me_device == "cuda":
+            try:
+                import torch
+
+                if not torch.cuda.is_available():
+                    me_device = "cpu"
+            except Exception:
+                me_device = "cpu"
+
         try:
-            intensity_3d = run_chinook_arpes(
-                self.tb_model,
-                kb,
-                physics,
-                self.B_matrix,
-                fermi_shift=self.fermi_shift,
-            )
+            use_grizzly = me_engine in ("grizzly", "auto")
+            if use_grizzly:
+                try:
+                    import grizzly  # noqa: F401
+                except ImportError:
+                    if me_engine == "grizzly":
+                        raise RuntimeError(
+                            "GrizzlyME requested but grizzlyme is not installed."
+                        )
+                    use_grizzly = False
+            if use_grizzly:
+                print(
+                    f"Local ARPES ME: GrizzlyME device={me_device}",
+                    flush=True,
+                )
+                intensity_3d = run_grizzly_arpes(
+                    self.tb_model,
+                    kb,
+                    physics,
+                    self.B_matrix,
+                    fermi_shift=self.fermi_shift,
+                    device=me_device,
+                )
+            else:
+                print("Local ARPES ME: Chinook CPU", flush=True)
+                intensity_3d = run_chinook_arpes(
+                    self.tb_model,
+                    kb,
+                    physics,
+                    self.B_matrix,
+                    fermi_shift=self.fermi_shift,
+                )
         except Exception as e:
             import traceback
             traceback.print_exc()

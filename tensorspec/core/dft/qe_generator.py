@@ -325,6 +325,8 @@ num_print_cycles = 10
 
 write_hr = true
 write_xyz = true
+# MDRS Fourier (W90 v3 default). TensorSpec TB/ARPES remaps hr.dat the same way
+# via wsvec.dat (or computed MDRS) — keep true for any material, not just graphene.
 use_ws_distance = true
 {spinor_str}
 begin projections

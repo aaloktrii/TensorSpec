@@ -77,7 +77,7 @@ tensorspec/
     ├── ml/                   # MaestroAI workers, warehouse, session helpers
     └── suites/               # Independent roadmap suites + ML
         ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
-        ├── dft_suite.py
+        ├── dft_suite.py          # Tabs: Structure | DFT/Wannier | Tight Binding (+ band canvas)
         ├── arpes_suite.py
         ├── peem_suite.py
         ├── xas_suite.py

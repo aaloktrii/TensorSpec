@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 CACHE_DIR = Path(os.path.expanduser("~/.tensorspec_cache/w90_tb"))
-CACHE_VERSION = 7  # v7: qe_fermi in cache key
+CACHE_VERSION = 8  # v8: use_ws_distance MDRS hop remap
 REMOTE_CACHE_NAME = "w90_tb_cache.pkl"
 
 
@@ -27,8 +27,22 @@ def cache_key(
         size = os.path.getsize(path)
     except OSError:
         mtime, size = 0, 0
+    # Sibling .win mtime so flipping use_ws_distance / mp_grid busts cache.
+    win_mtime = 0.0
+    work = os.path.dirname(path)
+    for name in (
+        "wannier90.win",
+        os.path.basename(path).replace("_hr.dat", ".win"),
+    ):
+        wp = os.path.join(work, name)
+        if os.path.isfile(wp):
+            try:
+                win_mtime = os.path.getmtime(wp)
+            except OSError:
+                win_mtime = 0.0
+            break
     raw = (
-        f"v{CACHE_VERSION}|{path}|{mtime}|{size}|{use_soc}|"
+        f"v{CACHE_VERSION}|{path}|{mtime}|{size}|win:{win_mtime}|{use_soc}|"
         f"{float(onsite_e):.12g}|{float(hop_tol):.12g}|{float(qe_fermi):.12g}"
     )
     return hashlib.sha256(raw.encode()).hexdigest()[:32]

@@ -4,7 +4,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                                QComboBox, QPushButton, QDoubleSpinBox,
                                QFormLayout, QGroupBox, QMessageBox, QSlider,
                                QSpinBox, QScrollArea, QApplication, QInputDialog, QSplitter,
-                               QCheckBox, QTextEdit, QLineEdit, QFileDialog)
+                               QCheckBox, QTextEdit, QLineEdit, QFileDialog, QTabWidget,
+                               QFrame)
 from PySide6.QtCore import Qt, QThread, Signal
 
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -129,9 +130,18 @@ class ARPESPanel(QWidget):
         self.main_splitter.setChildrenCollapsible(False)
         main_sim_layout.addWidget(self.main_splitter)
         
-        # --- LEFT PANEL: CONTROLS ---
+        # --- LEFT PANEL: tabbed controls (not one mile-long scroll) ---
         control_panel = QWidget()
-        control_layout = QVBoxLayout(control_panel)
+        control_outer = QVBoxLayout(control_panel)
+        control_outer.setContentsMargins(0, 0, 0, 0)
+        self.left_tabs = QTabWidget()
+
+        tab_src = QWidget()
+        src_layout = QVBoxLayout(tab_src)
+        tab_beam = QWidget()
+        beam_tab_layout = QVBoxLayout(tab_beam)
+        tab_analyzer = QWidget()
+        analyzer_tab_layout = QVBoxLayout(tab_analyzer)
 
         # 1. Engine Selector
         engine_group = QGroupBox("1. Simulation Engine Selector")
@@ -149,19 +159,20 @@ class ARPESPanel(QWidget):
         
         engine_layout.addRow(QLabel("Physics Model:"), self.engine_dropdown)
         engine_layout.addRow(QLabel("Compute mode:"), self.target_dropdown)
-        control_layout.addWidget(engine_group)
+        src_layout.addWidget(engine_group)
 
-        # Remote Chinook/Grizzly debug toggles (shown for B1/B2/A + Remote)
-        self.remote_tb_opts = QGroupBox("1b. Remote TB backend (Chinook ↔ Grizzly debug)")
+        # Chinook/Grizzly ME (local + hybrid). Remote-only rows hidden when Local.
+        self.remote_tb_opts = QGroupBox("1b. TB ME backend (Chinook ↔ Grizzly)")
         remote_tb_form = QFormLayout(self.remote_tb_opts)
         self.combo_remote_me = QComboBox()
         self.combo_remote_me.addItem("Chinook (CPU reference)", "chinook")
         self.combo_remote_me.addItem("GrizzlyME", "grizzly")
         self.combo_remote_me.addItem("Auto (Grizzly if installed)", "auto")
-        self.combo_remote_me.setCurrentIndex(0)  # default chinook while debugging
+        self.combo_remote_me.setCurrentIndex(1)  # GrizzlyME default
         self.combo_remote_device = QComboBox()
         self.combo_remote_device.addItem("CUDA", "cuda")
         self.combo_remote_device.addItem("CPU", "cpu")
+        self.combo_remote_device.setCurrentIndex(1)  # CPU safe default (no CUDA on many Macs)
         self.combo_remote_layout = QComboBox()
         self.combo_remote_layout.addItem("θ-slices (safe; large TB)", "slices")
         self.combo_remote_layout.addItem("Full cube (θ-chunked; may OOM)", "full")
@@ -189,25 +200,31 @@ class ARPESPanel(QWidget):
         self.remote_tb_cores_spin.setPrefix("Cores: ")
         remote_tb_form.addRow("ME engine:", self.combo_remote_me)
         remote_tb_form.addRow("Grizzly device:", self.combo_remote_device)
-        remote_tb_form.addRow("Layout:", self.combo_remote_layout)
-        remote_tb_form.addRow("CUDA GPUs:", gpu_row)
-        remote_tb_form.addRow("CPU workers:", self.remote_tb_cores_spin)
+        # Keep handles so local mode can hide hybrid-only rows.
+        self._lbl_remote_layout = QLabel("Layout:")
+        self._lbl_remote_gpus = QLabel("CUDA GPUs:")
+        self._lbl_remote_cores = QLabel("CPU workers:")
+        self._row_remote_layout_w = self.combo_remote_layout
+        self._row_remote_gpu_w = QWidget()
+        self._row_remote_gpu_w.setLayout(gpu_row)
+        remote_tb_form.addRow(self._lbl_remote_layout, self.combo_remote_layout)
+        remote_tb_form.addRow(self._lbl_remote_gpus, self._row_remote_gpu_w)
+        remote_tb_form.addRow(self._lbl_remote_cores, self.remote_tb_cores_spin)
         self.combo_remote_me.setToolTip(
             "Chinook = reference CPU path. GrizzlyME = GPU/CPU accelerated ME. "
-            "Toggle to A/B debug intensity and speed."
+            "Works for Local and Hybrid."
         )
         self.combo_remote_layout.setToolTip(
-            "Full cube runs GrizzlyME on the full (θ,φ,E) grid with automatic θ-chunking "
-            "when VRAM is tight. Large Wannier TB often OOMs without chunks — use θ-slices."
+            "Hybrid only. Full cube runs GrizzlyME on the full (θ,φ,E) grid with "
+            "automatic θ-chunking when VRAM is tight."
         )
         self.remote_ngpus_spin.setToolTip(
-            "Type any count from 1 up to host max. Capped again at submit and on the cluster."
+            "Hybrid only. Type any count from 1 up to host max."
         )
         self.combo_remote_device.currentIndexChanged.connect(self._sync_remote_gpu_ui)
         self.combo_remote_layout.currentIndexChanged.connect(self._sync_remote_gpu_ui)
         self.target_dropdown.currentIndexChanged.connect(self._refresh_remote_gpu_count)
-        control_layout.addWidget(self.remote_tb_opts)
-        self.remote_tb_opts.hide()
+        src_layout.addWidget(self.remote_tb_opts)
 
         # Workspace & SOC Settings
         self.ws_group = QGroupBox("0. Crystal Structure & Bands (Workspace)")
@@ -224,7 +241,7 @@ class ARPESPanel(QWidget):
         self.lbl_band_energy_meta.setStyleSheet("color: #9ad; font-size: 11px;")
         ws_layout.addWidget(self.lbl_band_energy_meta)
         self.ws_combo.currentIndexChanged.connect(self._update_band_energy_meta_label)
-        control_layout.addWidget(self.ws_group)
+        src_layout.addWidget(self.ws_group)
         
         # --- Remote Vaults for SPRKKR ---
         self.vault_group = QGroupBox("0. SPRKKR Remote Vault")
@@ -252,7 +269,7 @@ class ARPESPanel(QWidget):
         vault_layout.addWidget(self.btn_vault_refresh)
         vault_layout.addWidget(self.btn_vault_delete)
         vault_layout.addWidget(self.btn_load_local_spc)
-        control_layout.addWidget(self.vault_group)
+        src_layout.addWidget(self.vault_group)
         self.vault_group.hide()
 
         # --- SPR-KKR (B3) settings ---
@@ -384,9 +401,10 @@ class ARPESPanel(QWidget):
         self.btn_kkr_kill.clicked.connect(self._kill_sprkkr_jobs)
         sprkkr_form.addRow(self.btn_kkr_kill)
 
-        control_layout.addWidget(self.sprkkr_group)
+        src_layout.addWidget(self.sprkkr_group)
         self.sprkkr_group.hide()
         self._update_kkr_bin_status()
+        src_layout.addStretch()
 
         self.engine_dropdown.currentIndexChanged.connect(self.on_engine_changed)
         self.target_dropdown.currentIndexChanged.connect(self.on_target_changed)
@@ -468,7 +486,7 @@ class ARPESPanel(QWidget):
         param_layout.addRow("Radial Type:", self.rad_type_combo)
         param_layout.addRow("MFP (λ):", self.mfp_spin)
         param_layout.addRow("Temperature:", self.temperature_spin)
-        control_layout.addWidget(param_group)
+        beam_tab_layout.addWidget(param_group)
 
         # 3. Beam & Manipulator Geometry
         beam_group = QGroupBox("3. Beam & Manipulator Geometry")
@@ -581,7 +599,7 @@ class ARPESPanel(QWidget):
         beam_layout.addRow("Polarization:", self.polarization_combo)
         beam_layout.addRow("Pol. Angle (Arbitrary):", self.lin_pol_angle_spin)
         beam_layout.addRow("Intensity Mode:", self.matrix_element_combo)
-        control_layout.addWidget(beam_group)
+        beam_tab_layout.addWidget(beam_group)
 
         # --- SARPES CONFIGURATION ---
         self.group_sarpes = QGroupBox("Spin-Resolved ARPES (SARPES)")
@@ -601,7 +619,8 @@ class ARPESPanel(QWidget):
         sarpes_layout.addRow("Spin Filter:", self.combo_spin_comp)
         self.group_sarpes.setLayout(sarpes_layout)
         
-        control_layout.addWidget(self.group_sarpes)
+        beam_tab_layout.addWidget(self.group_sarpes)
+        beam_tab_layout.addStretch()
 
 
         
@@ -613,7 +632,7 @@ class ARPESPanel(QWidget):
         analyzer_layout = QFormLayout()
         self.slit_size_spin = QDoubleSpinBox(); self.slit_size_spin.setRange(0.1, 5.0); self.slit_size_spin.setValue(0.5); self.slit_size_spin.setSingleStep(0.1); self.slit_size_spin.setSuffix(" mm")
         self.slit_angle_spin = QDoubleSpinBox(); self.slit_angle_spin.setRange(-180.0, 180.0); self.slit_angle_spin.setValue(0.0); self.slit_angle_spin.setSuffix(" °")
-        self.deflector_angle_spin = QDoubleSpinBox(); self.deflector_angle_spin.setRange(-15.0, 15.0); self.deflector_angle_spin.setValue(0.0); self.deflector_angle_spin.setSuffix(" °")
+        self.deflector_angle_spin = QDoubleSpinBox(); self.deflector_angle_spin.setRange(-90.0, 90.0); self.deflector_angle_spin.setValue(0.0); self.deflector_angle_spin.setSuffix(" °")
         analyzer_layout.addRow("Analyzer Slit Size:", self.slit_size_spin)
         analyzer_layout.addRow("Analyzer Slit Angle:", self.slit_angle_spin)
         analyzer_layout.addRow("Deflector Angle:", self.deflector_angle_spin)
@@ -624,16 +643,16 @@ class ARPESPanel(QWidget):
             row.addWidget(QLabel(label_text))
             vmin = QDoubleSpinBox(); vmin.setRange(-90.0, 90.0); vmin.setValue(min_val); vmin.setSingleStep(0.1)
             vmax = QDoubleSpinBox(); vmax.setRange(-90.0, 90.0); vmax.setValue(max_val); vmax.setSingleStep(0.1)
-            vpts = QSpinBox(); vpts.setRange(10, 1000); vpts.setValue(40); vpts.setSingleStep(10)
+            vpts = QSpinBox(); vpts.setRange(1, 1000); vpts.setValue(pts_val); vpts.setSingleStep(10)
             row.addWidget(QLabel("Min:")); row.addWidget(vmin)
             row.addWidget(QLabel("Max:")); row.addWidget(vmax)
             row.addWidget(QLabel("Pts:")); row.addWidget(vpts)
             return row, vmin, vmax, vpts
 
         # Relabeled strictly to Angular axes (Theta and Phi)
-        row_kx, self.spin_kx_min, self.spin_kx_max, self.spin_kx_steps = create_range_row("Θ (Slit) [°]:", -15.0, 15.0, 100)
-        row_ky, self.spin_ky_min, self.spin_ky_max, self.spin_ky_steps = create_range_row("Φ (Deflect) [°]:", -15.0, 15.0, 100)
-        row_e, self.spin_e_min, self.spin_e_max, self.spin_e_steps = create_range_row("E:", -2.0, 0.5, 100)
+        row_kx, self.spin_kx_min, self.spin_kx_max, self.spin_kx_steps = create_range_row("Θ (Slit) [°]:", -15.0, 15.0, 60)
+        row_ky, self.spin_ky_min, self.spin_ky_max, self.spin_ky_steps = create_range_row("Φ (Deflect) [°]:", -15.0, 15.0, 60)
+        row_e, self.spin_e_min, self.spin_e_max, self.spin_e_steps = create_range_row("E:", -0.8, -0.8, 1)
 
         domain_layout.addLayout(row_kx)
         domain_layout.addLayout(row_ky)
@@ -658,14 +677,35 @@ class ARPESPanel(QWidget):
         res_layout.addRow("Momentum Resolution (dk):", self.ui_res_k_spinbox)
         domain_layout.addLayout(res_layout)
         
-        control_layout.addWidget(domain_group)
-        
-        control_layout.addStretch()
+        analyzer_tab_layout.addWidget(domain_group)
+        analyzer_tab_layout.addStretch()
+
+        self.left_tabs.addTab(tab_src, "Source")
+        self.left_tabs.addTab(tab_beam, "Beam")
+        self.left_tabs.addTab(tab_analyzer, "Analyzer")
+        control_outer.addWidget(self.left_tabs, stretch=1)
+
+        # Run / push stay pinned below tabs (always visible)
+        self.run_sim_btn = QPushButton("🚀 Run ARPES Simulation")
+        self.run_sim_btn.setStyleSheet("font-weight: bold; padding: 10px; background-color: #2b5c8f; color: white;")
+        self.run_sim_btn.clicked.connect(self.trigger_simulation)
+        self.btn_push_workspace = QPushButton("📊 Push to Workspace")
+        self.btn_push_workspace.setStyleSheet("font-weight: bold; padding: 10px; background-color: #E67E22; color: white;")
+        self.btn_push_workspace.setEnabled(False)
+        self.btn_push_workspace.clicked.connect(self.push_arpes_to_workspace)
+        self.btn_save_disk = QPushButton("💾 Save to Disk (.npz)")
+        self.btn_save_disk.setStyleSheet("font-weight: bold; padding: 10px; background-color: #D35400; color: white;")
+        self.btn_save_disk.setEnabled(False)
+        self.btn_save_disk.clicked.connect(self.save_arpes_to_disk)
+        control_outer.addWidget(self.run_sim_btn)
+        control_outer.addWidget(self.btn_push_workspace)
+        control_outer.addWidget(self.btn_save_disk)
         
         scroll_area = QScrollArea()
         scroll_area.setWidget(control_panel)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumWidth(350) 
+        scroll_area.setMinimumWidth(350)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         self.main_splitter.addWidget(scroll_area)
 
         # --- MIDDLE PANEL: SCHEMATIC VIEWER ---
@@ -724,11 +764,23 @@ class ARPESPanel(QWidget):
         self.vmax_spin = QDoubleSpinBox(); self.vmax_spin.setRange(0.0, 1.0); self.vmax_spin.setValue(1.0); self.vmax_spin.setSingleStep(0.05)
         self.gamma_spin = QDoubleSpinBox(); self.gamma_spin.setRange(0.1, 5.0); self.gamma_spin.setValue(1.0); self.gamma_spin.setSingleStep(0.1)
         
-        # --- NEW: BZ OVERLAY TOGGLE ---
+        # Display axes: BZ overlay is k-space only — gated behind Momentum mode.
+        self.combo_display_axes = QComboBox()
+        self.combo_display_axes.addItem("Angle (deg)", "angle")
+        self.combo_display_axes.addItem("Momentum (Å⁻¹)", "momentum")
+        self.combo_display_axes.setToolTip(
+            "Simulation grid is emission angle. Momentum remaps axes with "
+            "k∥ = 0.512√E_kin · sin(θ) (same convention as Chinook/Grizzly)."
+        )
+        self.combo_display_axes.currentIndexChanged.connect(self._on_display_axes_changed)
+
         self.chk_overlay_bz = QCheckBox("Overlay Surface BZ")
         self.chk_overlay_bz.setStyleSheet("font-weight: bold; color: #0F6A8B;")
+        self.chk_overlay_bz.setToolTip(
+            "Projected surface BZ in Å⁻¹. Only available when Display = Momentum."
+        )
+        self.chk_overlay_bz.setEnabled(False)
         self.chk_overlay_bz.stateChanged.connect(lambda: self.update_plot_slice())
-        # ------------------------------
 
         contrast_layout.addWidget(QLabel("Min:"))
         contrast_layout.addWidget(self.vmin_spin)
@@ -736,7 +788,9 @@ class ARPESPanel(QWidget):
         contrast_layout.addWidget(self.vmax_spin)
         contrast_layout.addWidget(QLabel("γ (Gamma):"))
         contrast_layout.addWidget(self.gamma_spin)
-        contrast_layout.addWidget(self.chk_overlay_bz) # <-- Added here
+        contrast_layout.addWidget(QLabel("Display:"))
+        contrast_layout.addWidget(self.combo_display_axes)
+        contrast_layout.addWidget(self.chk_overlay_bz)
         plot_layout.addLayout(contrast_layout)
 
         
@@ -790,26 +844,6 @@ class ARPESPanel(QWidget):
         self.main_splitter.setSizes([350, 400, 400])
         
         self.update_schematic()
-
-        # Run Button
-        self.run_sim_btn = QPushButton("🚀 Run ARPES Simulation")
-        self.run_sim_btn.setStyleSheet("font-weight: bold; padding: 10px; background-color: #2b5c8f; color: white;")
-        self.run_sim_btn.clicked.connect(self.trigger_simulation)
-        control_layout.addWidget(self.run_sim_btn)
-        
-        # --- NEW: Save & Push Buttons ---
-        self.btn_push_workspace = QPushButton("📊 Push to Workspace")
-        self.btn_push_workspace.setStyleSheet("font-weight: bold; padding: 10px; background-color: #E67E22; color: white;")
-        self.btn_push_workspace.setEnabled(False)
-        self.btn_push_workspace.clicked.connect(self.push_arpes_to_workspace)
-        
-        self.btn_save_disk = QPushButton("💾 Save to Disk (.npz)")
-        self.btn_save_disk.setStyleSheet("font-weight: bold; padding: 10px; background-color: #D35400; color: white;")
-        self.btn_save_disk.setEnabled(False)
-        self.btn_save_disk.clicked.connect(self.save_arpes_to_disk)
-        
-        control_layout.addWidget(self.btn_push_workspace)
-        control_layout.addWidget(self.btn_save_disk)
 
     def _hv_scan_allowed(self) -> bool:
         # B1 Chinook TB; B2 bare still uses chinook_wrapper path in panel — allow only
@@ -1571,6 +1605,8 @@ cd {remote_dir}
             'res_E': self.ui_res_e_spinbox.value(),
             'res_k': self.ui_res_k_spinbox.value(),
             'slit_angle': self.slit_angle_spin.value(),
+            'me_engine': self.combo_remote_me.currentData(),
+            'me_device': self.combo_remote_device.currentData(),
             **self._critic_gap_physics_kwargs(),
         }
         
@@ -1708,6 +1744,35 @@ cd {remote_dir}
         self.energy_slider.blockSignals(False)
         self.update_plot_slice(nearest_idx)
 
+    def _display_is_momentum(self) -> bool:
+        combo = getattr(self, "combo_display_axes", None)
+        return combo is not None and combo.currentData() == "momentum"
+
+    def _on_display_axes_changed(self, *_args):
+        """Angle mode cannot host a k-space BZ overlay — disable + clear it."""
+        is_mom = self._display_is_momentum()
+        self.chk_overlay_bz.setEnabled(is_mom)
+        if not is_mom and self.chk_overlay_bz.isChecked():
+            self.chk_overlay_bz.blockSignals(True)
+            self.chk_overlay_bz.setChecked(False)
+            self.chk_overlay_bz.blockSignals(False)
+        if hasattr(self, "sim_intensity"):
+            self.update_plot_slice()
+
+    def _plot_axis_arrays(self):
+        """Detector θ/φ arrays, optionally remapped to k∥ (Å⁻¹) for display."""
+        th = np.asarray(self.sim_kx, dtype=float)
+        ph = np.asarray(self.sim_ky, dtype=float)
+        if not self._display_is_momentum():
+            return th, ph, True
+        # Match chinook_arpes_kmesh: K_SLIT/DEFL = 0.512√E_kin · sin(angle)
+        e_kin = max(
+            float(self.photon_energy_spin.value()) - float(self.work_function_spin.value()),
+            0.1,
+        )
+        k_r = 0.512316 * np.sqrt(e_kin)
+        return k_r * np.sin(np.radians(th)), k_r * np.sin(np.radians(ph)), False
+
     def update_plot_slice(self, index=None):
         if not hasattr(self, 'sim_intensity'):
             return
@@ -1718,7 +1783,7 @@ cd {remote_dir}
         nx, ny, ne = intensity.shape
         self.ax.clear()
 
-        use_angles = getattr(self, 'sim_axes_are_angles', True)
+        x_axis, y_axis, use_angles = self._plot_axis_arrays()
         x_lab = r"$\Theta$ (slit) [deg]" if use_angles else r"$k_x$ ($\mathrm{\AA}^{-1}$)"
         y_lab = r"$\Phi$ (deflect) [deg]" if use_angles else r"$k_y$ ($\mathrm{\AA}^{-1}$)"
 
@@ -1726,24 +1791,24 @@ cd {remote_dir}
         deg_y = ny == 1 or self._axis_degenerate(self.sim_ky)
         deg_x = nx == 1 or self._axis_degenerate(self.sim_kx)
 
-        # --- ROUTE 1: PLOT BAND DISPERSION (E vs angle) ---
+        # --- ROUTE 1: PLOT BAND DISPERSION (E vs angle/k) ---
         if deg_y or deg_x:
             self.energy_label.setText("Band Dispersion Map")
             
             if deg_y:
                 slice_2d = intensity[:, 0, :].T
-                x_axis = self.sim_kx
+                x_plot = x_axis
                 x_label = x_lab
             else:
                 slice_2d = intensity[0, :, :].T
-                x_axis = self.sim_ky
+                x_plot = y_axis
                 x_label = y_lab
                 
             slice_max = np.max(slice_2d) if np.max(slice_2d) > 0 else 1.0
             norm_slice = slice_2d / slice_max
             gamma_corrected = np.power(norm_slice, self.gamma_spin.value())
             
-            self.ax.pcolormesh(x_axis, self.sim_E_axis, gamma_corrected, shading='auto', cmap='afmhot', 
+            self.ax.pcolormesh(x_plot, self.sim_E_axis, gamma_corrected, shading='auto', cmap='afmhot', 
                                vmin=self.vmin_spin.value(), vmax=self.vmax_spin.value())
             
             self.ax.set_aspect('auto')
@@ -1764,11 +1829,11 @@ cd {remote_dir}
             norm_slice = slice_2d / slice_max
             gamma_corrected = np.power(norm_slice, self.gamma_spin.value())
             
-            self.ax.pcolormesh(self.sim_kx, self.sim_ky, gamma_corrected, shading='auto', cmap='afmhot', 
+            self.ax.pcolormesh(x_axis, y_axis, gamma_corrected, shading='auto', cmap='afmhot', 
                                vmin=self.vmin_spin.value(), vmax=self.vmax_spin.value())
 
-            span_x = float(np.ptp(self.sim_kx))
-            span_y = float(np.ptp(self.sim_ky))
+            span_x = float(np.ptp(x_axis))
+            span_y = float(np.ptp(y_axis))
             if span_x > 1e-9 and span_y > 1e-9 and 0.05 < (span_y / span_x) < 20:
                 self.ax.set_aspect('equal')
             else:
@@ -1777,7 +1842,12 @@ cd {remote_dir}
             self.ax.set_xlabel(x_lab)
             self.ax.set_ylabel(y_lab)
             
-            if getattr(self, 'chk_overlay_bz', None) and self.chk_overlay_bz.isChecked():
+            # BZ is Å⁻¹ — never draw on angle axes
+            if (
+                self._display_is_momentum()
+                and getattr(self, 'chk_overlay_bz', None)
+                and self.chk_overlay_bz.isChecked()
+            ):
                 self._draw_bz_overlay()
             
         self.figure.subplots_adjust(left=0.15, right=0.9, top=0.9, bottom=0.15)
@@ -2263,13 +2333,22 @@ cd {remote_dir}
             self.vault_group.hide()
             self.sprkkr_group.hide()
             self.matrix_element_combo.show()
+            # ME backend visible for Local + Hybrid (GrizzlyME local on CPU/CUDA).
+            self.remote_tb_opts.show()
+            for w in (
+                self._lbl_remote_layout,
+                self._row_remote_layout_w,
+                self._lbl_remote_gpus,
+                self._row_remote_gpu_w,
+                self._lbl_remote_cores,
+                self.remote_tb_cores_spin,
+            ):
+                w.setVisible(remote)
             if remote:
-                self.remote_tb_opts.show()
                 self.live_log_widget.show()
                 self.btn_fetch_results.setEnabled(True)
                 self.btn_start_live.setEnabled(True)
             else:
-                self.remote_tb_opts.hide()
                 self.live_log_widget.hide()
                 self.btn_fetch_results.setEnabled(False)
                 self.btn_start_live.setEnabled(False)
@@ -2636,7 +2715,10 @@ cd {remote_dir}
             QMessageBox.information(self, "Deleted", f"Vault '{vault_name}' has been deleted!")
     
     def _draw_bz_overlay(self):
-        """Fetches the 3D Brillouin Zone, projects it to the hkl surface, and rotates it onto the (kx, ky) plot axes."""
+        """Project surface BZ onto momentum (Å⁻¹) axes. No-op in angle display."""
+        if not self._display_is_momentum():
+            return
+
         target_crystal = self.ws_combo.currentText()
         band_data = global_workspace.pull_band_structure(target_crystal)
         
@@ -2654,9 +2736,11 @@ cd {remote_dir}
         bz_data = CrystalEngine.calculate_brillouin_zone(structure)
         if not bz_data: return
         
-        # 2. Recreate the exact hkl -> Sample Frame rotation matrix used by Chinook
+        # 2. Same hkl → sample frame as chinook_arpes_kmesh.build_k_bulk_mesh
         hkl = (self.spin_h.value(), self.spin_k.value(), self.spin_l.value())
-        Z_surf, Y_surf = CrystalEngine.get_hkl_surface_frame(hkl, recip_matrix, azimuthal_ref=None)
+        Z_surf, Y_surf = CrystalEngine.get_hkl_surface_frame(
+            hkl, recip_matrix, azimuthal_ref=np.array([0.0, 1.0, 0.0])
+        )
         X_surf = np.cross(Y_surf, Z_surf)
         
         # R_bulk_to_hkl projects 3D Bulk vectors into the (kx, ky, kz) sample frame

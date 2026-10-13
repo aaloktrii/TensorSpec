@@ -205,9 +205,9 @@ class TightBindingPanel(QWidget):
         self.spin_qe_fermi.setValue(0.0)
         self.spin_qe_fermi.setSingleStep(0.1)
         self.spin_qe_fermi.setToolTip(
-            "QE Fermi energy (eV). Auto-filled from nscf.out / scf.out / "
-            "FERMI_ENERGY.txt beside hr.dat. Folded into H at Prepare; "
-            "not the same as On-site E."
+            "Fermi for W90 bands (eV). Auto: nscf/scf/FERMI_ENERGY.txt, or "
+            "W90 midgap at a near-touch (Dirac) when that sits off QE EF. "
+            "Folded into H at Prepare; not the same as On-site E."
         )
         self.lbl_qe_fermi_src = QLabel("QE EF source: none — enter if known")
         self.lbl_qe_fermi_src.setStyleSheet("color: gray; font-size: 10px;")
@@ -367,7 +367,7 @@ class TightBindingPanel(QWidget):
         fname, _ = QFileDialog.getOpenFileName(self, 'Open Wannier90 HR File', '', "Data files (*.dat);;All files (*.*)")
         if fname:
             import os
-            from tensorspec.core.dft.qe_fermi import detect_qe_fermi_eV
+            from tensorspec.core.dft.qe_fermi import detect_plot_fermi_eV
 
             work_dir = os.path.dirname(fname)
             wout = os.path.join(work_dir, "wannier90.wout")
@@ -383,7 +383,8 @@ class TightBindingPanel(QWidget):
             filename_short = fname.split('/')[-1]
             self.lbl_w90_status.setText(f"Status: Using {filename_short}")
             self.lbl_w90_status.setStyleSheet("color: blue; font-weight: bold;")
-            ef, src = detect_qe_fermi_eV(work_dir)
+            # Prefer W90 midgap@K when QE EF sits off a Dirac/semimetal touch.
+            ef, src = detect_plot_fermi_eV(work_dir)
             self._set_qe_fermi_ui(ef, src)
             self._qe_fermi_auto = False
             self._sync_tb_target()

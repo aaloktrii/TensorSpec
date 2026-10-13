@@ -4,7 +4,8 @@ import numpy as np
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                                QPushButton, QGroupBox, QComboBox, QMessageBox, 
-                               QInputDialog, QSplitter, QScrollArea, QFileDialog, QLabel, QTextEdit)
+                               QInputDialog, QSplitter, QScrollArea, QFileDialog, QLabel, QTextEdit,
+                               QTabWidget, QStackedWidget, QFrame)
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
@@ -15,7 +16,6 @@ from tensorspec.core.workspace import global_workspace
 # Import the isolated UI components
 from tensorspec.gui.components.dft_panels import TightBindingPanel
 from tensorspec.gui.components.qe_generator_panel import QEGeneratorPanel
-from PySide6.QtWidgets import QStackedWidget
 from tensorspec.gui.components.sprkkr_panels import SPRKKRDftPanel
 from tensorspec.core.dft.tb_remote_client import (
     TBCancelled,
@@ -184,64 +184,84 @@ class DFTSuite(QWidget):
 
     def _setup_ui(self):
         main_layout = QVBoxLayout(self)
-        
-        # --- Left Panel: Controls ---
-        control_panel = QWidget()
-        control_layout = QVBoxLayout(control_panel)
-        # (setFixedWidth removed to allow the QSplitter to resize horizontally)
-        
-        # 1. Workspace Integration Panel
+
+        # --- Left: tabbed controls (no mile-long scroll of everything at once) ---
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.left_tabs = QTabWidget()
+
+        # Tab 1 — Structure + engine pick
+        tab_struct = QWidget()
+        struct_layout = QVBoxLayout(tab_struct)
         ws_group = QGroupBox("Crystal Structure (Workspace)")
         ws_layout = QVBoxLayout(ws_group)
-        
         row1 = QHBoxLayout()
         self.ws_combo = QComboBox()
         self.ws_combo.addItem("No structures available")
         self.btn_ws_refresh = QPushButton("🔄 Refresh")
         row1.addWidget(self.ws_combo)
         row1.addWidget(self.btn_ws_refresh)
-        
         self.btn_ws_load = QPushButton("📥 Load Basis into Engine")
         ws_layout.addLayout(row1)
         ws_layout.addWidget(self.btn_ws_load)
-        control_layout.addWidget(ws_group)
+        struct_layout.addWidget(ws_group)
 
-        # 2. Modular QE Generator Panel
-        # --- Compute Engine Selector ---
         engine_group = QGroupBox("First Principles Engine")
         engine_layout = QVBoxLayout(engine_group)
         self.engine_combo = QComboBox()
-        self.engine_combo.addItems(["Quantum Espresso (Pseudopotential)", "SPRKKR (All-Electron KKR)"])
+        self.engine_combo.addItems(
+            ["Quantum Espresso (Pseudopotential)", "SPRKKR (All-Electron KKR)"]
+        )
         engine_layout.addWidget(self.engine_combo)
-        control_layout.addWidget(engine_group)
-        
+        struct_layout.addWidget(engine_group)
+        struct_layout.addStretch()
+        self.left_tabs.addTab(tab_struct, "Structure")
+
+        # Tab 2 — QE / SPRKKR inputs (each panel scrolls inside its own tab)
+        tab_dft = QWidget()
+        dft_layout = QVBoxLayout(tab_dft)
+        dft_layout.setContentsMargins(0, 0, 0, 0)
         self.engine_stack = QStackedWidget()
-        
-        # Panel 0: QE
         self.qe_panel = QEGeneratorPanel(self.engine)
         self.engine_stack.addWidget(self.qe_panel)
-        
-        # Panel 1: SPRKKR
         self.sprkkr_panel = SPRKKRDftPanel(self.engine)
         self.engine_stack.addWidget(self.sprkkr_panel)
-        
-        control_layout.addWidget(self.engine_stack)
-        
+        dft_inner = QWidget()
+        dft_inner_layout = QVBoxLayout(dft_inner)
+        dft_inner_layout.setContentsMargins(0, 0, 0, 0)
+        dft_inner_layout.addWidget(self.engine_stack)
+        dft_scroll = QScrollArea()
+        dft_scroll.setWidget(dft_inner)
+        dft_scroll.setWidgetResizable(True)
+        dft_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        dft_layout.addWidget(dft_scroll)
+        self.left_tabs.addTab(tab_dft, "DFT / Wannier")
+
         self.engine_combo.currentIndexChanged.connect(self.engine_stack.setCurrentIndex)
         self.engine_combo.currentIndexChanged.connect(self.on_engine_changed)
-        
-        # 3. Modular Tight Binding Panel
+
+        # Tab 3 — Tight binding + band actions
+        tab_tb = QWidget()
+        tb_layout = QVBoxLayout(tab_tb)
+        tb_layout.setContentsMargins(0, 0, 0, 0)
         self.tb_panel = TightBindingPanel()
-        control_layout.addWidget(self.tb_panel)
-        
-        # Action Buttons
+        tb_scroll = QScrollArea()
+        tb_scroll.setWidget(self.tb_panel)
+        tb_scroll.setWidgetResizable(True)
+        tb_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        tb_layout.addWidget(tb_scroll)
+
         self.btn_calculate = QPushButton("⚙️ Calculate Band Structure")
-        self.btn_calculate.setStyleSheet("background-color: #2b5c8f; color: white; font-weight: bold; padding: 8px;")
-
+        self.btn_calculate.setStyleSheet(
+            "background-color: #2b5c8f; color: white; font-weight: bold; padding: 8px;"
+        )
         self.btn_cancel_bands = QPushButton("🛑 Cancel Run")
-        self.btn_cancel_bands.setStyleSheet("background-color: #c0392b; color: white; font-weight: bold; padding: 8px;")
+        self.btn_cancel_bands.setStyleSheet(
+            "background-color: #c0392b; color: white; font-weight: bold; padding: 8px;"
+        )
         self.btn_cancel_bands.setEnabled(False)
-
         self.btn_prepare_arpes = QPushButton("🚀 Prepare TB for ARPES")
         self.btn_prepare_arpes.setStyleSheet(
             "background-color: #e67e22; color: white; font-weight: bold; padding: 8px;"
@@ -251,84 +271,81 @@ class DFTSuite(QWidget):
             "Push to Workspace — skips full band-path diagonalization. "
             "Use for large / third-party hr.dat before ARPES."
         )
-        
         self.btn_push_bands = QPushButton("📤 Push Bands to Workspace")
-        self.btn_push_bands.setStyleSheet("background-color: #5cb85c; color: white; font-weight: bold; padding: 8px;")
-        self.btn_push_bands.setEnabled(False) # Disabled until calculation is done
-        
-        # --- NEW: Ab-Initio Plotter Button ---
+        self.btn_push_bands.setStyleSheet(
+            "background-color: #5cb85c; color: white; font-weight: bold; padding: 8px;"
+        )
+        self.btn_push_bands.setEnabled(False)
         self.btn_load_qe_bands = QPushButton("📊 Load QE Ab-Initio Bands (XML)")
-        self.btn_load_qe_bands.setStyleSheet("background-color: #9C27B0; color: white; font-weight: bold; padding: 8px;")
-        
-        control_layout.addWidget(self.btn_calculate)
-        control_layout.addWidget(self.btn_prepare_arpes)
-        control_layout.addWidget(self.btn_cancel_bands)
-        control_layout.addWidget(self.btn_push_bands)
-        control_layout.addWidget(self.btn_load_qe_bands)
-        
-        # Container for the right side (canvas)
+        self.btn_load_qe_bands.setStyleSheet(
+            "background-color: #9C27B0; color: white; font-weight: bold; padding: 8px;"
+        )
+        for btn in (
+            self.btn_calculate,
+            self.btn_prepare_arpes,
+            self.btn_cancel_bands,
+            self.btn_push_bands,
+            self.btn_load_qe_bands,
+        ):
+            tb_layout.addWidget(btn)
+        self.left_tabs.addTab(tab_tb, "Tight Binding")
+
+        left_layout.addWidget(self.left_tabs)
+
+        # --- Right: band canvas ---
         self.right_container = QWidget()
         self.current_structure_name = "Unknown"
         right_layout = QVBoxLayout(self.right_container)
-        right_layout.setContentsMargins(0,0,0,0)
-        
-        # Placeholder for SPRKKR info
-        self.lbl_sprkkr_info = QLabel("<h3>SPRKKR Band Structures</h3><br>"
-                                      "SPRKKR computes band structures directly via the <b>Bloch Spectral Function (BSF)</b>.<br><br>"
-                                      "1. Run your SPRKKR SCF here.<br>"
-                                      "2. The job is automatically saved to your Workspace Vault.<br>"
-                                      "3. Switch to the <b>ARPES Suite</b>, select the Vault, choose <b>BSF</b> task, and run it to plot!")
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.lbl_sprkkr_info = QLabel(
+            "<h3>SPRKKR Band Structures</h3><br>"
+            "SPRKKR computes band structures directly via the <b>Bloch Spectral Function (BSF)</b>.<br><br>"
+            "1. Run your SPRKKR SCF here.<br>"
+            "2. The job is automatically saved to your Workspace Vault.<br>"
+            "3. Switch to the <b>ARPES Suite</b>, select the Vault, choose <b>BSF</b> task, and run it to plot!"
+        )
         self.lbl_sprkkr_info.setWordWrap(True)
         self.lbl_sprkkr_info.setAlignment(Qt.AlignCenter)
-        self.lbl_sprkkr_info.setStyleSheet("background-color: #1e1e1e; color: #a0a0a0; font-size: 14px; padding: 20px; border-radius: 10px;")
+        self.lbl_sprkkr_info.setStyleSheet(
+            "background-color: #1e1e1e; color: #a0a0a0; font-size: 14px; padding: 20px; border-radius: 10px;"
+        )
         self.lbl_sprkkr_info.hide()
-        
-        # --- Live Log Panel ---
+
         self.live_log_widget = QWidget()
         live_log_layout = QVBoxLayout(self.live_log_widget)
         live_log_layout.setContentsMargins(0, 0, 0, 0)
-        
         self.btn_start_live = QPushButton("📡 Start Embedded Live Monitor")
-        self.btn_start_live.setStyleSheet("background-color: #d35400; color: white; font-weight: bold; padding: 8px;")
+        self.btn_start_live.setStyleSheet(
+            "background-color: #d35400; color: white; font-weight: bold; padding: 8px;"
+        )
         self.btn_start_live.clicked.connect(self.start_embedded_monitor)
-        
         self.txt_live_logs = QTextEdit()
         self.txt_live_logs.setReadOnly(True)
-        self.txt_live_logs.setStyleSheet("background-color: #0c0c0c; color: #00ff00; font-family: monospace; font-size: 12px;")
-        
+        self.txt_live_logs.setStyleSheet(
+            "background-color: #0c0c0c; color: #00ff00; font-family: monospace; font-size: 12px;"
+        )
         live_log_layout.addWidget(self.btn_start_live)
         live_log_layout.addWidget(self.txt_live_logs)
         self.live_log_widget.hide()
-        
-        control_layout.addStretch()
-        
-        # --- Right Panel: Band Structure Canvas ---
+
         self.figure = Figure(figsize=(6, 5))
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111)
-        
         right_layout.addWidget(self.canvas)
         right_layout.addWidget(self.lbl_sprkkr_info)
         right_layout.addWidget(self.live_log_widget)
-        
-        # Wrap the control panel in a scroll area to fix the vertical lock
-        scroll_area = QScrollArea()
-        scroll_area.setWidget(control_panel)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumWidth(320) # Prevents the panel from being crushed completely
 
-        # Create the Draggable Splitter
+        left_panel.setMinimumWidth(340)
         main_splitter = QSplitter(Qt.Horizontal)
         main_splitter.setChildrenCollapsible(False)
-        main_splitter.addWidget(scroll_area) # Add the scroll area instead of the raw panel
+        main_splitter.addWidget(left_panel)
         main_splitter.addWidget(self.right_container)
         main_splitter.setStretchFactor(0, 0)
         main_splitter.setStretchFactor(1, 1)
-        # Set initial width ratio (380px for the left panel, the rest for the canvas)
-        main_splitter.setSizes([380, 520]) 
-        
+        main_splitter.setSizes([400, 600])
         main_layout.addWidget(main_splitter)
-        
+
         self.monitor_thread = None
         self._tb_band_thread = None
         self._tb_local_thread = None
@@ -476,6 +493,12 @@ class DFTSuite(QWidget):
         if self.engine.load_structure_from_workspace(target):
             self.current_structure_name = target
             formula = self.engine.crystal_structure.composition.reduced_formula
+            # Slabs / 2D: default QE k_z = 1 (material-agnostic vacuum heuristic)
+            try:
+                if self.engine.crystal_structure.lattice.c > 10.0:
+                    self.qe_panel.spin_kz.setValue(1)
+            except Exception:
+                pass
             hopping = self.engine.get_default_hopping(formula)
             
             self.active_hopping_keys = list(hopping.keys())
@@ -898,9 +921,9 @@ class DFTSuite(QWidget):
         """Legacy helper — prefer tb_panel.qe_fermi_eV() in UI paths."""
         if not w90_file:
             return 0.0
-        from tensorspec.core.dft.qe_fermi import detect_qe_fermi_eV
+        from tensorspec.core.dft.qe_fermi import detect_plot_fermi_eV
 
-        val, _src = detect_qe_fermi_eV(os.path.dirname(w90_file))
+        val, _src = detect_plot_fermi_eV(os.path.dirname(w90_file))
         return float(val)
 
     def _attach_w90_h_dict_from_cache(self, ctx):
@@ -977,6 +1000,107 @@ class DFTSuite(QWidget):
     def _on_tb_remote_done(self, success, message, result):
         """Back-compat wrapper."""
         self._on_tb_bands_done(success, message, result)
+
+    @staticmethod
+    def _norm_k_label(lab: str) -> str:
+        s = str(lab).replace("$", "").replace("\\", "").strip()
+        if "Gamma" in s or s in ("G", "Γ"):
+            return "G"
+        return s.upper() if len(s) <= 2 else s
+
+    def _overlay_w90_native(
+        self, w90_file, k_dist, node_idx, labels, fermi_energy
+    ) -> bool:
+        """Overlay wannier90_band.dat with per-segment x alignment via labelinfo.
+
+        Global stretch of the full W90 path onto the TB path is wrong whenever
+        HighSymmKpath and wannier90.win kpoint_path differ (common for 2D).
+        """
+        import os
+
+        band_dat_path = w90_file.replace("_hr.dat", "_band.dat")
+        labelinfo_path = w90_file.replace("_hr.dat", "_band.labelinfo.dat")
+        if not os.path.isfile(band_dat_path):
+            print(f"Native band file not found at: {band_dat_path}", flush=True)
+            return False
+
+        # Parse band blocks (one block per Wannier band)
+        blocks = []
+        xs, ys = [], []
+        with open(band_dat_path, "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) == 2:
+                    xs.append(float(parts[0]))
+                    ys.append(float(parts[1]) - float(fermi_energy))
+                elif not parts and xs:
+                    blocks.append((np.asarray(xs), np.asarray(ys)))
+                    xs, ys = [], []
+        if xs:
+            blocks.append((np.asarray(xs), np.asarray(ys)))
+        if not blocks:
+            return False
+
+        # labelinfo: first occurrence of each label → W90 path distance
+        w90_lab_x = {}
+        if os.path.isfile(labelinfo_path):
+            with open(labelinfo_path, "r") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        lab = self._norm_k_label(parts[0])
+                        if lab not in w90_lab_x:
+                            w90_lab_x[lab] = float(parts[2])
+
+        blue_labs = [self._norm_k_label(l) for l in labels]
+        blue_x = [float(k_dist[i]) for i in node_idx]
+
+        # Shared consecutive label pairs for piecewise map
+        pairs = []
+        for a in range(len(blue_labs) - 1):
+            la, lb = blue_labs[a], blue_labs[a + 1]
+            if la in w90_lab_x and lb in w90_lab_x:
+                pairs.append(
+                    (blue_x[a], blue_x[a + 1], w90_lab_x[la], w90_lab_x[lb])
+                )
+
+        label_added = False
+        for wx, wy in blocks:
+            if pairs:
+                mapped_x = np.full_like(wx, np.nan, dtype=float)
+                for bx0, bx1, wx0, wx1 in pairs:
+                    if abs(wx1 - wx0) < 1e-12:
+                        continue
+                    lo, hi = (wx0, wx1) if wx0 <= wx1 else (wx1, wx0)
+                    mask = (wx >= lo - 1e-9) & (wx <= hi + 1e-9)
+                    if not np.any(mask):
+                        continue
+                    t = (wx[mask] - wx0) / (wx1 - wx0)
+                    mapped_x[mask] = bx0 + t * (bx1 - bx0)
+                ok = np.isfinite(mapped_x)
+                if not np.any(ok):
+                    continue
+                order = np.argsort(mapped_x[ok])
+                lbl = "Wannier90 Native" if not label_added else None
+                self.ax.plot(
+                    mapped_x[ok][order],
+                    wy[ok][order],
+                    color="red",
+                    linestyle="--",
+                    linewidth=1.5,
+                    zorder=0,
+                    label=lbl,
+                )
+                label_added = True
+            else:
+                # No shared labels — refuse misleading global stretch
+                print(
+                    "W90 overlay skipped: band.labelinfo labels do not match "
+                    "TB path (would misalign Dirac/K). Blue = TensorSpec FT.",
+                    flush=True,
+                )
+                return False
+        return label_added
 
     def _finalize_and_plot_bands(self, ctx):
         is_2d = ctx["is_2d"]
@@ -1134,41 +1258,12 @@ class DFTSuite(QWidget):
                 for b in range(num_bands):
                     self.ax.plot(k_dist, eigenvalues[:, b], color='blue', linewidth=2)
             
-            # --- NATIVE W90 OVERLAY PARSER ---
+            # --- NATIVE W90 OVERLAY (label-aligned; no global x-stretch) ---
             if not is_2d and w90_file and self.tb_panel.chk_overlay_w90.isChecked():
-                import os
-                band_dat_path = w90_file.replace("_hr.dat", "_band.dat")
-                if os.path.exists(band_dat_path):
-                    w90_x, w90_y = [], []
-                    label_added = False
-                    
-                    with open(band_dat_path, 'r') as f:
-                        for line in f:
-                            parts = line.split()
-                            if len(parts) == 2:
-                                w90_x.append(float(parts[0]))
-                                # Shift W90 energy by the exact same VBM
-                                w90_y.append(float(parts[1]) - fermi_energy)
-                            elif len(parts) == 0 and len(w90_x) > 0:
-                                lbl = "Wannier90 Native" if not label_added else None
-                                # Scale the W90 x-axis to perfectly align with PyMatgen
-                                w90_x_arr = np.array(w90_x)
-                                if w90_x_arr[-1] > 0:
-                                    w90_x_arr = w90_x_arr * (k_dist[-1] / w90_x_arr[-1])
-                                self.ax.plot(w90_x_arr, w90_y, color='red', linestyle='--', linewidth=1.5, zorder=0, label=lbl)
-                                label_added = True
-                                w90_x, w90_y = [], []
-                                
-                    if len(w90_x) > 0:
-                        lbl = "Wannier90 Native" if not label_added else None
-                        w90_x_arr = np.array(w90_x)
-                        if w90_x_arr[-1] > 0:
-                            w90_x_arr = w90_x_arr * (k_dist[-1] / w90_x_arr[-1])
-                        self.ax.plot(w90_x_arr, w90_y, color='red', linestyle='--', linewidth=1.5, zorder=0, label=lbl)
-                        
-                    self.ax.legend(loc='upper right')
-                else:
-                    print(f"Native band file not found at: {band_dat_path}")
+                if self._overlay_w90_native(
+                    w90_file, k_dist, node_idx, labels, fermi_energy
+                ):
+                    self.ax.legend(loc="upper right")
             
             self.ax.axhline(0, color='gray', linestyle='--', linewidth=1, zorder=1)
             self.ax.set_xlim(0, k_dist[-1])

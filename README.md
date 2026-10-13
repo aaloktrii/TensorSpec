@@ -47,7 +47,7 @@ The Workspace Browser ribbon opens independent suites (Crystal, DFT, ARPES, PEEM
 | Suite | Status | Notes |
 |-------|--------|--------|
 | Crystal Viewer | Live | Tabs View (Structure/Camera/Export) · CDW · Stack · BZ; CIF, supercells, twist/Bernevig |
-| DFT | Live | Chinook TB, QE/Wannier helpers, SPR-KKR SCF |
+| DFT | Live | Tabs Structure · DFT/Wannier · Tight Binding; Chinook/W90 TB matches Wannier90 `use_ws_distance` (MDRS / `wsvec.dat`); 2D Auto-Detect keeps one Γ…Γ loop; Push bands → workspace for ARPES |
 | ARPES | Live (sim) | Kinematics + three-step / Chinook B1 / SPR-KKR B3; MAESTRO loaders partial |
 | PEEM | Live | TIF/ZIP load, pair CP/CM·LH/LV, drift, BG, XMCD sum rule |
 | XAS / XMCD | Live | 1D spectra; shared PEEM BG + sum-rule core |
