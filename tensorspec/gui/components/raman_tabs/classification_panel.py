@@ -200,6 +200,12 @@ class ClassificationTab(QtWidgets.QWidget):
         self.btn_hist.clicked.connect(self.show_histograms)
         pl.addWidget(self.btn_hist)
 
+        self.btn_fit2d = QtWidgets.QPushButton("Fit 2D band on all pixels")
+        self.btn_fit2d.setToolTip("Voigt fit of every pixel's 2D band (and G, when covered): "
+                                  "FWHM(2D), asymmetry and I(2D)/I(G) maps used by the "
+                                  "classification. Settings: Analysis ▸ Fit parameters.")
+        self.btn_fit2d.clicked.connect(self.main.start_fitting)
+        pl.addWidget(self.btn_fit2d)
         self.btn_run = QtWidgets.QPushButton("Classify map")
         self.btn_run.setStyleSheet("font-weight:bold; padding:6px;")
         self.btn_run.clicked.connect(self.run_classification)
@@ -327,7 +333,7 @@ class ClassificationTab(QtWidgets.QWidget):
     def show_layermap(self):
         if self.main.mapfile is None or not self.main.fits:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load and fit a Raman map first (2 · Map ▸ Map Explorer).")
+                self, APP_NAME, "Load a Raman map and press 'Fit 2D band on all pixels' first.")
             return
         dlg = getattr(self, "_regions_dlg", None)
         if dlg is not None and dlg.isVisible():
@@ -346,14 +352,14 @@ class ClassificationTab(QtWidgets.QWidget):
     def show_thickness(self):
         if self.main.mapfile is None:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load a Raman map first (2 · Map ▸ Map Explorer).")
+                self, APP_NAME, "Load a Raman map and press 'Fit 2D band on all pixels' first.")
             return
         ThicknessDialog(self.main, self).exec()
 
     def run_classification(self):
         if self.main.fwhm_map is None:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load a Raman map first (2 · Map ▸ Map Explorer).")
+                self, APP_NAME, "Load a Raman map and press 'Fit 2D band on all pixels' first.")
             return
         self._pull_config()
         cfg = self.main.cfg
@@ -475,7 +481,7 @@ class ClassificationTab(QtWidgets.QWidget):
         """
         if self.main.fwhm_map is None:
             QtWidgets.QMessageBox.information(
-                self, APP_NAME, "Load and fit a map first (2 · Map ▸ Map Explorer).")
+                self, APP_NAME, "Load a Raman map and press 'Fit 2D band on all pixels' first.")
             return
         self._pull_config()
         cfg = self.main.cfg

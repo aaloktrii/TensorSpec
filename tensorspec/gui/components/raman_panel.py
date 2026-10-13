@@ -18,6 +18,7 @@ from PySide6 import QtCore, QtWidgets
 from tensorspec.core.io.raman_loaders import MapFile, is_single_spectrum, parse_map_file, read_spot_folder
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.core.raman.map_geometry import auto_align, describe_transform
+from tensorspec.core.raman.presets import PRESETS
 from tensorspec.core.raman.voigt_2d import HAVE_LMFIT
 from tensorspec.gui.components.raman_tabs.area_panel import AreaTab
 from tensorspec.gui.components.raman_tabs.classification_panel import ClassificationTab
@@ -62,6 +63,7 @@ class RamanPanel(QtWidgets.QWidget):
         super().__init__(parent)
         self.service = service or RamanService()
         self.worker: Optional[FitWorker] = None
+        self.preset_windows = {}           # extra Band-integral windows from a material preset
 
         # The tabs refer to each other while building, so create them all first.
         self.tab_map = MapExplorerTab(self)
@@ -130,6 +132,9 @@ class RamanPanel(QtWidgets.QWidget):
         a = self.menuBar().addMenu("&Analysis")
         self._add_action(a, "Fit parameters…", self.edit_fit_params)
         self._add_action(a, "Re-fit all spectra", self.start_fitting)
+        a.addSeparator()
+        for name in PRESETS:
+            self._add_action(a, "%s preset" % name, lambda n=name: self.apply_preset(n))
 
         h = self.menuBar().addMenu("&Help")
         self._add_action(h, "About", self.about)
@@ -223,8 +228,10 @@ class RamanPanel(QtWidgets.QWidget):
             bits.append("X/Y taken from the #AxisType headers (column 1 is X)")
         if res:
             bits.append("narrow-peak cutoff set to %.1f cm⁻¹ from the header" % res)
+        bits.append("nothing fitted — fit in 1 · Spectra, 2 · Map ▸ Area spectrum, or "
+                    "3 · Analysis ▸ Classification ▸ Fit 2D band")
         self.status("; ".join(bits))
-        self.start_fitting()
+        self.tab_map.refresh_map()
 
     def load_optical(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -296,6 +303,20 @@ class RamanPanel(QtWidgets.QWidget):
                         "%.1f cm⁻¹. Click a pixel to inspect it."
                         % (ok, mf.n_points, mf.n_points - ok, med))
 
+    # -- material presets ----------------------------------------------------
+    def apply_preset(self, name: str):
+        """Fill one material's settings (core/raman/presets.py): step-1 bands and Si calibration,
+        Band-integral windows, stacked-figure windows and labels. Nothing is fitted."""
+        p = PRESETS[name]
+        self.tab_fit.set_bands(p["bands"], p["si_calibrate"])
+        self.preset_windows = dict(p.get("windows", {}))
+        self.tab_stack.ed_win.setText(p.get("stack_windows", ""))
+        self.tab_stack.ed_bands.setText(p.get("stack_labels", ""))
+        if self.tab_map.cmb_quantity.currentText() == "Band integral":
+            self.tab_map._fill_bands()
+        self.status("%s preset applied: bands %s, Si calibration %s. Nothing fitted yet."
+                    % (name, ", ".join(b[0] for b in p["bands"]), "on" if p["si_calibrate"] else "off"))
+
     # -- map area ----------------------------------------------------------
     def set_area(self, rect):
         """Sum the spectra inside ``rect`` on the map and fit them with the step-1 model."""
@@ -306,8 +327,8 @@ class RamanPanel(QtWidgets.QWidget):
             self.status("No measured pixel inside that rectangle.")
             return
         self.tab_map.show_area()
-        self.tab_area.fit()
-        self.status("Area: %d pixels summed and fitted — see 2 · Map ▸ Area spectrum." % n)
+        self.tab_area.show_area()
+        self.status("Area: %d pixels summed — fit it in 2 · Map ▸ Area spectrum." % n)
 
     def rebuild_maps(self) -> int:
         return self.service.rebuild_maps()
@@ -460,8 +481,9 @@ class RamanPanel(QtWidgets.QWidget):
                         engine=cmb_engine.currentText(),
                         free_gamma=chk_g.isChecked(),
                         parallel=chk_p.isChecked())
-        if self.mapfile is not None:
-            self.start_fitting()
+        if self.mapfile is not None and self.fits:
+            self.status("Fit parameters changed — press 'Fit 2D band on all pixels' "
+                        "(3 · Analysis ▸ Classification) to apply them.")
 
     def save_config(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(

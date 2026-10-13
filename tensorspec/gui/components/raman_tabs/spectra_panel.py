@@ -148,7 +148,7 @@ class SpectraTab(QtWidgets.QWidget):
         self.btn_fit.clicked.connect(self.fit_all)
         r2.addWidget(self.btn_fit)
         self.chk_auto = QtWidgets.QCheckBox("Refit on change")
-        self.chk_auto.setChecked(True)
+        self.chk_auto.setChecked(False)
         r2.addWidget(self.chk_auto)
         r2.addStretch(1)
         right.addLayout(r2)
