@@ -7,7 +7,7 @@ Tab 6); the button there now opens this tab. Figures are drawn by
 plotting/backends/raman_views/peak_fit.py."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from PySide6 import QtCore, QtWidgets
 
@@ -30,7 +30,6 @@ class StrainDopingTab(QtWidgets.QWidget):
     def __init__(self, main: "RamanPanel"):
         super().__init__()
         self.main = main
-        self.rows: Optional[List[dict]] = None
         root = QtWidgets.QHBoxLayout(self)
         form = QtWidgets.QFormLayout()
         self.eds = {}
@@ -60,8 +59,8 @@ class StrainDopingTab(QtWidgets.QWidget):
             return None
 
     def analyse(self):
-        items = self.main.tab_fit.items
-        if not items:
+        svc = self.main.service
+        if not svc.spectra:
             QtWidgets.QMessageBox.information(self, APP_NAME, "Add spectra in "
                                               "1 · Spectra ▸ Peak fitting first.")
             return
@@ -70,27 +69,25 @@ class StrainDopingTab(QtWidgets.QWidget):
             QtWidgets.QMessageBox.information(self, APP_NAME, "Build or load a 1L/2L "
                                               "reference in 3 · Analysis ▸ Layer prediction first.")
             return
-        prog = QtWidgets.QProgressDialog("Analysing…", "Cancel", 0, len(items), self)
+        prog = QtWidgets.QProgressDialog("Analysing…", "Cancel", 0, len(svc.spectra), self)
         prog.setWindowModality(QtCore.Qt.WindowModal)
 
         def tick(k, n):
             prog.setValue(k)
             QtWidgets.QApplication.processEvents()
             return not prog.wasCanceled()
-        rows = self.main.engine.strain_doping_many([(it["wn"], it["y"]) for it in items],
-                                                   ref, progress=tick)
-        prog.setValue(len(items))
+        rows = svc.strain_doping(ref, progress=tick)
+        prog.setValue(len(svc.spectra))
         if rows is None:
             return
-        self.rows = rows
         self.redraw()
 
     def redraw(self):
         p = self.params()
-        if p is None or self.rows is None:
+        rows = self.main.service.strain_rows
+        if p is None or rows is None:
             return
         self.cv.figure.clear()
-        views.draw_correlation_figure(self.cv.figure, self.rows, p)
+        views.draw_correlation_figure(self.cv.figure, rows, p)
         self.cv.draw()
-        if self.main.tab_fit._from_map():
-            self.main.service.write_strain_doping(self.rows, p)
+        self.main.service.strain_doping_params(p)

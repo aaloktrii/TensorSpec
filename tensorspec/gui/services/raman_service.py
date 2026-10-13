@@ -1,7 +1,14 @@
-"""Raman suite service (no Qt): holds the loaded map, the fits and the analysis config that the
-Raman tabs share, routes analysis through RamanEngineRouter and keeps the global workspace
-DataTree current (/raw on load, /analysis/raman_* after each step; /history is appended by
-DataTreeBuilder).
+"""Raman suite service (no Qt) — the backend API of the Raman suite.
+
+One RamanService is one working session: it holds all state (step-1 spectra and their fits, the fit
+model, the stacked-figure list, the loaded map, map area and map results, the analysis config) and
+offers one method per user action, routing the science through RamanEngineRouter and keeping the
+global workspace DataTree current (/raw on load, /analysis/raman_* after each step; /history is
+appended by DataTreeBuilder). Long jobs take progress(done, total) -> False to cancel.
+
+Any frontend (the Qt tabs in gui/components/raman_tabs/, a script, a notebook, a web app) drives the
+suite through this class only and draws with plotting/; tests/test_raman_service_headless.py runs the
+whole workflow through it without Qt.
 
 The state and the non-Qt halves of MainWindow's methods (open_raman, _on_fits, rebuild_maps,
 layer_grid, current/set_transform, _coverage_note, save/load_config, suggest_name) moved here from
@@ -17,7 +24,9 @@ import numpy as np
 
 from tensorspec.core.io import raman_loaders
 from tensorspec.core.io.raman_loaders import MapFile
-from tensorspec.core.raman import products, reference
+from tensorspec.core.raman import exports, presets, products, reference
+from tensorspec.core.raman import spectra as spectra_lists
+from tensorspec.core.raman.fit_model import FitModel
 from tensorspec.core.raman.classification import pixel_ratio, ratio_applicable
 from tensorspec.core.raman.constants import default_config
 from tensorspec.core.raman.map_geometry import apply_map_transform, default_transform
@@ -56,10 +65,147 @@ class RamanService:
             "hwhm": None, "area": None, "residual": None}
         self.name: Optional[str] = None                   # workspace key of the loaded map
         self.band_maps = {}                               # key -> (lo, hi, grid, mapfile it is on)
+        # step 1
+        self.spectra: List[dict] = []                     # entries of core/raman/spectra.py
+        self.spectra_fits: Dict[int, dict] = {}           # entry index -> fit_spectrum result
+        self.fit_model = FitModel()                       # the step-1 model every fit uses
+        self.stack: List[dict] = []                       # {"spec": Spectrum, "color", "visible"}
+        self.preset_windows: Dict[str, tuple] = {}        # extra band-integral windows of a preset
+        self.strain_rows: Optional[list] = None
         self._band_written = None                         # band map shown as /analysis data
         self.clear_peak_maps()
         self.clear_area()
 
+    # =========================================================================================
+    # 1 · Spectra
+    # =========================================================================================
+    def set_fit_model(self, model: FitModel):
+        """The fit model of 1 · Spectra; areas and pixel fits of 2 · Map use it too."""
+        self.fit_model = model
+
+    def preset(self, name: str) -> dict:
+        """Apply a material preset (core/raman/presets.py): fit model bands + Si calibration and
+        band-integral windows. Returns the preset, for the frontend to show its other settings."""
+        p = presets.PRESETS[name]
+        self.fit_model = FitModel(bands=p["bands"], background=self.fit_model.background,
+                                  bg_opts=self.fit_model.bg_opts, si_calibrate=p["si_calibrate"],
+                                  centre_tol=self.fit_model.centre_tol)
+        self.preset_windows = dict(p.get("windows", {}))
+        return p
+
+    def add_spectra(self, entries) -> int:
+        self.spectra.extend(entries)
+        return len(entries)
+
+    def add_spectrum(self, label, wn, y, path, x=np.nan, ypos=np.nan) -> int:
+        return self.add_spectra([spectra_lists.entry(label, wn, y, path, x, ypos)])
+
+    def add_spectra_files(self, paths):
+        """Returns (number added, [(path, error), ...])."""
+        entries, bad = spectra_lists.from_files(paths)
+        return self.add_spectra(entries), bad
+
+    def add_spectra_folder(self, folder) -> int:
+        return self.add_spectra(spectra_lists.from_folder(folder))
+
+    def add_map_spectra(self) -> int:
+        """Every spectrum of the loaded map (0 if none is loaded)."""
+        return self.add_spectra(spectra_lists.from_map(self.mapfile)) if self.mapfile else 0
+
+    def clear_spectra(self):
+        self.spectra, self.spectra_fits = [], {}
+
+    def spectra_are_map(self) -> bool:
+        """True when the step-1 list is exactly the loaded map's spectra."""
+        return spectra_lists.is_whole_map(self.spectra, self.mapfile)
+
+    def fit_spectrum(self, i: int) -> dict:
+        it = self.spectra[i]
+        res = self.engine.fit_spectrum(it["wn"], it["y"], self.fit_model)
+        self.spectra_fits[i] = res
+        return res
+
+    def fit_all_spectra(self, progress=None) -> Optional[str]:
+        """Fit every step-1 spectrum, write <folder>/output/peak_fits.csv (and /analysis/raman_peakfit
+        when the list is the loaded map). Returns the CSV path, or None if cancelled."""
+        n = len(self.spectra)
+        for i in range(n):
+            if progress and progress(i, n) is False:
+                return None
+            self.fit_spectrum(i)
+        if progress:
+            progress(n, n)
+        path = exports.write_peak_fits_csv(
+            os.path.join(exports.output_dir(self.spectra[0]["path"]), "peak_fits.csv"),
+            self.spectra, self.spectra_fits)
+        if self.spectra_are_map():
+            self.write_table("raman_peakfit", exports.peak_fit_rows(self.spectra, self.spectra_fits),
+                             "si_shift", {"background": self.fit_model.background})
+        return path
+
+    def peak_counts(self):
+        """Peak count per band of the step-1 fits, and (x, y) of the spectra when known."""
+        names = [b[0] for b in self.fit_model.bands]
+        return names, *exports.peak_counts(self.spectra, self.spectra_fits, names)
+
+    def strain_doping(self, ref, progress=None):
+        """omega_G - omega_2D correlation rows of the step-1 spectra against the 1L/2L reference
+        (None if cancelled)."""
+        rows = self.engine.strain_doping_many([(e["wn"], e["y"]) for e in self.spectra], ref,
+                                              progress=progress)
+        if rows is not None:
+            self.strain_rows = rows
+        return rows
+
+    def strain_doping_params(self, params: dict):
+        """Grid parameters chosen for the correlation; stored with the map's results."""
+        if self.strain_rows is not None and self.spectra_are_map():
+            self.write_strain_doping(self.strain_rows, params)
+
+    # -- stacked figure ------------------------------------------------------------------------
+    STACK_COLORS = ["#000000", "#e8402a", "#1f5fa8", "#2a8c4a", "#8a5a00",
+                    "#7b3fa0", "#17becf", "#7f7f7f"]
+
+    def stack_add(self, spec):
+        used = {it["color"] for it in self.stack}
+        color = next((c for c in self.STACK_COLORS if c not in used), self.STACK_COLORS[0])
+        self.stack.append({"spec": spec, "color": color, "visible": True})
+
+    def stack_add_paths(self, paths):
+        """Single spectra, or the median of map files / spot folders. Returns ['name: error', ...]."""
+        bad = []
+        for p in paths:
+            try:
+                self.stack_add(spectra_lists.spectrum_from_path(p))
+            except Exception as exc:
+                bad.append("%s: %s" % (os.path.basename(p), exc))
+        return bad
+
+    def stack_add_map_pixel(self, i: int):
+        self.stack_add(spectra_lists.map_pixel(self.mapfile, i))
+
+    def stack_add_map_median(self):
+        self.stack_add(spectra_lists.map_median(self.mapfile))
+
+    def stack_remove(self, rows):
+        for r in sorted(rows, reverse=True):
+            self.stack.pop(r)
+
+    def stack_move(self, r: int, d: int) -> bool:
+        t = r + d
+        if not (0 <= t < len(self.stack)):
+            return False
+        self.stack[r], self.stack[t] = self.stack[t], self.stack[r]
+        return True
+
+    def stack_traces(self):
+        return [{"wn": it["spec"].wn, "inten": it["spec"].inten,
+                 "label": it["spec"].label, "color": it["color"]}
+                for it in self.stack if it["visible"]]
+
+    # =========================================================================================
+    # 2 · Map  (and the state shared with 3 · Analysis)
+    # =========================================================================================
     # -- naming --------------------------------------------------------------------------------
     def suggest_name(self, suffix: str) -> str:
         if not self.mapfile:

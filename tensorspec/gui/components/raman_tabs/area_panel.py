@@ -65,7 +65,7 @@ class AreaTab(QtWidgets.QWidget):
         fig = self.plot.figure
         fig.clear()
         views.draw_spectra_overlay(fig, [{"label": self._label(), "wn": svc.area_axis,
-                                          "y": svc.area_spectrum}], self.main.tab_fit.bands())
+                                          "y": svc.area_spectrum}], svc.fit_model.bands)
         self.tbl_peaks.setRowCount(0)
         x0, x1, y0, y1 = svc.area_rect
         self.lbl.setText("%d pixels, X %.1f–%.1f µm, Y %.1f–%.1f µm; spectra summed. Not fitted:\n"
@@ -82,11 +82,11 @@ class AreaTab(QtWidgets.QWidget):
         if svc.area_spectrum is None:
             self.clear()
             return
-        if not self.main.tab_fit.bands():
+        if not svc.fit_model.bands:
             self.main.status("No bands to fit: define them in 1 · Spectra ▸ Peak fitting "
                              "(or apply a preset).")
             return
-        res = svc.fit_area(self.main.tab_fit.fit_model())
+        res = svc.fit_area(svc.fit_model)
         bands = list(res["bands"].items())
         fig = self.plot.figure
         fig.clear()

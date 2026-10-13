@@ -7,7 +7,6 @@ Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 6 - Peak fitt
 figures through plotting/backends/raman_views/peak_fit.py."""
 from __future__ import annotations
 
-import csv
 import os
 import re
 from typing import TYPE_CHECKING
@@ -16,10 +15,9 @@ from typing import Dict, List
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from tensorspec.core.io.raman_loaders import _SPOT_RE, is_single_spectrum, read_single_spectrum, short_label
 from tensorspec.core.raman.fit_model import FitModel, as_band, band
-from tensorspec.gui.components.raman_tabs.stack_panel import parse_windows
-from tensorspec.gui.components.raman_tabs.layout import _fmt, fill_peak_table
+from tensorspec.core.raman.ranges import parse_windows
+from tensorspec.gui.components.raman_tabs.layout import fill_peak_table
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
 from tensorspec.plotting.backends.raman_views import peak_fit as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
@@ -41,8 +39,6 @@ class PeakFitTab(QtWidgets.QWidget):
     def __init__(self, main: "RamanPanel"):
         super().__init__()
         self.main = main
-        self.items: List[dict] = []      # {label, wn, y, path, x, ypos}
-        self.results: Dict[int, dict] = {}
         self._build()
 
     # -- UI -------------------------------------------------------------------
@@ -154,6 +150,13 @@ class PeakFitTab(QtWidgets.QWidget):
         self.plot = Canvas(figsize=(8, 5))
         self.plot.canvas.mpl_connect("button_press_event", self._plot_clicked)
         root.addWidget(self.plot, 1)
+        # every fit setting goes to the backend as it changes
+        self.chk_si.toggled.connect(self._sync_model)
+        self.cmb_bg.currentIndexChanged.connect(self._sync_model)
+        self.spn_order.valueChanged.connect(self._sync_model)
+        self.ed_lam.editingFinished.connect(self._sync_model)
+        self.ed_p.editingFinished.connect(self._sync_model)
+        self.spn_tol.valueChanged.connect(self._sync_model)
         self._placeholder()
 
     PEAK_CHOICES = ([("Auto: find count", "auto")] +
@@ -216,7 +219,9 @@ class PeakFitTab(QtWidgets.QWidget):
                          % (len(ranges), "" if len(ranges) == 1 else "s"))
 
     def _bands_changed(self, *_):
-        """Re-show the current view so band windows and manual centres stay visible."""
+        """Hand the bands to the backend and re-show the current view, so band windows and manual
+        centres stay visible."""
+        self._sync_model()
         i = self.lst.currentRow()
         if 0 <= i < len(self.items) and i not in self.results:
             self._selected(i)
@@ -285,52 +290,51 @@ class PeakFitTab(QtWidgets.QWidget):
         except ValueError:
             return {"order": self.spn_order.value()}
 
-    # -- spectra --------------------------------------------------------------
+    # -- spectra (held by the service) ----------------------------------------------
+    @property
+    def items(self) -> List[dict]:
+        return self.main.service.spectra
+
+    @property
+    def results(self) -> Dict[int, dict]:
+        return self.main.service.spectra_fits
+
     def _add(self, label, wn, y, path, x=np.nan, ypos=np.nan):
-        self.items.append({"label": label, "wn": np.asarray(wn, float),
-                           "y": np.asarray(y, float), "path": path, "x": x, "ypos": ypos})
+        self.main.service.add_spectrum(label, wn, y, path, x, ypos)
         self.lst.addItem(label)
 
     def add_files(self):
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, "Add spectra", "", "Spectra (*.txt *.dat *.csv *.h5);;All files (*)")
-        for p in paths:
-            try:
-                s = read_single_spectrum(p)
-                self._add(s.label, s.wn, s.inten, p)
-            except Exception as exc:
-                self.main.status("Skipped %s: %s" % (os.path.basename(p), exc))
+        _, bad = self.main.service.add_spectra_files(paths)
+        for p, why in bad:
+            self.main.status("Skipped %s: %s" % (os.path.basename(p), why))
         self._added()
 
     def add_folder(self):
         folder = QtWidgets.QFileDialog.getExistingDirectory(self, "Folder of spectra")
         if not folder:
             return
-        for name in sorted(os.listdir(folder)):
-            p = os.path.join(folder, name)
-            if not name.lower().endswith((".txt", ".dat", ".csv")) or not is_single_spectrum(p):
-                continue
-            s = read_single_spectrum(p)
-            m = _SPOT_RE.search(name)
-            self._add(short_label(p), s.wn, s.inten, p,
-                      float(m.group(1)) if m else np.nan, float(m.group(2)) if m else np.nan)
+        self.main.service.add_spectra_folder(folder)
         self._added()
 
     def use_map(self):
-        mf = self.main.mapfile
-        if mf is None:
+        if self.main.mapfile is None:
             self.main.status("Load a map first.")
             return
-        for i in range(mf.n_points):
-            self._add("spot %d (%.1f, %.1f)" % (i, mf.x[i], mf.y[i]), mf.axis, mf.data[i],
-                      mf.path, float(mf.x[i]), float(mf.y[i]))
+        self.main.service.add_map_spectra()
         self._added()
+
+    def _refresh_list(self):
+        self.lst.blockSignals(True)
+        self.lst.clear()
+        self.lst.addItems([it["label"] for it in self.items])
+        self.lst.setCurrentRow(-1)
+        self.lst.blockSignals(False)
 
     def _added(self):
         """After adding spectra: plot them all; nothing is fitted until a Fit button is pressed."""
-        self.lst.blockSignals(True)
-        self.lst.setCurrentRow(-1)
-        self.lst.blockSignals(False)
+        self._refresh_list()
         self.plot_all()
 
     def plot_all(self):
@@ -346,17 +350,15 @@ class PeakFitTab(QtWidgets.QWidget):
         self.plot.draw()
 
     def clear(self):
-        self.items, self.results = [], {}
+        self.main.service.clear_spectra()
         self.lst.clear()
         self.tbl_peaks.setRowCount(0)
         self._placeholder()
 
     # -- fitting --------------------------------------------------------------
     def fit_item(self, i: int) -> dict:
-        it = self.items[i]
-        res = self.main.engine.fit_spectrum(it["wn"], it["y"], self.fit_model())
-        self.results[i] = res
-        return res
+        self._sync_model()
+        return self.main.service.fit_spectrum(i)
 
     def _selected(self, i: int):
         """Show the chosen spectrum (with its fit, if it has been fitted); fitting is a button."""
@@ -387,65 +389,27 @@ class PeakFitTab(QtWidgets.QWidget):
         if not self.bands():
             self.main.status("No bands to fit: add a band (From/To, peaks) or apply a preset.")
             return
+        self._sync_model()
         prog = QtWidgets.QProgressDialog("Fitting…", "Cancel", 0, len(self.items), self)
         prog.setWindowModality(QtCore.Qt.WindowModal)
-        for i in range(len(self.items)):
-            if prog.wasCanceled():
-                return
-            prog.setValue(i)
-            self.fit_item(i)
+
+        def tick(k, n):
+            prog.setValue(k)
+            QtWidgets.QApplication.processEvents()
+            return not prog.wasCanceled()
+        path = self.main.service.fit_all_spectra(tick)
         prog.setValue(len(self.items))
-        src = self.items[0]["path"].rstrip(os.sep)
-        base = src if os.path.isdir(src) else os.path.dirname(src)
-        out = os.path.join(base, "output")
-        os.makedirs(out, exist_ok=True)
-        path = os.path.join(out, "peak_fits.csv")
-        with open(path, "w", newline="") as fh:
-            w = csv.writer(fh)
-            w.writerow(["spectrum", "x", "y", "si_shift", "band", "n_peaks", "peak",
-                        "centre", "centre_err", "fwhm", "fwhm_err", "height", "height_err",
-                        "area", "area_err", "r2", "note"])
-            for i, it in enumerate(self.items):
-                res = self.results[i]
-                for name, b in res["bands"].items():
-                    rows = b.get("comps") or [None]
-                    for k, c in enumerate(rows):
-                        w.writerow([it["label"], _fmt(it["x"]), _fmt(it["ypos"]),
-                                    _fmt(res["shift"]), name, b.get("n", 0), k + 1 if c else ""]
-                                   + (["%.3f" % c[q] for q in ("pos", "pos_err", "fwhm", "fwhm_err",
-                                                                "height", "height_err", "area",
-                                                                "area_err")] if c else [""] * 8)
-                                   + [_fmt(b.get("r2", np.nan)),
-                                      b.get("why") or b.get("stopped", "")])
+        if path is None:
+            return
         self.draw_summary()
-        if self._from_map():
-            self.main.service.write_table("raman_peakfit", self._result_rows(), "si_shift",
-                                          {"background": self.cmb_bg.currentText()})
         self.main.status("Fitted %d spectra — saved %s" % (len(self.items), path))
 
     def _from_map(self) -> bool:
-        """True when the list holds exactly the spots of the loaded map ('Use loaded map')."""
-        mf = self.main.mapfile
-        return (mf is not None and len(self.items) == mf.n_points
-                and all(it["path"] == mf.path for it in self.items))
+        return self.main.service.spectra_are_map()
 
-    def _result_rows(self) -> List[dict]:
-        """One row per spectrum for /analysis/raman_peakfit: position, FWHM and height of
-        each fitted peak per band."""
-        rows = []
-        for i, it in enumerate(self.items):
-            res = self.results.get(i)
-            if res is None:
-                continue
-            row = {"spectrum": it["label"], "x": it["x"], "y": it["ypos"],
-                   "si_shift": res["shift"]}
-            for name, b in res["bands"].items():
-                row["%s_n_peaks" % name] = b.get("n", 0)
-                for k, c in enumerate(b.get("comps") or []):
-                    for q in ("pos", "fwhm", "height"):
-                        row["%s_%d_%s" % (name, k + 1, q)] = c[q]
-            rows.append(row)
-        return rows
+    def _sync_model(self, *_):
+        """Hand the fit settings of this tab to the backend (used by every fit, here and in 2 · Map)."""
+        self.main.service.set_fit_model(self.fit_model())
 
     # -- drawing --------------------------------------------------------------
     def _placeholder(self):
@@ -475,13 +439,7 @@ class PeakFitTab(QtWidgets.QWidget):
         otherwise a histogram."""
         fig = self.plot.figure
         fig.clear()
-        names = [b[0] for b in self.bands()]
-        has_xy = sum(np.isfinite(it["x"]) for it in self.items) > 3
-        counts = [np.array([self.results[i]["bands"].get(name, {}).get("n", 0)
-                            if self.results[i]["bands"].get(name, {}).get("ok") else 0
-                            for i in range(len(self.items))]) for name in names]
-        xy = ((np.array([it["x"] for it in self.items]),
-               np.array([it["ypos"] for it in self.items])) if has_xy else None)
+        names, counts, xy = self.main.service.peak_counts()
         views.draw_peak_counts(fig, names, counts, xy, self.main.cfg)
         self.plot.draw()
 

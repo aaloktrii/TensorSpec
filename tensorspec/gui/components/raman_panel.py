@@ -94,7 +94,6 @@ class RamanPanel(QtWidgets.QWidget):
         self.service = service or RamanService()
         self.worker: Optional[FitWorker] = None
         self.peak_worker: Optional[PeakMapWorker] = None
-        self.preset_windows = {}           # extra Band-integral windows from a material preset
 
         # The tabs refer to each other while building, so create them all first.
         self.tab_map = MapExplorerTab(self)
@@ -339,9 +338,8 @@ class RamanPanel(QtWidgets.QWidget):
     def apply_preset(self, name: str):
         """Fill one material's settings (core/raman/presets.py): step-1 bands and Si calibration,
         Band-integral windows, stacked-figure windows and labels. Nothing is fitted."""
-        p = PRESETS[name]
-        self.tab_fit.set_bands(p["bands"], p["si_calibrate"])
-        self.preset_windows = dict(p.get("windows", {}))
+        p = self.service.preset(name)
+        self.tab_fit.set_bands(self.service.fit_model.bands, p["si_calibrate"])
         self.tab_stack.ed_win.setText(p.get("stack_windows", ""))
         self.tab_stack.ed_bands.setText(p.get("stack_labels", ""))
         if self.tab_map.cmb_quantity.currentText() == "Band integral":
@@ -368,7 +366,7 @@ class RamanPanel(QtWidgets.QWidget):
         if self.mapfile is None:
             QtWidgets.QMessageBox.information(self, APP_NAME, "Load a map first.")
             return
-        model = self.tab_fit.fit_model()
+        model = self.service.fit_model
         if not model.bands:
             QtWidgets.QMessageBox.information(
                 self, APP_NAME, "Define the bands to fit in 1 · Spectra ▸ Peak fitting "

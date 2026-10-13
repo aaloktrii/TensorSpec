@@ -336,9 +336,10 @@ class MapExplorerTab(QtWidgets.QWidget):
 
     def _window_choices(self):
         """[(name, lo, hi)]: the step-1 fit bands, then any windows of the applied preset."""
-        out = [(name, lo, hi) for name, lo, hi, *_ in self.main.tab_fit.bands()]
+        svc = self.main.service
+        out = [(name, lo, hi) for name, lo, hi, *_ in svc.fit_model.bands]
         names = {n for n, _, _ in out}
-        out += [(n, lo, hi) for n, (lo, hi) in self.main.preset_windows.items() if n not in names]
+        out += [(n, lo, hi) for n, (lo, hi) in svc.preset_windows.items() if n not in names]
         return out
 
     def _fill_bands(self):

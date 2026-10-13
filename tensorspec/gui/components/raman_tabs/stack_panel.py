@@ -5,46 +5,19 @@ Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 4 - Stacked s
 from __future__ import annotations
 
 import os
-import re
 from typing import TYPE_CHECKING
-from typing import List, Tuple
+from typing import List
 
-import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from tensorspec.core.io.raman_loaders import (Spectrum, is_single_spectrum, parse_map_file,
-                                              read_single_spectrum, read_spot_folder, short_label)
+from tensorspec.core.io.raman_loaders import Spectrum
 from tensorspec.core.raman.constants import APP_NAME
+from tensorspec.core.raman.ranges import parse_band_labels, parse_windows
 from tensorspec.plotting.backends.raman_matplotlib_engine import raman_style, stack_figure
 from tensorspec.plotting.viewers.raman_canvas import _EXPORT_DIR
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel
-
-STACK_COLORS = ["#000000", "#e8402a", "#1f5fa8", "#2a8c4a", "#8a5a00",
-                "#7b3fa0", "#17becf", "#7f7f7f"]
-_NUM = r"(\d+(?:\.\d+)?)"
-
-
-def parse_windows(text: str) -> List[Tuple[float, float]]:
-    """'1450-1650, 2550-2800' -> [(1450, 1650), (2550, 2800)]."""
-    out = []
-    for lo, hi in re.findall(_NUM + r"\s*[-–:]\s*" + _NUM, text):
-        lo, hi = float(lo), float(hi)
-        if hi > lo:
-            out.append((lo, hi))
-    return out
-
-
-def parse_band_labels(text: str) -> List[Tuple[str, float]]:
-    """'G 1583, 2D 2690' -> [('G', 1583.0), ('2D', 2690.0)]."""
-    out = []
-    for piece in re.split(r"[,;]", text):
-        m = re.match(r"\s*(.+?)\s*@?\s*" + _NUM + r"\s*$", piece)
-        if m:
-            out.append((m.group(1), float(m.group(2))))
-    return out
-
 
 class StackTab(QtWidgets.QWidget):
     """Stack spectra from files or from the loaded map into one figure and
@@ -53,8 +26,12 @@ class StackTab(QtWidgets.QWidget):
     def __init__(self, main: "RamanPanel"):
         super().__init__()
         self.main = main
-        self.items: List[dict] = []          # {spec, color, visible}
         self._build()
+
+    @property
+    def items(self) -> List[dict]:
+        """The traces of the figure, held by the service: {spec, color, visible}."""
+        return self.main.service.stack
 
     # -- UI -----------------------------------------------------------------
     def _build(self):
@@ -153,32 +130,14 @@ class StackTab(QtWidgets.QWidget):
 
     # -- items ----------------------------------------------------------------
     def add_spectrum(self, spec: Spectrum):
-        used = {it["color"] for it in self.items}
-        color = next((c for c in STACK_COLORS if c not in used), STACK_COLORS[0])
-        self.items.append({"spec": spec, "color": color, "visible": True})
+        self.main.service.stack_add(spec)
         self._rebuild()
         self.redraw()
 
     def add_paths(self, paths: List[str]):
-        bad = []
-        for p in paths:
-            try:
-                if os.path.isdir(p):
-                    mf = read_spot_folder(p)
-                    self.add_spectrum(Spectrum(
-                        mf.axis, np.nanmedian(mf.data, 0),
-                        short_label(p) + " median", p))
-                elif is_single_spectrum(p):
-                    self.add_spectrum(read_single_spectrum(p))
-                else:
-                    mf = parse_map_file(p)
-                    if mf.layout != "spectra":
-                        raise ValueError("not a spectrum")
-                    self.add_spectrum(Spectrum(
-                        mf.axis, np.nanmedian(mf.data, 0),
-                        short_label(p) + " median", p))
-            except Exception as exc:
-                bad.append("%s: %s" % (os.path.basename(p), exc))
+        bad = self.main.service.stack_add_paths(paths)
+        self._rebuild()
+        self.redraw()
         if bad:
             QtWidgets.QMessageBox.warning(self, APP_NAME, "Could not read:\n\n"
                                           + "\n".join(bad))
@@ -196,30 +155,25 @@ class StackTab(QtWidgets.QWidget):
         if mf is None or sel is None or mf.index_map[sel] < 0:
             self.main.status("Click a pixel in the Map Explorer first.")
             return
-        i = int(mf.index_map[sel])
-        name = short_label(mf.path)
-        self.add_spectrum(Spectrum(mf.axis, mf.data[i].astype(float),
-                                   "%s (%.1f, %.1f)" % (name, mf.x[i], mf.y[i]),
-                                   mf.path))
+        self.main.service.stack_add_map_pixel(int(mf.index_map[sel]))
+        self._rebuild()
+        self.redraw()
 
     def add_map_median(self):
-        mf = self.main.mapfile
-        if mf is None:
+        if self.main.mapfile is None:
             self.main.status("Load a map first.")
             return
-        name = short_label(mf.path)
-        self.add_spectrum(Spectrum(mf.axis, np.nanmedian(mf.data, 0),
-                                   "%s median" % name, mf.path))
+        self.main.service.stack_add_map_median()
+        self._rebuild()
+        self.redraw()
 
     def clear(self):
-        self.items = []
+        self.main.service.stack.clear()
         self._rebuild()
         self.redraw()
 
     def _remove(self):
-        rows = sorted({i.row() for i in self.tbl.selectedIndexes()}, reverse=True)
-        for r in rows:
-            self.items.pop(r)
+        self.main.service.stack_remove({i.row() for i in self.tbl.selectedIndexes()})
         self._rebuild()
         self.redraw()
 
@@ -227,11 +181,9 @@ class StackTab(QtWidgets.QWidget):
         rows = sorted({i.row() for i in self.tbl.selectedIndexes()})
         if len(rows) != 1:
             return
-        r, t = rows[0], rows[0] + d
-        if 0 <= t < len(self.items):
-            self.items[r], self.items[t] = self.items[t], self.items[r]
+        if self.main.service.stack_move(rows[0], d):
             self._rebuild()
-            self.tbl.selectRow(t)
+            self.tbl.selectRow(rows[0] + d)
             self.redraw()
 
     def _rebuild(self):
@@ -270,9 +222,7 @@ class StackTab(QtWidgets.QWidget):
 
     # -- figure ---------------------------------------------------------------
     def _figure(self):
-        traces = [{"wn": it["spec"].wn, "inten": it["spec"].inten,
-                   "label": it["spec"].label, "color": it["color"]}
-                  for it in self.items if it["visible"]]
+        traces = self.main.service.stack_traces()
         w = self.spn_w.value() / 2.54
         h = self.spn_h.value() / 2.54 or (2.6 + 1.25 * max(1, len(traces))) / 2.54
         windows = parse_windows(self.ed_win.text())
