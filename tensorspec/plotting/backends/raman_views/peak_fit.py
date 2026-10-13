@@ -69,3 +69,24 @@ def draw_correlation_figure(fig, rows, params):
     """omega_G - omega_2D correlation of strain_doping rows over the Lee et al. grid."""
     ax = fig.add_subplot(111)
     draw_correlation(ax, rows, params)
+
+
+def draw_spectra_overlay(fig, items, bands, max_legend=12):
+    """All loaded spectra on one axes (raw counts), the fit bands shaded and named.
+    ``items``: [{label, wn, y}]; ``bands``: the fit model's (name, lo, hi, ...) rows."""
+    import matplotlib.transforms as mtransforms
+    ax = fig.add_subplot(111)
+    many = len(items) > max_legend
+    for k, it in enumerate(items):
+        ax.plot(it["wn"], it["y"], lw=0.4 if many else 0.8,
+                color="#555" if many else COMP_COLORS[k % len(COMP_COLORS)],
+                alpha=0.35 if many else 1.0, label=None if many else it["label"])
+    trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+    for name, lo, hi, *_ in bands:
+        ax.axvspan(lo, hi, color="#ffd54f", alpha=0.25, lw=0)
+        ax.text(0.5 * (lo + hi), 1.0, name, transform=trans, ha="center", va="bottom", fontsize=8)
+    ax.set_xlabel("Raman shift (cm$^{-1}$)")
+    ax.set_ylabel("Intensity (counts)")
+    ax.set_title("%d spectra — select one to fit it" % len(items), fontsize=9, pad=14)
+    if not many and items:
+        ax.legend(fontsize=7, frameon=False)

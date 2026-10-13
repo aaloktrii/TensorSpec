@@ -111,3 +111,18 @@ def test_reference_build_goes_to_workspace(tmp_path):
     assert os.path.exists(out) and len(data["datasets"]) == 2
     assert reference.preferred_reference(project) == out
     assert open(reference.DEFAULT_REF, "rb").read() == shipped       # shipped default untouched
+
+
+def test_fit_model_matches_band_by_band_fit():
+    from tensorspec.core.raman import tools
+    from tensorspec.core.raman.fit_model import FitModel, fit_spectrum
+    y = graphene(split_g=True)
+    model = FitModel(bands=[("G", 1500.0, 1680.0, "auto", 3), ("2D", 2560.0, 2810.0, 1, 4)],
+                     background="linear", si_calibrate=False)
+    res = fit_spectrum(WN, y, model)
+    nz = tools.noise_level(WN, y)
+    g = tools.analyse_band(WN, y, 1500.0, 1680.0, n="auto", nmax=3, bg="linear",
+                           bg_opts=model.bg_opts, noise=nz)
+    assert res["bands"]["G"]["n"] == g["n"] == 2
+    assert res["bands"]["2D"]["n"] == 1
+    assert FitModel.from_dict(model.to_dict()) == model
