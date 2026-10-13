@@ -392,12 +392,16 @@ class SliceWidget(QFrame):
                 )
             )
             
-            row.addWidget(lbl); row.addWidget(spin); row.addWidget(slider)
-            from tensorspec.gui.components.stack_player import StackPlayer
-            player = StackPlayer(slider)
-            player.label.setVisible(False)  # the spin box already shows the position
-            row.addWidget(player)
+            slider.setMinimumWidth(120)  # stays draggable / visible in a narrow window
+            row.addWidget(lbl); row.addWidget(spin); row.addWidget(slider, 1)
             self.sliders_layout.addLayout(row)
+            if len(ax_arr) > 1:
+                # Play on its own line so it never squeezes the slider; "frame n / N" shows it running
+                from tensorspec.gui.components.stack_player import StackPlayer
+                play_row = QHBoxLayout()
+                play_row.addSpacing(80)
+                play_row.addWidget(StackPlayer(slider), 1)
+                self.sliders_layout.addLayout(play_row)
             self.slider_widgets[i] = slider
             self.spin_widgets[i] = spin
 

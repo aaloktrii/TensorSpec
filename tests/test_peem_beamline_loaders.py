@@ -357,3 +357,30 @@ def test_add_folders_dialog_takes_several_selected_folders(qapp, tmp_path):
     p._exec_dialog = select_two
     chosen = p._pick_folders()
     assert sorted(map(os.path.realpath, chosen)) == sorted(map(os.path.realpath, [str(cl), str(cr)]))
+
+
+def test_remove_selected_items_from_the_load_list(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    cl, cr = uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)
+    lh = uview_acq(tmp_path, "LH", 1000)
+    p = PeemXmcdPanel()
+    p._add_paths([str(cl), str(cr), str(lh)])
+    p._scan_pol[str(cr)] = "CM"
+    p.scan_list.item(1).setSelected(True)  # remove CR only
+    p._remove_selected()
+    assert p._scan_paths == [str(cl), str(lh)] and p.scan_list.count() == 2 and str(cr) not in p._scan_pol
+    assert p.scan_list.item(1).toolTip() == str(lh)  # list rows stay matched to their paths
+    p.show()
+    p.scan_list.setFocus()
+    p.scan_list.clearSelection()
+    p.scan_list.item(0).setSelected(True)
+    QTest.keyClick(p.scan_list, Qt.Key_Delete)  # the Delete key does the same
+    qapp.processEvents()
+    assert p._scan_paths == [str(lh)]
+    errors = []
+    p._err = errors.append
+    p.scan_list.clearSelection()
+    p._remove_selected()
+    assert errors and p._scan_paths == [str(lh)]

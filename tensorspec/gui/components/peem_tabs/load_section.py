@@ -51,6 +51,19 @@ class _DropPaths(QObject):
         return False
 
 
+class _DeleteKey(QObject):
+    """Delete / Backspace on the load list -> callback()."""
+
+    def __init__(self, callback, parent=None):
+        super().__init__(parent)
+        self._callback = callback
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.KeyPress and ev.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+            self._callback()
+            return True
+        return False
+
 
 class LoadSection:
     def _build_load(self, cl):
@@ -83,12 +96,22 @@ class LoadSection:
         b_dirs = QPushButton("Add folders…")
         b_dirs.setToolTip("Pick one acquisition, or a folder that holds several and tick the ones to add")
         b_dirs.clicked.connect(self._add_folders)
-        b_clear = QPushButton("Clear")
+        b_remove = QPushButton("Remove selected")
+        b_remove.setToolTip("Take the selected item(s) off the list (Delete / Backspace key too). "
+                            "Click Load again to load the rest.")
+        b_remove.clicked.connect(self._remove_selected)
+        b_clear = QPushButton("Clear all")
+        b_clear.setToolTip("Empty the list and unload the current data")
         b_clear.clicked.connect(self._clear_scans)
         row.addWidget(b_add)
         row.addWidget(b_dirs)
+        lf.addRow(row)
+        row = QHBoxLayout()
+        row.addWidget(b_remove)
         row.addWidget(b_clear)
         lf.addRow(row)
+        self._delete_key = _DeleteKey(self._remove_selected, self)
+        self.scan_list.installEventFilter(self._delete_key)
         self.btn_load = QPushButton("Load")
         self.btn_load.clicked.connect(self._load)
         lf.addRow(self.btn_load)
@@ -328,6 +351,22 @@ class LoadSection:
 
     def _exec_dialog(self, dlg) -> int:
         return dlg.exec()
+
+    def _remove_selected(self):
+        """Take the selected items off the list; the loaded data stay until Load is clicked again."""
+        rows = sorted({self.scan_list.row(it) for it in self.scan_list.selectedItems()}, reverse=True)
+        if not rows:
+            self._err("Select the item(s) to remove in the list first.")
+            return
+        for r in rows:
+            p = self._scan_paths.pop(r)
+            self._scan_pol.pop(p, None)
+            self._scan_detected.pop(p, None)
+            self.scan_list.takeItem(r)
+            self._log(f"Removed {p}")
+        self._update_load_status()
+        if self._name and self._scan_paths:
+            self.load_status.setText(self.load_status.text() + " The data shown are still the previous load.")
 
     def _clear_scans(self):
         """Clear the file list AND unload the current dataset (frames, drift, stack, maps) and the view."""

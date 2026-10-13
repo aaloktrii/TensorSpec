@@ -93,7 +93,7 @@ def save_map_picture(
     if vmax <= vmin:
         raise ValueError("the colour maximum must be above the minimum")
     figsize = (size_px[0] / dpi, size_px[1] / dpi) if size_px else (6, 5.2)
-    fig = Figure(figsize=figsize, dpi=dpi, layout=None if image_only or not size_px else "constrained")
+    fig = Figure(figsize=figsize, dpi=dpi, layout="none" if image_only or not size_px else "constrained")
     FigureCanvasAgg(fig)
     if image_only:
         ax = fig.add_axes((0, 0, 1, 1))
