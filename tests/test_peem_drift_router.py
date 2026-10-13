@@ -50,3 +50,14 @@ def test_average_by_energy_pairs_separate_sweeps_and_drops_lonely_bins():
     assert len(one) == 2 and pts == [0.0] and cnt == [[3, 3]] and w is None
     with pytest.raises(ValueError, match="no energy has both"):
         average_by_energy(frames[:3], pol[:3], energy[:3], ("CP", "CM"))
+
+
+
+def test_average_by_energy_single_energy_scan():
+    """All frames at one photon energy (a plain XMCD image scan): one CP and one CM image."""
+    from tensorspec.core.peem.engine import average_by_energy
+    frames = np.arange(4, dtype=float)[:, None, None] * np.ones((4, 2, 2))
+    stack, tags, points, counts, width = average_by_energy(frames, ["CP", "CP", "CM", "CM"], np.full(4, 576.6),
+                                                           ("CP", "CM"))
+    assert tags == ["CP", "CM"] and counts == [[2, 2]] and points == pytest.approx([576.6])
+    assert stack[:, 0, 0].tolist() == [0.5, 2.5]

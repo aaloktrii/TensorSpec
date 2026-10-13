@@ -446,6 +446,30 @@ class PeemDriftStackSteps:
         return {"drift_box": ds.attrs["drift_box_source"], "drift_box_y0y1x0x1": list(ds.attrs["drift_box_y0y1x0x1"]),
                 "drift_max_px": round(float(r.max()), 2), "drift_last_frame_px": [round(float(dy[-1]), 2), round(float(dx[-1]), 2)]}
 
+    def stacked_frames(self, name: str, pair: str | None = None, energy_bin_eV: float | None = None):
+        """Drift-corrected frames averaged per polarization (and per photon energy for energy scans):
+        A(E1), B(E1), A(E2), ... -> (stack, pol tags, energies, [n_A, n_B] per energy, bin width,
+        has_energy). pair None = XMCD if circular frames exist, else XLD."""
+        proc = global_workspace.pull_tensor_data(name, "processed")
+        pmd = (proc.metadata or {}) if proc is not None else {}
+        if proc is None or not pmd.get("drift_corrected"):
+            raise ValueError("Run the drift correction first.")
+        pol = [str(t) for t in pmd.get("pol", [])]
+        if pair is None:
+            pair = "xmcd" if {"CP", "CM"} <= set(pol) else "xld"
+        tags = {"xmcd": ("CP", "CM"), "xld": ("LH", "LV")}.get(pair)
+        if tags is None:
+            raise ValueError('pair must be "xmcd" or "xld"')
+        raw = _require_raw(name)
+        frames = np.asarray(proc.value, dtype=np.float32)
+        energy, e_src = resolve_energy(len(raw.value), raw.metadata or {})
+        keep = np.asarray(pmd.get("raw_frame_index", range(len(pol))), dtype=int)
+        energy = np.asarray(energy, float)[keep]  # energies of the frames kept after clean-up
+        has_e = e_src != "index"
+        stack, pol_out, points, counts, width = average_by_energy(frames, pol, energy if has_e else None, tags,
+                                                                 energy_bin_eV)
+        return stack, pol_out, points, counts, width, has_e
+
     def to_peem_stack(self, name: str, pair: str = "xmcd", energy_bin_eV: float | None = None) -> dict[str, Any]:
         """Hand the drift-corrected result of tab 1 to the PEEM-stack tab (background, sum rule).
 
@@ -458,23 +482,10 @@ class PeemDriftStackSteps:
         average_by_energy). The new dataset is already paired (/processed) and separated
         (/processed/<A>, <B>), which is the input the PEEM-stack background and sum-rule steps use.
         """
-        tags = {"xmcd": ("CP", "CM"), "xld": ("LH", "LV")}.get(pair)
-        if tags is None:
-            raise ValueError('pair must be "xmcd" or "xld"')
         raw = _require_raw(name)
-        proc = global_workspace.pull_tensor_data(name, "processed")
-        pmd = (proc.metadata or {}) if proc is not None else {}
-        if proc is None or not pmd.get("drift_corrected"):
-            raise ValueError("Run step 2 (drift correction) in the XMCD-imaging tab first.")
-        frames = np.asarray(proc.value, dtype=np.float32)
-        pol = [str(t) for t in pmd.get("pol", [])]
-        energy, e_src = resolve_energy(len(raw.value), raw.metadata or {})
-        keep = np.asarray(pmd.get("raw_frame_index", range(len(pol))), dtype=int)
-        energy = np.asarray(energy, float)[keep]  # energies of the frames kept after clean-up
-        has_e = e_src != "index"
-        ta, tb = tags
-        stack, pol_out, points, counts, energy_bin_eV = average_by_energy(
-            frames, pol, energy if has_e else None, tags, energy_bin_eV)
+        pmd = global_workspace.pull_tensor_data(name, "processed").metadata or {}
+        stack, pol_out, points, counts, energy_bin_eV, has_e = self.stacked_frames(name, pair, energy_bin_eV)
+        ta, tb = pol_out[:2]
         md = {k: v for k, v in (raw.metadata or {}).items()
               if k in ("format", "beamline", "default_convention", "pol_source", "fov_um", "um_per_px",
                        "temperature_K", "loader", "i0_normalized")}
@@ -482,7 +493,7 @@ class PeemDriftStackSteps:
             "pol": pol_out,
             "frame_names": [f"{t}@{e:.2f}eV" for e in points for t in (ta, tb)],
             "derived_from": name,
-            "derived_by": "XMCD-imaging tab: drift-corrected frames averaged per polarization and energy",
+            "derived_by": "XPEEM map: drift-corrected frames averaged per polarization and energy",
             "drift_method": pmd.get("drift_method_label"),
             "frames_per_point": counts,
             "beamline_table": {"columns": ["energy"], "series": {"energy": points}} if has_e else None,

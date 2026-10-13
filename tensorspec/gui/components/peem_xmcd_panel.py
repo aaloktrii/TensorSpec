@@ -256,7 +256,7 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
 
 
     # ------------------------------------------------------------ view (TensorSpec data viewer)
-    _FRAME_KINDS = ("raw", "cleaned", "processed")
+    _FRAME_KINDS = ("raw", "cleaned", "processed", "stacked")
     _SIGNED = {"pcd", "pld", "pmld", "pmnld", "domain_map"}
 
     def _current_layer(self) -> str:
@@ -289,6 +289,7 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
             srcs.append(("cleaned frames (before drift)", "cleaned"))
         if self.service.get_drift(self._name, "processed") is not None:
             srcs.append(("drift-corrected frames", "processed"))
+            srcs.append(("stacked images (per polarization / energy)", "stacked"))
         cur = self.view_combo.currentData()
         want = select if select in self._FRAME_KINDS else cur
         if want not in [k for _, k in srcs]:

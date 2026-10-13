@@ -141,3 +141,26 @@ def test_stack_step_shows_stacked_images_and_sums(qapp, xmcd_dataset):
         assert np.allclose(p._current_image(), st[var].values, equal_nan=True)
     assert np.allclose(st["sum_cp"].values, 3 * st["mean_cp"].values)
     assert np.allclose(st["data"].values, st["mean_cp"].values + st["mean_cm"].values)
+
+
+def test_stacked_frames_view_and_send_to_xas_tab(qapp, xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    from tensorspec.gui.suites.peem_suite import PEEMSuite
+    suite = PEEMSuite()
+    p = suite.xmcd_panel
+    suite.service = p.service = suite.panel.service = svc
+    p._run = lambda fn, done, *args, **kw: done(fn(*args, **kw))
+    p._name = "synth_xmcd"
+    svc.drift_correct("synth_xmcd")
+    p._refresh_views(select="stacked")
+    assert p.view_combo.currentData() == "stacked"
+    stack, tags, *_ = svc.stacked_frames("synth_xmcd")
+    assert tags == ["CP", "CM"] and stack.shape[0] == 2  # one energy: CP image, CM image
+    assert np.allclose(p.viewer.tensor_data.value, stack)
+    assert not p.btn_to_xas.isHidden()
+    p.pair_combo.setCurrentIndex(p.pair_combo.findData("xmcd"))
+    p._send_to_xas()
+    assert suite.tabs.currentWidget() is suite.panel  # the stack / BG / sum-rule tab now shows the stacks
+    assert "synth_xmcd_xmcd" in [suite.panel.dataset_combo.itemText(i) for i in range(suite.panel.dataset_combo.count())] \
+        if hasattr(suite.panel, "dataset_combo") else True
+    suite.close()

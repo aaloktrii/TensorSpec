@@ -30,9 +30,15 @@ class PEEMSuite(QWidget):
         self.panel = PeemPanel()
         self.panel.service = self.service
         self.panel.set_xmcd_source(self._xmcd_to_stack)
+        self.xmcd_panel.set_xas_target(self._to_xas_tab)
         self.tabs.addTab(self.xmcd_panel, "XPEEM map")
         self.tabs.addTab(self.panel, "Stack · BG · sum rule")
         layout.addWidget(self.tabs)
+
+    def _to_xas_tab(self):
+        """XPEEM map 'XAS from ROI + sum rule': load the stacked images in the stack tab and show it."""
+        self.tabs.setCurrentWidget(self.panel)
+        self.panel._load_from_xmcd()
 
     def _xmcd_to_stack(self) -> dict:
         """XPEEM-map result -> stack tab (background subtraction, sum rule)."""

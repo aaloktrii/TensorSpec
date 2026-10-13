@@ -398,9 +398,9 @@ def average_by_energy(
     ekey = np.zeros(len(pol))
     if has_e:
         if energy_bin_eV is None:
-            steps = [np.median(np.diff(np.unique(energy[[i for i, t in enumerate(pol) if t == tg]])))
-                     for tg in tags if sum(t == tg for t in pol) > 1]
-            energy_bin_eV = float(max(steps)) if steps else 0.01
+            uniq = [np.unique(energy[[i for i, t in enumerate(pol) if t == tg]]) for tg in tags]
+            steps = [float(np.median(np.diff(u))) for u in uniq if len(u) > 1]  # one energy: no step
+            energy_bin_eV = max(steps) if steps else 0.01
         energy_bin_eV = max(float(energy_bin_eV), 1e-3)
         ekey = np.floor((energy - energy.min()) / energy_bin_eV + 0.5)
     points, imgs, pol_out, counts = [], [], [], []

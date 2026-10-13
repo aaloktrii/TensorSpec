@@ -16,12 +16,14 @@ from tensorspec.gui.services.peem_steps.common import _require_raw, _working_fra
 
 class PeemImageAnalysisSteps:
     # ------------------------------------------------------------ image analysis (shown image)
-    FRAME_VIEWS = ("raw", "cleaned", "processed")
+    FRAME_VIEWS = ("raw", "cleaned", "processed", "stacked")
 
     def view_image(self, name: str, kind: str, var: str = "data", frame: int = 0) -> np.ndarray:
         """The image a view shows: a raw / cleaned / drift-corrected frame, or a map variable."""
         if kind == "cleaned":
             return self.get_working_frame(name, frame)
+        if kind == "stacked":
+            return np.asarray(self.stacked_frames(name)[0][int(frame)], dtype=float)
         if kind in ("raw", "processed"):
             return np.asarray(self.get_view_tensor(name, kind, int(frame)), dtype=float)
         return np.asarray(self.get_map(name, kind, var or "data"), dtype=float)
@@ -60,7 +62,9 @@ class PeemImageAnalysisSteps:
             if proc is None:
                 raise ValueError("no drift-corrected frames yet")
             return np.asarray(proc.value, dtype=float)
-        raise ValueError("profile vs frame needs a frame view (raw, cleaned or drift-corrected)")
+        if kind == "stacked":
+            return np.asarray(self.stacked_frames(name)[0], dtype=float)
+        raise ValueError("profile vs frame needs a frame view (raw, cleaned, drift-corrected or stacked)")
 
     def line_profile(self, name: str, kind: str, var: str, frame: int, a, b, halfwidth: int = 0) -> dict[str, Any]:
         """Igor LineProfile on the shown image (distance in µm when the pixel size is known)."""

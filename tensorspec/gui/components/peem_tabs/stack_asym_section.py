@@ -43,6 +43,12 @@ class StackAsymSection:
         self.stack_out.setToolTip("Stacked images in the viewer (after Stack)")
         self.stack_out.currentIndexChanged.connect(self._show_stack_output)
         sk.addRow(self.stack_out)
+        self.btn_to_xas = QPushButton("XAS from ROI + sum rule →")
+        self.btn_to_xas.setToolTip("The stacked images (one per polarization and photon energy) go to the\n"
+                                   "'Stack · BG · sum rule' tab: draw an ROI there for its XAS, background and sum rule")
+        self.btn_to_xas.clicked.connect(self._send_to_xas)
+        self.btn_to_xas.setVisible(False)  # shown when the PEEM suite connects its stack tab
+        sk.addRow(self.btn_to_xas)
         cl.addWidget(stk)
 
         # ---------------------------------------------------------------- 4. Asymmetry
@@ -122,6 +128,15 @@ class StackAsymSection:
             self.stack_out.addItem(label, key)
         self.stack_out.setCurrentIndex(max(0, self.stack_out.findData(cur)))
         self.stack_out.blockSignals(False)
+
+    def set_xas_target(self, send):
+        """send() hands the stacked images to the stack / BG / sum-rule tab (set by the PEEM suite)."""
+        self._xas_target = send
+        self.btn_to_xas.setVisible(send is not None)
+
+    def _send_to_xas(self):
+        if self._require() and getattr(self, "_xas_target", None):
+            self._xas_target()
 
     def _on_stacked(self, res: dict):
         at = self.service.get_product_attrs(self._name, "stack")
