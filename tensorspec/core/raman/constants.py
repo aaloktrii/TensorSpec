@@ -40,6 +40,9 @@ DEFAULT_COLORS: Dict[int, Dict[str, str]] = {
 
 LAYERS = sorted(BOUHAFS_FWHM.keys())
 
+#: Graphene interlayer spacing, nm (layer count from an AFM step height).
+LAYER_NM = 0.335
+
 
 def default_config() -> dict:
     """Every tunable lives here so edits survive a re-run without reloading."""

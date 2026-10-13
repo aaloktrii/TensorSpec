@@ -88,6 +88,37 @@ def orient_axes(ax, cfg: dict):
         ax.invert_yaxis()
 
 
+def draw_placeholder(ax, text=None):
+    """Grey centred message on an empty axes (no map / no classification yet)."""
+    if text is not None:
+        ax.text(0.5, 0.5, text, ha="center", va="center", color="#999")
+    ax.set_axis_off()
+
+
+def draw_figure_message(fig, text):
+    """Grey centred message on an otherwise empty figure."""
+    fig.text(0.5, 0.5, text, ha="center", va="center", color="#999")
+
+
+def draw_optical_underlay(ax, optical, image, alpha):
+    """The camera image under a map view (map and classification tabs)."""
+    ax.imshow(np.ma.masked_invalid(image), origin="lower", extent=optical.extent,
+              cmap="gray", alpha=alpha,
+              interpolation="bilinear", aspect="equal", zorder=2)
+
+
+def draw_map_grid(ax, mf):
+    """White pixel-grid lines over a map view."""
+    left, right, bottom, top = mf.extent
+    ny, nx = mf.shape
+    for xv in np.linspace(left, right, nx + 1):
+        ax.axvline(xv, color="w", lw=0.4, alpha=0.6, zorder=3)
+    for yv in np.linspace(bottom, top, ny + 1):
+        ax.axhline(yv, color="w", lw=0.4, alpha=0.6, zorder=3)
+    ax.set_xlim(left, right)
+    ax.set_ylim(bottom, top)
+
+
 # Neighbouring layer counts get strongly contrasting colours.
 N_COLORS = {3: "#1e88e5", 4: "#fb8c00", 5: "#43a047", 6: "#8e24aa",
             7: "#e53935", 8: "#00acc1", 9: "#6d4c41"}
@@ -233,6 +264,17 @@ def draw_stack(fig, traces: List[dict], windows: List[Tuple[float, float]],
 STYLE = {"font.family": "sans-serif",
          "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
          "font.size": 8, "pdf.fonttype": 42, "axes.linewidth": 0.6}
+
+
+
+def stack_figure(width_in: float, height_in: float, traces: List[dict],
+                 windows: List[Tuple[float, float]], **kw) -> Figure:
+    """An off-screen (Agg) figure of draw_stack, drawn in the Raman figure style."""
+    fig = Figure(figsize=(width_in, height_in))
+    FigureCanvasAgg(fig)
+    with raman_style():
+        draw_stack(fig, traces, windows, **kw)
+    return fig
 
 
 def styled(fn):

@@ -3,20 +3,20 @@ mean ± SD) and layer-number / stacking predictions for the loaded map or a fold
 are written to /analysis/raman_layer_prediction.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 5 - Layer prediction); calls go through RamanEngineRouter
-(main.engine), figures through plotting/backends/raman_matplotlib_engine.py."""
+(main.engine), figures through plotting/backends/raman_views/prediction.py."""
 from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
 from typing import Dict, List, Optional
 
-import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.io.raman_loaders import short_label
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.plotting.backends import raman_matplotlib_engine
-from tensorspec.plotting.backends.raman_matplotlib_engine import REF_COLORS, draw_reference, orient_axes
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
+from tensorspec.plotting.backends.raman_views import prediction as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 #: The reference / prediction modules were optional next to the original script; they are part
@@ -209,36 +209,9 @@ class PredictTab(QtWidgets.QWidget):
         fig = self.plot.figure
         fig.clear()
         if not HAVE_GREF or self.ref is None:
-            fig.text(0.5, 0.5, "No reference" if HAVE_GREF else
-                     "raman_peak_fit.py / graphene_reference.py not found",
-                     ha="center", va="center", color="#999")
+            draw_figure_message(fig, "No reference" if HAVE_GREF else
+                                "raman_peak_fit.py / graphene_reference.py not found")
             self.plot.draw()
             return
-        preds = self.preds or []
-        has_xy = sum(np.isfinite(p["x"]) for p in preds) > 3
-        axs = np.atleast_1d(fig.subplots(1, 2 if has_xy else 1))
-        ax = axs[0]
-        draw_reference(ax, self.ref, matching_only=not preds)
-        for lab, c in REF_COLORS.items():
-            if lab == "no fit":                 # failed fits carry no usable values
-                continue
-            sel = [p for p in preds if p["layer"] == lab and np.isfinite(p["2D_fwhm"])]
-            if sel:
-                ax.scatter([p["2D_fwhm"] for p in sel], [p["I2D_IG"] for p in sel], s=18,
-                           marker="x", lw=0.8, color="k" if lab in ("1L", "2L") else c,
-                           label="%s: %s (%d)" % (self.pred_title, lab, len(sel)))
-        ax.legend(fontsize=7, frameon=False)
-        if has_xy:
-            ax = axs[1]
-            for lab, c in REF_COLORS.items():
-                sel = [p for p in preds if p["layer"] == lab]
-                if sel:
-                    ax.scatter([p["x"] for p in sel], [p["y"] for p in sel], s=40,
-                               marker="s", color=c, lw=0, label="%s (%d)" % (lab, len(sel)))
-            ax.set_aspect("equal")
-            ax.set_xlabel("X  [µm]")
-            ax.set_ylabel("Y  [µm]")
-            ax.set_title(self.pred_title, fontsize=9)
-            ax.legend(fontsize=7, frameon=False, loc="upper left", bbox_to_anchor=(1, 1))
-            orient_axes(ax, self.main.cfg)
+        views.draw_prediction(fig, self.ref, self.preds or [], self.pred_title, self.main.cfg)
         self.plot.draw()

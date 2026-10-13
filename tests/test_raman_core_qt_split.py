@@ -25,7 +25,16 @@ def test_raman_core_has_no_qt_or_plotting():
 
 
 def test_raman_matplotlib_engine_has_no_qt():
-    assert _hits([PKG / "plotting" / "backends" / "raman_matplotlib_engine.py"], QT) == []
+    views = list((PKG / "plotting" / "backends" / "raman_views").glob("*.py"))
+    assert views
+    assert _hits([PKG / "plotting" / "backends" / "raman_matplotlib_engine.py", *views], QT) == []
+
+
+def test_raman_tabs_do_not_draw():
+    """Rendering lives in plotting/: the Raman tabs import no matplotlib themselves."""
+    tabs = [*(PKG / "gui" / "components" / "raman_tabs").glob("*.py"),
+            PKG / "gui" / "components" / "raman_panel.py"]
+    assert _hits(tabs, ("matplotlib", "mpl_toolkits")) == []
 
 
 def test_raman_service_has_no_qt():

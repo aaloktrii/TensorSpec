@@ -1,19 +1,18 @@
 """Classification helper dialog: thickness from I(2D)/I(G) (maps, histogram, editable cutoffs).
+Figures are drawn by plotting/backends/raman_views/classification.py.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 2 - Classification: ThicknessDialog)."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import matplotlib.colors as mcolors
 import numpy as np
-from matplotlib.patches import Patch
 from PySide6 import QtWidgets
 
-from tensorspec.core.raman.classification import LAYER_THICK, label_of, layer_from_ratio
+from tensorspec.core.raman.classification import LAYER_THICK, layer_from_ratio
 from tensorspec.core.raman.constants import LAYERS
 from tensorspec.gui.components.raman_tabs.layout import fit_to_screen
-from tensorspec.plotting.backends.raman_matplotlib_engine import na_color, orient_axes
+from tensorspec.plotting.backends.raman_views import classification as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 if TYPE_CHECKING:
@@ -159,52 +158,9 @@ class ThicknessDialog(QtWidgets.QDialog):
 
         fig = self.canvas.figure
         fig.clear()
-        a1 = fig.add_subplot(131)
-        a2 = fig.add_subplot(132)
-        a3 = fig.add_subplot(133)
         fin = rm[np.isfinite(rm)]
-
-        opt = self.main.optical
-        for ax in (a1, a2):
-            if opt is not None and self.main.optical_image is not None:
-                ax.imshow(np.ma.masked_invalid(self.main.optical_image),
-                          origin="lower", extent=opt.extent, cmap="gray",
-                          aspect="equal", zorder=0)
-        im = a1.imshow(np.ma.masked_invalid(rm), origin="lower", extent=mf.extent,
-                       cmap="magma", aspect="equal", interpolation="nearest",
-                       alpha=0.85, zorder=1)
-        fig.colorbar(im, ax=a1, fraction=0.046, pad=0.03).set_label(
-            "I(2D)/I(G) (%s)" % c["ratio_metric"])
-        a1.set_title("I(2D)/I(G)", fontsize=10)
-
-        cols = [na_color(n, c) for n in self.LAYER_ORDER]
-        cmap = mcolors.ListedColormap(cols)
-        a2.imshow(np.ma.masked_invalid(lm), origin="lower", extent=mf.extent,
-                  cmap=cmap, vmin=-0.5, vmax=3.5, aspect="equal",
-                  interpolation="nearest", alpha=0.9, zorder=1)
-        a2.legend(handles=[Patch(facecolor=cols[i], edgecolor="#555",
-                                 label="%s  (%d)" % (label_of(n, "N/A"), counts[n]))
-                           for i, n in enumerate(self.LAYER_ORDER)],
-                  fontsize=8, loc="upper left", framealpha=0.9)
-        a2.set_title("Thickness from the ratio", fontsize=10)
-        for ax in (a1, a2):
-            ax.set_xlim(mf.extent[0], mf.extent[1])
-            ax.set_ylim(mf.extent[2], mf.extent[3])
-            orient_axes(ax, self.main.cfg)
-            ax.set_xlabel("X [µm]")
-        a1.set_ylabel("Y [µm]")
-
-        if fin.size:
-            a3.hist(fin, bins=max(8, min(50, fin.size // 3)), color="#607d8b",
-                    edgecolor="white", linewidth=0.4)
-            for key, lab in (("1_2", "1|2"), ("2_3", "2|3"), ("3_thick", "3|≥4")):
-                v = c["ratio_cut"][key]
-                a3.axvline(v, color="#d81b60", ls="--", lw=1.1)
-                a3.text(v, a3.get_ylim()[1] * 0.96, " " + lab, color="#d81b60",
-                        fontsize=8, va="top")
-        a3.set_xlabel("I(2D)/I(G)")
-        a3.set_ylabel("pixels")
-        a3.set_title("Distribution, with the cutoffs", fontsize=10)
+        views.draw_thickness(fig, mf, rm, lm, counts, c, self.main.cfg, self.LAYER_ORDER, fin,
+                             self.main.optical, self.main.optical_image)
         self.canvas.draw()
 
         if not valid:

@@ -10,14 +10,12 @@ from typing import TYPE_CHECKING
 from typing import List, Tuple
 
 import numpy as np
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from matplotlib.figure import Figure
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from tensorspec.core.io.raman_loaders import (Spectrum, is_single_spectrum, parse_map_file,
                                               read_single_spectrum, read_spot_folder, short_label)
 from tensorspec.core.raman.constants import APP_NAME
-from tensorspec.plotting.backends.raman_matplotlib_engine import draw_stack, raman_style
+from tensorspec.plotting.backends.raman_matplotlib_engine import raman_style, stack_figure
 from tensorspec.plotting.viewers.raman_canvas import _EXPORT_DIR
 
 if TYPE_CHECKING:
@@ -269,22 +267,18 @@ class StackTab(QtWidgets.QWidget):
             self.redraw()
 
     # -- figure ---------------------------------------------------------------
-    def _figure(self) -> Figure:
+    def _figure(self):
         traces = [{"wn": it["spec"].wn, "inten": it["spec"].inten,
                    "label": it["spec"].label, "color": it["color"]}
                   for it in self.items if it["visible"]]
         w = self.spn_w.value() / 2.54
         h = self.spn_h.value() / 2.54 or (2.6 + 1.25 * max(1, len(traces))) / 2.54
-        fig = Figure(figsize=(w, h))
-        FigureCanvasAgg(fig)
-        with raman_style():
-            draw_stack(fig, traces, parse_windows(self.ed_win.text()),
-                       step=self.spn_step.value(), normalise=self.chk_norm.isChecked(),
-                       trace_labels=self.chk_labels.isChecked(),
-                       band_labels=parse_band_labels(self.ed_bands.text())
-                       if self.chk_bands.isChecked() else [],
-                       title=self.ed_title.text().strip())
-        return fig
+        return stack_figure(w, h, traces, parse_windows(self.ed_win.text()),
+                            step=self.spn_step.value(), normalise=self.chk_norm.isChecked(),
+                            trace_labels=self.chk_labels.isChecked(),
+                            band_labels=parse_band_labels(self.ed_bands.text())
+                            if self.chk_bands.isChecked() else [],
+                            title=self.ed_title.text().strip())
 
     def redraw(self):
         import io

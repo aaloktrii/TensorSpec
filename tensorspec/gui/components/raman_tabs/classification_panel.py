@@ -1,6 +1,6 @@
 """Tab 2 · Classification: layer number (manual / auto from I(2D)/I(G) / layer map) and ABA/ABC
 stacking per pixel, editable threshold table, histograms, PNG / CSV export. Results are written to
-/analysis/raman_classification.
+/analysis/raman_classification; figures are drawn by plotting/backends/raman_views/classification.py.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 2 - Classification: ClassificationTab)."""
 from __future__ import annotations
@@ -10,18 +10,17 @@ from typing import TYPE_CHECKING
 from typing import Dict, Optional
 
 import numpy as np
-from matplotlib.patches import Patch
 from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.raman.classification import (LAYER_THICK, classify_map, label_of, pixel_ratio,
-                                                  terrace_edges, windows_for)
+                                                  terrace_edges)
 from tensorspec.core.raman.constants import (APP_NAME, BOUHAFS_FWHM, DEFAULT_COLORS, DEFAULT_TOL,
                                              LAYERS)
 from tensorspec.gui.components.raman_tabs.layer_regions_dialog import LayerRegionsDialog
 from tensorspec.gui.components.raman_tabs.layout import ThresholdTable, _fmt
-from tensorspec.gui.components.raman_tabs.map_explorer_panel import MapExplorerTab
 from tensorspec.gui.components.raman_tabs.thickness_dialog import ThicknessDialog
-from tensorspec.plotting.backends.raman_matplotlib_engine import class_rgba, frame_axes, na_color, orient_axes
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_placeholder
+from tensorspec.plotting.backends.raman_views import classification as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas, export_figure
 
 if TYPE_CHECKING:
@@ -493,11 +492,6 @@ class ClassificationTab(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(dlg)
         cv = Canvas(figsize=(9, 4))
         cv.figure.clear()
-        ax1 = cv.figure.add_subplot(121)
-        ax2 = cv.figure.add_subplot(122)
-
-        ax1.hist(fw, bins=max(10, min(60, fw.size // 8)),
-                 color="#607d8b", edgecolor="white", linewidth=0.4)
         if cfg["layer_mode"] == "manual":
             shown = [int(cfg["manual_layer"])]
         elif cfg["layer_mode"] == "map" and self.main.layer_by_spec is not None:
@@ -505,35 +499,7 @@ class ClassificationTab(QtWidgets.QWidget):
                            if n in cfg["fwhm"]) or sorted(cfg["fwhm"])
         else:
             shown = sorted(cfg["fwhm"])
-        top = ax1.get_ylim()[1]
-        for layer in shown:
-            (a0, a1), (c0, c1) = windows_for(layer, cfg)
-            for (lo, hi), col, key in (((a0, a1), "#1e88e5", "ABA"),
-                                       ((c0, c1), "#e53935", "ABC")):
-                if hi < fw.min() - 5 or lo > fw.max() + 5:
-                    continue
-                ax1.axvspan(lo, hi, color=col, alpha=0.16, lw=0)
-                ax1.axvline(cfg["fwhm"][layer][key], color=col, lw=1.0, ls="--")
-            if len(shown) == 1:
-                ax1.text(cfg["fwhm"][layer]["ABA"], top * 0.96, " ABA",
-                         color="#1e88e5", fontsize=8, va="top")
-                ax1.text(cfg["fwhm"][layer]["ABC"], top * 0.96, " ABC",
-                         color="#e53935", fontsize=8, va="top")
-        ax1.set_xlabel("FWHM(2D)  [cm$^{-1}$]")
-        ax1.set_ylabel("pixels")
-        ax1.set_title("Width, with the ABA (blue) and ABC (red) windows"
-                      if len(shown) == 1 else
-                      "Width, with every layer's ABA/ABC windows", fontsize=9)
-
-        if am.size:
-            ax2.hist(am, bins=max(10, min(60, am.size // 8)),
-                     color="#8d6e63", edgecolor="white", linewidth=0.4)
-            ax2.axvline(cfg["asym_threshold"], color="#d81b60", lw=1.4, ls="--",
-                        label="threshold %.3f" % cfg["asym_threshold"])
-            ax2.legend(fontsize=8)
-        ax2.set_xlabel("asymmetry (%s)" % cfg["asym_metric"])
-        ax2.set_ylabel("pixels")
-        ax2.set_title("Shape asymmetry, with the ABC cut", fontsize=10)
+        views.draw_threshold_histograms(cv.figure, fw, am, cfg, shown)
 
         lay.addWidget(cv)
         msg = QtWidgets.QLabel(
@@ -557,9 +523,7 @@ class ClassificationTab(QtWidgets.QWidget):
     # -- drawing ------------------------------------------------------------
     def _placeholder(self):
         self.canvas.clear()
-        self.canvas.ax.text(0.5, 0.5, "No classification yet",
-                            ha="center", va="center", color="#999")
-        self.canvas.ax.set_axis_off()
+        draw_placeholder(self.canvas.ax, "No classification yet")
         self.canvas.draw()
 
     def refresh_map(self):
@@ -569,45 +533,9 @@ class ClassificationTab(QtWidgets.QWidget):
             return
         cv = self.canvas
         cv.clear()
-        ax = cv.ax
-        rgba = class_rgba(self.layers, self.calls, self.main.cfg)
-        ax.imshow(rgba, origin="lower", extent=mf.extent,
-                  interpolation="nearest", aspect="equal", zorder=1)
-
-        opt = self.main.optical
-        if opt is not None and self.chk_optical.isChecked() \
-                and self.main.optical_image is not None:
-            ax.imshow(np.ma.masked_invalid(self.main.optical_image),
-                      origin="lower", extent=opt.extent, cmap="gray",
-                      alpha=self.main.cfg["optical_alpha"],
-                      interpolation="bilinear", aspect="equal", zorder=2)
-        if self.chk_grid.isChecked():
-            MapExplorerTab._draw_grid(ax, mf)
-
-        present = set()
-        ny, nx = self.layers.shape
-        for r in range(ny):
-            for c in range(nx):
-                present.add((int(self.layers[r, c]), self.calls[r, c]))
-        handles = []
-        for lay, call in sorted(present, key=lambda t: (t[0] < 0, t[0], str(t[1]))):
-            if call is None or (lay < 0 and call != "N/A"):
-                continue
-            col = (na_color(lay, self.main.cfg) if call == "N/A"
-                   else self.main.cfg["colors"][lay][call])
-            handles.append(Patch(facecolor=col, edgecolor="#555",
-                                 label=label_of(lay, call)))
-        handles.append(Patch(facecolor=self.main.cfg["unclassified_color"],
-                             edgecolor="#555", label="Unclassified"))
-        ax.legend(handles=handles, loc="center left", bbox_to_anchor=(1.02, 0.5),
-                  fontsize=9, frameon=True, title="Class")
-        ax.set_xlabel("X  [µm]")
-        ax.set_ylabel("Y  [µm]")
-        ax.set_title("Stacking-order classification")
-        ax.set_anchor("C")
-        frame_axes(ax, mf, self.main.cfg,
-                   self.chk_optical.isChecked() and self.main.optical is not None)
-        orient_axes(ax, self.main.cfg)
+        views.draw_class_map(cv.ax, mf, self.layers, self.calls, self.main.cfg,
+                             self.main.optical, self.main.optical_image,
+                             self.chk_optical.isChecked(), self.chk_grid.isChecked())
         cv.draw()
 
     # -- export -------------------------------------------------------------

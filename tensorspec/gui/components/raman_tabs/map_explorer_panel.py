@@ -1,5 +1,6 @@
 """Tab 1 · Map Explorer: FWHM(2D) / G height / 2D height map, pixel grid, optical overlay,
-orientation and auto-alignment, raw spectrum and fit of a clicked pixel.
+orientation and auto-alignment, raw spectrum and fit of a clicked pixel. The figures are drawn by
+plotting/backends/raman_views/map_explorer.py.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 1 - Map Explorer)."""
 from __future__ import annotations
@@ -7,15 +8,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import List, Optional, Tuple
 
-import matplotlib.patches as mpatches
 import numpy as np
 from PySide6 import QtCore, QtWidgets
 
-from tensorspec.core.io.raman_loaders import MapFile
 from tensorspec.core.raman.classification import g_band_cfg, label_of, layer_from_ratio, pixel_ratio
 from tensorspec.core.raman.map_geometry import band_height, describe_transform
 from tensorspec.core.raman.voigt_2d import asym_of
-from tensorspec.plotting.backends.raman_matplotlib_engine import frame_axes, orient_axes, side_colorbar
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_placeholder
+from tensorspec.plotting.backends.raman_views import map_explorer as views
 from tensorspec.plotting.viewers.raman_canvas import Canvas
 
 if TYPE_CHECKING:
@@ -299,22 +299,9 @@ class MapExplorerTab(QtWidgets.QWidget):
         """Re-limit the axes without refitting anything."""
         if self._spec is None:
             return
-        ax = self.spec_canvas.ax
-        wn, inten = self._spec["wn"], self._spec["inten"]
         lo, hi = self._view_range()
-        ax.set_xlim(lo, hi)
-        if self.chk_yfit.isChecked():
-            sel = (wn >= lo) & (wn <= hi) & np.isfinite(inten)
-            if sel.sum() >= 2:
-                y0, y1 = float(np.min(inten[sel])), float(np.max(inten[sel]))
-                pad = 0.08 * (y1 - y0) if y1 > y0 else max(1.0, abs(y1) * 0.1)
-                ax.set_ylim(y0 - pad, y1 + pad)
-        else:
-            good = np.isfinite(inten)
-            if good.any():
-                y0, y1 = float(np.min(inten[good])), float(np.max(inten[good]))
-                pad = 0.08 * (y1 - y0) if y1 > y0 else 1.0
-                ax.set_ylim(y0 - pad, y1 + pad)
+        views.set_spectrum_view(self.spec_canvas.ax, self._spec["wn"], self._spec["inten"],
+                                lo, hi, self.chk_yfit.isChecked())
         self.spec_canvas.draw()
 
     def sync_transform_ui(self):
@@ -347,12 +334,10 @@ class MapExplorerTab(QtWidgets.QWidget):
 
     def _show_placeholder(self):
         self.map_canvas.clear()
-        self.map_canvas.ax.text(0.5, 0.5, "No map loaded",
-                                ha="center", va="center", color="#999")
-        self.map_canvas.ax.set_axis_off()
+        draw_placeholder(self.map_canvas.ax, "No map loaded")
         self.map_canvas.draw()
         self.spec_canvas.clear()
-        self.spec_canvas.ax.set_axis_off()
+        draw_placeholder(self.spec_canvas.ax)
         self.spec_canvas.draw()
 
     # -- drawing ------------------------------------------------------------
@@ -379,91 +364,12 @@ class MapExplorerTab(QtWidgets.QWidget):
 
         cv = self.map_canvas
         cv.clear()
-        ax = cv.ax
         data = self.main.fwhm_map if fwhm else self.height_grid(quantity)
-        finite = np.isfinite(data)
-        if finite.any():
-            vmin = float(np.nanpercentile(data[finite], 2))
-            vmax = float(np.nanpercentile(data[finite], 98))
-            if vmin == vmax:
-                vmin, vmax = vmin - 1, vmax + 1
-        else:
-            vmin, vmax = 0, 1
-
-        im = ax.imshow(np.ma.masked_invalid(data), origin="lower",
-                       extent=mf.extent, cmap=self.main.cfg["cmap"],
-                       vmin=vmin, vmax=vmax, interpolation="nearest",
-                       aspect="equal", zorder=1)
-        cb = side_colorbar(cv.figure, ax, im)
-        cb.set_label("FWHM(2D)  [cm$^{-1}$]" if fwhm else "%s  [counts]" % quantity)
-
-        if fwhm and not finite.any():
-            # An all-NaN map is otherwise indistinguishable from a map that
-            # simply has not been fitted yet, so spell it out.
-            tally = self.main.fit_tally or {}
-            lines = ["No spectrum passed the quality filters",
-                     "(%d pixels, none fitted)" % mf.n_points]
-            for why, n in sorted(tally.items(), key=lambda kv: -kv[1])[:4]:
-                lines.append("%d × %s" % (n, why))
-            lines.append("Adjust under Analysis > Fit parameters")
-            ax.text(0.5, 0.5, "\n".join(lines), transform=ax.transAxes,
-                    ha="center", va="center", fontsize=9, color="#b71c1c",
-                    zorder=6,
-                    bbox=dict(boxstyle="round,pad=0.6", fc="white",
-                              ec="#b71c1c", alpha=0.92))
-
-        self._draw_optical(ax)
-        if self.chk_grid.isChecked():
-            self._draw_grid(ax, mf)
-        if self.sel is not None:
-            self._draw_selection(ax, mf, *self.sel)
-
-        ax.set_xlabel("X  [µm]")
-        ax.set_ylabel("Y  [µm]")
-        ax.set_title("%s   (%d × %d pixels)"
-                     % ("FWHM of the 2D band" if fwhm else quantity + " (raw)",
-                        mf.shape[1], mf.shape[0]))
-        # An equal-aspect image in a wide canvas is anchored right by default
-        # once the colorbar has taken its slice, stranding the map in the
-        # corner with empty figure beside it.
-        ax.set_anchor("C")
-        frame_axes(ax, mf, self.main.cfg,
-                   self.chk_optical.isChecked() and self.main.optical is not None)
-        orient_axes(ax, self.main.cfg)
+        views.draw_quantity_map(cv.figure, cv.ax, mf, data, quantity, self.main.fit_tally,
+                                self.main.cfg, self.main.optical, self.main.optical_image,
+                                self.chk_optical.isChecked(), self.chk_grid.isChecked(),
+                                self.sel)
         cv.draw()
-
-    def _draw_optical(self, ax):
-        opt = self.main.optical
-        if opt is None or not self.chk_optical.isChecked():
-            return
-        img = self.main.optical_image
-        if img is None:
-            return
-        ax.imshow(np.ma.masked_invalid(img), origin="lower", extent=opt.extent,
-                  cmap="gray", alpha=self.main.cfg["optical_alpha"],
-                  interpolation="bilinear", aspect="equal", zorder=2)
-
-    @staticmethod
-    def _draw_grid(ax, mf: MapFile):
-        left, right, bottom, top = mf.extent
-        ny, nx = mf.shape
-        for xv in np.linspace(left, right, nx + 1):
-            ax.axvline(xv, color="w", lw=0.4, alpha=0.6, zorder=3)
-        for yv in np.linspace(bottom, top, ny + 1):
-            ax.axhline(yv, color="w", lw=0.4, alpha=0.6, zorder=3)
-        ax.set_xlim(left, right)
-        ax.set_ylim(bottom, top)
-
-    @staticmethod
-    def _draw_selection(ax, mf: MapFile, row: int, col: int):
-        left, right, bottom, top = mf.extent
-        ny, nx = mf.shape
-        dx = (right - left) / nx
-        dy = (top - bottom) / ny
-        rect = mpatches.Rectangle(
-            (left + col * dx, bottom + row * dy), dx, dy,
-            fill=False, edgecolor="red", lw=2.0, zorder=4)
-        ax.add_patch(rect)
 
     # -- interaction --------------------------------------------------------
     def _on_click(self, event):
@@ -487,26 +393,22 @@ class MapExplorerTab(QtWidgets.QWidget):
         cv.clear()
         ax = cv.ax
         if idx < 0:
-            ax.text(0.5, 0.5, "No spectrum at this pixel",
-                    ha="center", va="center", color="#999")
-            ax.set_axis_off()
+            views.draw_no_spectrum(ax)
             cv.draw()
             return
 
         wn, inten = mf.axis, mf.data[idx]
         self._spec = dict(wn=wn, inten=inten, row=row, col=col)
-        ax.plot(wn, inten, lw=0.8, color="#333", label="raw spectrum")
         lo, hi = self.main.cfg["band_min"], self.main.cfg["band_max"]
-        ax.axvspan(lo, hi, color="#ffd54f", alpha=0.30, label="2D band region")
 
         res = self.main.fits[idx] if self.main.fits else None
         txt = ""
+        fit_curve, center = None, None
         if res and np.isfinite(res.get("center", np.nan)):
             m = (wn >= lo) & (wn <= hi)
             if m.sum() > 3:
-                ax.plot(wn[m], self.main.engine.rebuild_fit(wn[m], res), lw=1.4, color="#d81b60",
-                        label="Voigt + baseline")
-            ax.axvline(res["center"], color="#1e88e5", lw=0.8, ls="--")
+                fit_curve = (wn[m], self.main.engine.rebuild_fit(wn[m], res))
+            center = res["center"]
             asym = asym_of(res, self.main.cfg["asym_metric"])
             err = res.get("fwhm_err", np.nan)
             txt = ("x = %.2f µm, y = %.2f µm\nFWHM = %.1f %s cm⁻¹   centre = %.1f cm⁻¹\n"
@@ -519,11 +421,7 @@ class MapExplorerTab(QtWidgets.QWidget):
                       res["snr"],
                       "" if res["ok"] else "   [rejected: %s]" % res["note"]))
 
-        ax.set_xlabel("Raman shift  [cm$^{-1}$]")
-        ax.set_ylabel("Intensity  [a.u.]")
-        ax.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=3,
-                  borderpad=0.3, handlelength=1.4)
-        ax.set_title("Pixel (row %d, col %d)" % (row, col), fontsize=9)
+        views.draw_pixel_spectrum(ax, wn, inten, (lo, hi), fit_curve, center, row, col)
         self._apply_view()
         gf = self.main.g_fits[idx] if self.main.g_fits else None
         if gf is not None and txt:
@@ -535,10 +433,7 @@ class MapExplorerTab(QtWidgets.QWidget):
             if gf.get("ok") and np.isfinite(gf.get("center", np.nan)):
                 gcfg = g_band_cfg(self.main.cfg)
                 gm = (wn >= gcfg["band_min"]) & (wn <= gcfg["band_max"])
-                ax.plot(wn[gm], self.main.engine.rebuild_fit(wn[gm], gf), lw=1.4, color="#1e88e5",
-                        label="G fit")
-                ax.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=4,
-                          borderpad=0.3, handlelength=1.4)
+                views.draw_g_fit(ax, wn[gm], self.main.engine.rebuild_fit(wn[gm], gf))
         cv.draw()
         self.info.setText(txt or "No fit available for this pixel.")
         rejected = bool(res) and not res.get("ok", False)
