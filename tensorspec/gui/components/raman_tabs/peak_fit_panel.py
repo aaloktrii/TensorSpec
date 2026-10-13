@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 from typing import TYPE_CHECKING
 from typing import Dict, List
 
@@ -16,7 +17,8 @@ import numpy as np
 from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.io.raman_loaders import _SPOT_RE, is_single_spectrum, read_single_spectrum, short_label
-from tensorspec.core.raman.fit_model import FitModel
+from tensorspec.core.raman.fit_model import FitModel, as_band, band
+from tensorspec.gui.components.raman_tabs.stack_panel import parse_windows
 from tensorspec.gui.components.raman_tabs.layout import _fmt, fill_peak_table
 from tensorspec.plotting.backends.raman_matplotlib_engine import draw_figure_message
 from tensorspec.plotting.backends.raman_views import peak_fit as views
@@ -79,14 +81,45 @@ class PeakFitTab(QtWidgets.QWidget):
         form.addRow(rb)
         left.addLayout(form)
 
-        self.tbl_bands = QtWidgets.QTableWidget(0, 5)
-        self.tbl_bands.setHorizontalHeaderLabels(["Band", "From", "To", "Peaks", "Max"])
+        # fit ranges typed as text: one band per range
+        r = QtWidgets.QHBoxLayout()
+        r.addWidget(QtWidgets.QLabel("Ranges"))
+        self.ed_ranges = QtWidgets.QLineEdit("")
+        self.ed_ranges.setPlaceholderText("e.g. 1400-1600; 2500-2800  (cm⁻¹)")
+        self.ed_ranges.returnPressed.connect(self.set_ranges)
+        r.addWidget(self.ed_ranges, 1)
+        b = QtWidgets.QPushButton("Set bands")
+        b.setToolTip("One band per range; existing bands are replaced")
+        b.clicked.connect(self.set_ranges)
+        r.addWidget(b)
+        left.addLayout(r)
+
+        self.tbl_bands = QtWidgets.QTableWidget(0, 7)
+        self.tbl_bands.setHorizontalHeaderLabels(["Band", "From", "To", "Peaks", "Max", "Shape",
+                                                  "Manual centres"])
         self.tbl_bands.verticalHeader().setVisible(False)
-        self.tbl_bands.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-        self.tbl_bands.setMaximumHeight(140)
+        hh = self.tbl_bands.horizontalHeader()
+        hh.setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(6, QtWidgets.QHeaderView.Stretch)
+        self.tbl_bands.setMaximumHeight(160)
+        self.tbl_bands.setToolTip(
+            "Peaks: 'Auto: find count' lets the fit decide how many (up to Max); 'Auto: N' fits N "
+            "peaks it places itself; 'Manual' fits one peak at each manual centre — select the "
+            "band's row, then left-click the spectrum to add a peak, right-click to remove one.")
+        self.tbl_bands.itemChanged.connect(self._bands_changed)
         left.addWidget(self.tbl_bands)
         r = QtWidgets.QHBoxLayout()
-        for text, fn in (("Add band", lambda: self._add_band_row("band", 1000, 1100, "Auto", 3)),
+        r.addWidget(QtWidgets.QLabel("Manual peaks may move ±"))
+        self.spn_tol = QtWidgets.QDoubleSpinBox()
+        self.spn_tol.setRange(0.5, 200.0)
+        self.spn_tol.setDecimals(1)
+        self.spn_tol.setValue(10.0)
+        self.spn_tol.setSuffix(" cm⁻¹")
+        r.addWidget(self.spn_tol)
+        r.addStretch(1)
+        left.addLayout(r)
+        r = QtWidgets.QHBoxLayout()
+        for text, fn in (("Add band", lambda: self._add_band_row("band", 1000, 1100, "auto", 3)),
                          ("Remove band", self._remove_band),
                          ("Graphene preset", lambda: self.main.apply_preset("Graphene"))):
             b = QtWidgets.QPushButton(text)
@@ -119,30 +152,76 @@ class PeakFitTab(QtWidgets.QWidget):
         lw.setMaximumWidth(500)
         root.addWidget(lw)
         self.plot = Canvas(figsize=(8, 5))
+        self.plot.canvas.mpl_connect("button_press_event", self._plot_clicked)
         root.addWidget(self.plot, 1)
         self._placeholder()
 
-    def _add_band_row(self, name, lo, hi, peaks, nmax):
+    PEAK_CHOICES = ([("Auto: find count", "auto")] +
+                    [("Auto: %d peak%s" % (k, "" if k == 1 else "s"), k) for k in range(1, 7)] +
+                    [("Manual (click peaks)", "manual")])
+    SHAPE_CHOICES = (("Lorentzian", "lorentzian"), ("Gaussian", "gaussian"),
+                     ("Voigt (pseudo)", "voigt"))
+
+    def _add_band_row(self, name, lo, hi, peaks="auto", nmax=3, shape="lorentzian", centres=()):
+        self.tbl_bands.blockSignals(True)            # no redraws while the row is half built
         r = self.tbl_bands.rowCount()
         self.tbl_bands.insertRow(r)
         self.tbl_bands.setItem(r, 0, QtWidgets.QTableWidgetItem(name))
         self.tbl_bands.setItem(r, 1, QtWidgets.QTableWidgetItem("%g" % lo))
         self.tbl_bands.setItem(r, 2, QtWidgets.QTableWidgetItem("%g" % hi))
         cmb = QtWidgets.QComboBox()
-        cmb.addItems(["Auto"] + [str(k) for k in range(1, 7)])
-        cmb.setCurrentText(str(peaks))
+        for label, data in self.PEAK_CHOICES:
+            cmb.addItem(label, data)
+        peaks = "auto" if peaks in ("Auto", "auto") else peaks
+        cmb.setCurrentIndex(max(0, cmb.findData(peaks if peaks in ("auto", "manual") else int(peaks))))
         self.tbl_bands.setCellWidget(r, 3, cmb)
         sp = QtWidgets.QSpinBox()
         sp.setRange(1, 6)
         sp.setValue(int(nmax))
+        sp.setToolTip("Most peaks 'Auto: find count' may use")
         self.tbl_bands.setCellWidget(r, 4, sp)
+        shp = QtWidgets.QComboBox()
+        for label, data in self.SHAPE_CHOICES:
+            shp.addItem(label, data)
+        shp.setCurrentIndex(max(0, shp.findData(shape)))
+        self.tbl_bands.setCellWidget(r, 5, shp)
+        self.tbl_bands.setItem(r, 6, QtWidgets.QTableWidgetItem(
+            ", ".join("%g" % c for c in centres)))
+        cmb.currentIndexChanged.connect(lambda *_, c=cmb, s=sp: s.setEnabled(c.currentData() == "auto"))
+        sp.setEnabled(cmb.currentData() == "auto")
+        cmb.currentIndexChanged.connect(self._bands_changed)
+        shp.currentIndexChanged.connect(self._bands_changed)
+        self.tbl_bands.blockSignals(False)
 
     def set_bands(self, bands, si_calibrate: bool):
-        """Replace the band table: rows of (name, from, to, peaks or "auto", max)."""
+        """Replace the band table: rows of (name, from, to, peaks, max[, shape, centres])."""
         self.tbl_bands.setRowCount(0)
-        for name, lo, hi, n, nmax in bands:
-            self._add_band_row(name, lo, hi, "Auto" if n == "auto" else n, nmax)
+        for row in bands:
+            self._add_band_row(*as_band(row))
         self.chk_si.setChecked(bool(si_calibrate))
+        self._bands_changed()
+
+    def set_ranges(self):
+        """One band per range typed in 'Ranges' (e.g. 1400-1600; 2500-2800); peaks found
+        automatically until set otherwise."""
+        ranges = parse_windows(self.ed_ranges.text().replace(";", ","))
+        if not ranges:
+            self.main.status("No range understood — type e.g. 1400-1600; 2500-2800")
+            return
+        self.tbl_bands.setRowCount(0)
+        for lo, hi in ranges:
+            self._add_band_row("%g-%g" % (lo, hi), lo, hi)
+        self._bands_changed()
+        self.main.status("%d band%s set from the ranges; nothing fitted yet."
+                         % (len(ranges), "" if len(ranges) == 1 else "s"))
+
+    def _bands_changed(self, *_):
+        """Re-show the current view so band windows and manual centres stay visible."""
+        i = self.lst.currentRow()
+        if 0 <= i < len(self.items) and i not in self.results:
+            self._selected(i)
+        elif self.items and i < 0:
+            self.plot_all()
 
     def _remove_band(self):
         r = self.tbl_bands.currentRow()
@@ -157,16 +236,47 @@ class PeakFitTab(QtWidgets.QWidget):
                 hi = float(self.tbl_bands.item(r, 2).text())
             except (AttributeError, ValueError):
                 continue
-            n = self.tbl_bands.cellWidget(r, 3).currentText()
-            out.append((self.tbl_bands.item(r, 0).text(), lo, hi,
-                        "auto" if n == "Auto" else int(n),
-                        self.tbl_bands.cellWidget(r, 4).value()))
+            if self.tbl_bands.cellWidget(r, 3) is None or self.tbl_bands.cellWidget(r, 5) is None:
+                continue
+            item = self.tbl_bands.item(r, 6)
+            centres = [float(v) for v in re.findall(r"[-+]?\d+(?:\.\d+)?", item.text() if item else "")]
+            out.append(band(self.tbl_bands.item(r, 0).text(), lo, hi,
+                            self.tbl_bands.cellWidget(r, 3).currentData(),
+                            self.tbl_bands.cellWidget(r, 4).value(),
+                            self.tbl_bands.cellWidget(r, 5).currentData(), sorted(centres)))
         return out
+
+    # -- manual peaks: click on the plot ------------------------------------------
+    def _plot_clicked(self, event):
+        """Left-click adds a manual peak to the band under the cursor (the selected row first),
+        right-click removes the nearest one."""
+        if event.inaxes is None or event.xdata is None:
+            return
+        x = float(event.xdata)
+        rows = [r for r, b in enumerate(self.bands()) if b[3] == "manual" and b[1] < x < b[2]]
+        if not rows:
+            if any(b[3] == "manual" for b in self.bands()):
+                self.main.status("Click inside a Manual band's range to place a peak.")
+            return
+        cur = self.tbl_bands.currentRow()
+        r = cur if cur in rows else rows[0]
+        centres = list(self.bands()[r][6])
+        if event.button == 1:
+            centres.append(x)
+        elif event.button == 3 and centres:
+            centres.remove(min(centres, key=lambda c: abs(c - x)))
+        else:
+            return
+        self.tbl_bands.item(r, 6).setText(", ".join("%.1f" % c for c in sorted(centres)))
+        i = self.lst.currentRow()
+        self.results.pop(i, None)                      # placement changed: show it unfitted
+        self._bands_changed()
 
     def fit_model(self) -> FitModel:
         """The fit defined here (Si calibration, background, bands); 2 · Map applies the same."""
         return FitModel(bands=self.bands(), background=self.cmb_bg.currentText(),
-                        bg_opts=self.bg_opts(), si_calibrate=self.chk_si.isChecked())
+                        bg_opts=self.bg_opts(), si_calibrate=self.chk_si.isChecked(),
+                        centre_tol=self.spn_tol.value())
 
     def bg_opts(self) -> dict:
         try:
