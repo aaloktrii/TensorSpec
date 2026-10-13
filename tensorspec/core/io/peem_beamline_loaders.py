@@ -29,7 +29,6 @@ ALS +0.9 are CP); XLD is (LV-LH)/(LV+LH) (core/peem/dichroism).
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
@@ -73,51 +72,6 @@ def partner_folder(path: str | Path) -> Path | None:
             cand = p.with_name(p.name.replace(a, b, 1))
             return cand if cand.is_dir() else None
     return None
-
-
-_POL_TOKEN = re.compile(r"(?i)(?<![A-Za-z0-9])(CL|CR|CP|CM|LH|LV|pos|neg)(?![A-Za-z0-9])")
-
-
-def group_pairs(paths: list[str | Path], pols: dict[str, str | None] | None = None) -> list[list[str]]:
-    """Split a load list into datasets of one polarization pair each, keeping the list order.
-
-    1. Items in the same folder whose names differ only in the polarization token (CL / CR / LH /
-       LV / CP / CM / pos / neg, as a whole word) are one dataset: ..._CL_+15deg + ..._CR_+15deg.
-    2. The rest (names without a token, e.g. UE49 scan tables) pair up in list order with the next
-       item of the opposite polarization (``pols``: path -> CP / CM / LH / LV, e.g. set by the user).
-    3. An item holding both polarizations ("per frame", e.g. .P3B) or with no partner is a dataset
-       of its own.
-    Hand-picked items can always be loaded together as one dataset instead.
-    """
-    pols = pols or {}
-    opposite = {"CP": "CM", "CM": "CP", "LH": "LV", "LV": "LH"}
-    named: dict[tuple[str, str], list[str]] = {}
-    order: list[tuple[str, str] | str] = []
-    for p in map(str, paths):
-        q = Path(p)
-        name = q.name if q.is_dir() else q.stem
-        key = _POL_TOKEN.sub("*", name)
-        if key == name:
-            order.append(p)
-            continue
-        k = (str(q.parent), key)
-        if k not in named:
-            order.append(k)
-        named.setdefault(k, []).append(p)
-    groups: list[list[str]] = []
-    open_: list[str] | None = None  # an unnamed item waiting for its opposite polarization
-    for entry in order:
-        if isinstance(entry, tuple):
-            groups.append(named[entry])
-            continue
-        tag = pols.get(entry)
-        if open_ is not None and tag and opposite.get(pols.get(open_[0]) or "") == tag:
-            open_.append(entry)
-            open_ = None
-            continue
-        groups.append([entry])
-        open_ = groups[-1] if tag in opposite else None
-    return groups
 
 
 POL_TAGS = ("CP", "CM", "LH", "LV")

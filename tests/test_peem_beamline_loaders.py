@@ -1,4 +1,5 @@
 """One loader for UE49 / UView / P3B (core/io/peem_beamline_loaders.py) and XMCD through the service."""
+import os
 import numpy as np
 import pytest
 from test_als_p3b import write_p3b
@@ -6,6 +7,16 @@ from test_esm_uview_loader import _acq as uview_acq
 
 from tensorspec.core.io import peem_beamline_loaders
 from tensorspec.core.peem import synthetic
+
+
+@pytest.fixture(autouse=True)
+def _private_load_settings(tmp_path, monkeypatch):
+    """The load list remembers its folder in QSettings: keep tests out of the user's settings."""
+    from PySide6.QtCore import QSettings
+    from tensorspec.gui.components.peem_tabs.load_section import LoadSection
+    store = QSettings(str(tmp_path / "load_settings.ini"), QSettings.IniFormat)
+    monkeypatch.setattr(LoadSection, "_settings", staticmethod(lambda: store))
+
 
 
 def _ue49(tmp_path):
@@ -253,7 +264,7 @@ def test_load_list_sets_polarization_of_unnamed_folders(qapp, tmp_path, monkeypa
     p._run = lambda fn, done, *args, **kw: done(fn(*args, **kw))  # synchronous for the test
     p._add_paths([str(a), str(b)])
     assert "? — set the polarization" in p.scan_list.item(0).text()
-    assert "No polarization for 2 item(s): first, second" in p.load_status.text()
+    assert "Set the polarization of: first, second" in p.load_status.text()
     p._load()
     assert errors and "Set the polarization" in errors[-1] and p._name is None
     for row, tag in ((0, "CP"), (1, "CM")):
@@ -386,111 +397,17 @@ def test_remove_selected_items_from_the_load_list(qapp, tmp_path):
     assert errors and p._scan_paths == [str(lh)]
 
 
-def _angle_acq(root, pol, value, angle):
-    """A UView acquisition named like the beamtime ones: ..._<pol>_<angle>deg."""
-    tmp = root / f"_{pol}_{angle}"
-    tmp.mkdir()
-    d = uview_acq(tmp, pol, value)
-    return d.rename(root / d.name.replace("_0deg", f"_{angle}deg"))
-
-
-def test_group_pairs_by_name_then_by_polarization_order(tmp_path):
-    names = [f"XPEEM_20um_579eV_Cr2p_{p}_{a}deg" for p in ("CL", "CR") for a in ("-15", "+15", "0")]
-    paths = [str(tmp_path / n) for n in names]
-    groups = peem_beamline_loaders.group_pairs(paths)
-    assert groups == [[paths[0], paths[3]], [paths[1], paths[4]], [paths[2], paths[5]]]
-    tables = [str(tmp_path / f"Mono_{i}.txt") for i in (226, 227, 228)] + [str(tmp_path / "a.P3B")]
-    pols = dict(zip(tables, ("CP", "CM", "CP", "per frame")))
-    assert peem_beamline_loaders.group_pairs(tables, pols) == [tables[:2], [tables[2]], [tables[3]]]
-    other = str(tmp_path / "sub" / names[3])  # same name in another folder: not paired with names[0]
-    assert peem_beamline_loaders.group_pairs([paths[0], other]) == [[paths[0]], [other]]
-
-
-def test_load_pairs_save_results_and_unload(tmp_path):
-    from tensorspec.gui.services.peem_service import PeemService
-    acq = [_angle_acq(tmp_path, p, v, a) for p, v in (("CL", 1100), ("CR", 900)) for a in ("-15", "0")]
-    s = PeemService()
-    res = s.load_pairs(acq)
-    names = [r["name"] for r in res]
-    assert len(names) == 2 and all(r["pol_counts"] == {"CM": 3, "CP": 3} for r in res)
-    assert set(names) <= set(s.loaded_datasets())
-    n = names[0]
-    s.drift_correct(n, method="central")
-    s.stack(n)
-    s.asymmetry(n)
-    pushed = s.to_peem_stack(n, "xmcd")["name"]  # a stack for the Sum Rule tab is not a loaded dataset
-    assert pushed not in s.loaded_datasets()
-    out = s.save_results(n, tmp_path / "results")
-    files = {f.rsplit("/", 1)[-1] for f in out["files"]}
-    assert {"pcd_data.tif", "pcd_data.png", "stack_mean_cp.tif", "drift.csv", "history.txt", "summary.json"} <= files
-    assert "pcd_mean_cp.tif" not in files  # the stacked images are saved once, from the stack
-    assert "PEEM load" in (tmp_path / "results" / n / "history.txt").read_text()
-    assert len((tmp_path / "results" / n / "drift.csv").read_text().splitlines()) == 1 + 6
-    s.unload(n)
-    assert n not in s.loaded_datasets() and names[1] in s.loaded_datasets()
-    for name in (names[1], pushed):
-        s.unload(name)
-
-
-def test_panel_switches_saves_and_unloads_datasets(qapp, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QFileDialog
+def test_add_dialogs_open_in_the_folder_used_last_time(qapp, tmp_path, monkeypatch):
+    """Add files / Add folders start where the last item came from, also after Clear all and in a
+    new panel (a restart): the folder is kept in the settings."""
     from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
-    acq = [_angle_acq(tmp_path, p, v, a) for p, v in (("CL", 1100), ("CR", 900)) for a in ("-15", "0")]
+    day = tmp_path / "beamtime" / "110K"
+    day.mkdir(parents=True)
+    cl = uview_acq(day, "CL", 1100)
     p = PeemXmcdPanel()
-    for leftover in p.service.loaded_datasets():  # datasets other tests left in the shared workspace
-        p.service.unload(leftover)
-    p._run = lambda fn, done, *a, **k: done(fn(*a, **k))  # synchronous
-    p._add_paths([str(x) for x in acq])
-    p.scan_list.item(0).setSelected(True)
-    assert p.btn_load_sel.isEnabled() and p.btn_load_sel.text() == "Load selected (1) as one dataset"
-    p.scan_list.clearSelection()
-    assert not p.btn_load_sel.isEnabled()
-    p._load_pairs()
-    names = [p.dataset_combo.itemData(i) for i in range(p.dataset_combo.count())]
-    assert len(names) == 2 and p._name == names[0]
-    p.service.drift_correct(names[0], method="central")
-    p.service.stack(names[0])
-    p._switch_dataset(names[1])
-    assert p._name == names[1] and p.stack_out.currentData() is None  # nothing stacked there yet
-    p._switch_dataset(names[0])
-    assert p.stack_out.currentData() == "mean_cp"
-    monkeypatch.setattr(QFileDialog, "getExistingDirectory", staticmethod(lambda *a, **k: str(tmp_path / "out")))
-    p._save_results()
-    assert (tmp_path / "out" / names[0] / "stack_mean_cp.png").exists()
-    p._unload_current()
-    assert p._name == names[1] and p.dataset_combo.count() == 1
+    assert p._start_dir() == os.path.expanduser("~")  # nothing remembered yet
+    p._add_paths([str(cl)])
+    assert p._start_dir() == str(day)
     p._clear_scans()
-    assert p._name is None and not p.service.loaded_datasets() and p.dataset_combo.currentData() is None
-
-
-def test_items_without_polarization_do_not_block_loading_the_others(qapp, tmp_path, monkeypatch):
-    """LEEM images next to the XPEEM folders (no polarization): Load selected and Load each pair
-    still work and leave them out; Load all asks for their polarization."""
-    import shutil
-    from PySide6.QtWidgets import QMessageBox
-    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
-    errors = []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: errors.append(a[2])))
-    acq = [_angle_acq(tmp_path, p, v, a) for p, v in (("CL", 1100), ("CR", 900)) for a in ("-15", "0")]
-    leem = []
-    for i in range(4):
-        f = tmp_path / f"20260602_LEEM_mirror_{i}.dat"
-        shutil.copy(next(acq[0].glob("*.dat")), f)
-        leem.append(str(f))
-    p = PeemXmcdPanel()
-    for leftover in p.service.loaded_datasets():
-        p.service.unload(leftover)
-    p._run = lambda fn, done, *a, **k: done(fn(*a, **k))
-    p._add_paths(leem + [str(x) for x in acq])
-    assert p.dataset_combo.currentText() == "(none loaded)"
-    assert "No polarization for 4 item(s)" in p.load_status.text() and "and 1 more" in p.load_status.text()
-    p._load()  # all: refused, the LEEM images have no polarization
-    assert errors and p._name is None
-    p.scan_list.item(4).setSelected(True)  # CL -15
-    p.scan_list.item(6).setSelected(True)  # CR -15
-    p._load(selected=True)
-    assert p._name and p.service.get_meta(p._name)["n_frames"] == 6
-    p.scan_list.clearSelection()
-    p._load_pairs()
-    assert p.dataset_combo.count() == 2 and "Left out (no polarization)" in p.load_status.text()
-    p._clear_scans()
+    assert p._start_dir() == str(day)
+    assert PeemXmcdPanel()._start_dir() == str(day)  # a new window (restart) too

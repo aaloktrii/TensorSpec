@@ -48,48 +48,6 @@ class PeemMapsDomainsSteps:
         self.export_map(name, kind, out.with_suffix(""), var, pictures=("png",) if png else ())
         return str(out.with_suffix(".tif"))
 
-    def save_results(self, name: str, folder: str | Path, pictures: tuple[str, ...] | list[str] = ("png",)) -> dict[str, Any]:
-        """Everything computed for one dataset into <folder>/<name>/ (the frames are not copied):
-
-            <kind>_<variable>.tif / .png   every map (stack, asymmetry, filtered maps, domain map ...)
-            drift.csv                       per-frame drift (frame, polarization, dy, dx in px)
-            history.txt                     every step and its parameters (/history)
-            summary.json                    dataset summary and the scalar results of each map
-        Then the dataset can be unloaded (unload) without losing the results."""
-        import json
-
-        out = Path(folder).expanduser() / name
-        out.mkdir(parents=True, exist_ok=True)
-        files: list[str] = []
-        summary: dict[str, Any] = {"dataset": name, "maps": {}}
-        try:
-            summary["meta"] = {k: v for k, v in self.xmcd_meta(name).items()
-                               if isinstance(v, (str, int, float, bool, list)) or v is None}
-        except Exception as exc:  # summary is a convenience; maps are what matter
-            summary["meta_error"] = str(exc)
-        for kind in self.list_products(name):
-            summary["maps"][kind] = {k: v for k, v in self.get_product_attrs(name, kind).items()
-                                     if isinstance(v, (str, int, float, bool))}
-            for var in self.map_variables(name, kind):
-                if kind != "stack" and var.startswith("mean_"):
-                    continue  # copies of the stacked images, saved once from /analysis/stack
-                if np.ndim(self.get_map(name, kind, var)) == 2:
-                    files += self.export_map(name, kind, out / f"{kind}_{var}", var, pictures=pictures)
-        drift = self.get_drift(name, "processed")
-        if drift is not None:
-            pol = drift.get("pol") or [""] * len(drift["dy"])
-            rows = ["frame,polarization,dy_px,dx_px"] + [f"{i},{p},{dy:.4f},{dx:.4f}" for i, (p, dy, dx)
-                                                         in enumerate(zip(pol, drift["dy"], drift["dx"]))]
-            (out / "drift.csv").write_text("\n".join(rows) + "\n")
-            files.append(str(out / "drift.csv"))
-        hist = global_workspace.get(name)["tree"]["history"]
-        log = (hist.to_dataset() if hasattr(hist, "to_dataset") else hist.ds).attrs.get("log") or []
-        (out / "history.txt").write_text("\n".join(map(str, log)) + "\n")
-        (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
-        files += [str(out / "history.txt"), str(out / "summary.json")]
-        _record(name, "save results", {"folder": str(out), "n_files": len(files)})
-        return {"name": name, "folder": str(out), "files": files}
-
     def export_options(self, name: str, kind: str, var: str = "data") -> dict[str, Any]:
         """What an export dialog starts from: map size, pixel size, colour scale and label the viewer uses."""
         arr = self.get_map(name, kind, var)

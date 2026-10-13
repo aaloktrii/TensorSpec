@@ -15,8 +15,6 @@ checks every public call is listed here and runs the workflow without Qt):
                                           do not record it). load_ue49 / load_uview: one format.
     find_ue49_scans, set_detector_maps    UE49 helpers (TPX3 dead-pixel / flat-field maps)
     load_path, attach_csv                 TIF stack / folder for the Sum Rule tab, beamline CSV
-    load_pairs(paths, pol=...)            one dataset per polarization pair (e.g. CL/CR at each angle),
-                                          all loaded side by side; loaded_datasets lists them
     unload                                remove a dataset
     get_meta, xmcd_meta                   dataset summary (frames, polarizations, FOV, products ...)
 
@@ -54,8 +52,6 @@ checks every public call is listed here and runs the workflow without Qt):
 8. Maps, ROI statistics, domains  [maps_domains]
     list_products, get_map, get_product_attrs, roi_statistics, auto_fov_roi,
     compute_domain_map, export_map_tiff (float TIFF of the values + colour PNG to look at)
-    save_results                          every map (TIFF + PNG), drift.csv, history.txt, summary.json
-                                          of one dataset into a folder (then unload it)
     export_options, export_map            export with options: crop, picture size (px) / dpi,
                                           PNG / PDF / SVG, colours and limits, colour bar, scale bar
 

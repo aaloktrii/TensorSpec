@@ -11,6 +11,16 @@ from tensorspec.core.data_models import TensorData  # noqa: E402
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel, plane_layer  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _private_load_settings(tmp_path, monkeypatch):
+    """The load list remembers its folder in QSettings: keep tests out of the user's settings."""
+    from PySide6.QtCore import QSettings
+    from tensorspec.gui.components.peem_tabs.load_section import LoadSection
+    store = QSettings(str(tmp_path / "load_settings.ini"), QSettings.IniFormat)
+    monkeypatch.setattr(LoadSection, "_settings", staticmethod(lambda: store))
+
+
+
 @pytest.fixture(scope="module")
 def app():
     return QApplication.instance() or QApplication([])
