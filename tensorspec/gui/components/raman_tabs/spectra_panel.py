@@ -17,7 +17,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from tensorspec.core.raman.classification import label_of
 from tensorspec.gui.components.raman_tabs.layout import Canvas
-from tensorspec.plotting.raman_figures import class_rgba, n_color, na_color, orient_axes, side_colorbar
+from tensorspec.plotting.backends.raman_matplotlib_engine import class_rgba, n_color, na_color, orient_axes, side_colorbar
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel

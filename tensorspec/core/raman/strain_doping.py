@@ -20,7 +20,7 @@ with origin (ω_G0, ω_2D0), biaxial-strain slope s_ε = 2.2 and hole-doping
 slope s_n = 0.70. PARAMS defaults were read off the user's figure (origin and
 doping rate are estimates; edit them to the published values).
 
-CLI: scripts/raman/strain_doping.py. Plots (grid, correlation) are in plotting/raman_figures.py.
+CLI: scripts/raman/strain_doping.py. Plots (grid, correlation) are in plotting/backends/raman_matplotlib_engine.py.
 
 Moved from Raman_Classifier ``strain_doping.py`` (analysis part).
 """

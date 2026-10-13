@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tensorspec.core.io.raman_loaders import SPECTRUM_EXT  # noqa: E402
 from tensorspec.core.raman.reference import DEFAULT_REF  # noqa: E402
 from tensorspec.core.raman_engine import RamanEngineRouter  # noqa: E402
-from tensorspec.plotting import raman_figures  # noqa: E402
+from tensorspec.plotting.backends import raman_matplotlib_engine  # noqa: E402
 
 
 def main():
@@ -37,7 +37,7 @@ def main():
     a = ap.parse_args()
     engine = RamanEngineRouter()
     if a.cmd == "build":
-        engine.build_reference([(lab, f) for lab, f in a.ref], a.json, figures=raman_figures)
+        engine.build_reference([(lab, f) for lab, f in a.ref], a.json, figures=raman_matplotlib_engine)
     else:
         if not os.path.exists(a.json):
             raise SystemExit("No reference at %s - run 'build' first." % a.json)
@@ -53,7 +53,7 @@ def main():
                 print("skipped %s: no .txt/.dat/.csv spectra in it" % f)
                 bad += 1
                 continue
-            engine.predict_folder(d, ref, figures=raman_figures)
+            engine.predict_folder(d, ref, figures=raman_matplotlib_engine)
         if bad:
             raise SystemExit(1)
 

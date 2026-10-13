@@ -13,7 +13,7 @@ from PySide6 import QtWidgets
 from tensorspec.core.raman.classification import LAYER_THICK, label_of, layer_from_ratio
 from tensorspec.core.raman.constants import LAYERS
 from tensorspec.gui.components.raman_tabs.layout import Canvas, fit_to_screen
-from tensorspec.plotting.raman_figures import na_color, orient_axes
+from tensorspec.plotting.backends.raman_matplotlib_engine import na_color, orient_axes
 
 if TYPE_CHECKING:
     from tensorspec.gui.components.raman_panel import RamanPanel

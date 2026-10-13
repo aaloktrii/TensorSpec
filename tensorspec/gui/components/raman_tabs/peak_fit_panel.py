@@ -19,7 +19,7 @@ from tensorspec.core.io.raman_loaders import _SPOT_RE, is_single_spectrum, read_
 from tensorspec.core.raman import strain_doping
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.gui.components.raman_tabs.layout import Canvas, _fmt, fit_to_screen
-from tensorspec.plotting.raman_figures import draw_correlation, orient_axes
+from tensorspec.plotting.backends.raman_matplotlib_engine import draw_correlation, orient_axes
 
 #: The strain/doping and peak-fit modules were optional next to the original script; they are
 #: part of tensorspec (core/raman/) now.

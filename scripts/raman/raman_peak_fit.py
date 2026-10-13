@@ -11,7 +11,7 @@ Run (manually, on as many dataset folders as you like):
     python scripts/raman/raman_peak_fit.py ~/Downloads/Graphene/007_02 --n2d 4
 
 CLI of Raman_Classifier ``raman_peak_fit.py``; the fitting is core/raman/peak_fit.py + batch.py,
-the PDFs plotting/raman_figures.py.
+the PDFs plotting/backends/raman_matplotlib_engine.py.
 """
 from __future__ import annotations
 
@@ -23,11 +23,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tensorspec.core.raman import batch  # noqa: E402
-from tensorspec.plotting import raman_figures  # noqa: E402
+from tensorspec.plotting.backends import raman_matplotlib_engine  # noqa: E402
 
 
 def run(folder, a):
-    rows, out, summ, _ = batch.fit_folder(folder, a, figures=raman_figures)
+    rows, out, summ, _ = batch.fit_folder(folder, a, figures=raman_matplotlib_engine)
     good = [r for r in rows if r.get("ok")]
     name = os.path.basename(os.path.normpath(folder))
     print("\n%s: %d spectra, %d fitted  ->  %s" % (name, len(rows), len(good), out))

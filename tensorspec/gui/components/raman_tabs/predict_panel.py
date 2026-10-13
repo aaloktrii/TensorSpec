@@ -3,7 +3,7 @@ mean ± SD) and layer-number / stacking predictions for the loaded map or a fold
 are written to /analysis/raman_layer_prediction.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Tab 5 - Layer prediction); calls go through RamanEngineRouter
-(main.engine), figures through plotting/raman_figures.py."""
+(main.engine), figures through plotting/backends/raman_matplotlib_engine.py."""
 from __future__ import annotations
 
 import os
@@ -17,8 +17,8 @@ from tensorspec.core.io.raman_loaders import short_label
 from tensorspec.core.raman.constants import APP_NAME
 from tensorspec.core.raman.reference import DEFAULT_REF
 from tensorspec.gui.components.raman_tabs.layout import Canvas
-from tensorspec.plotting import raman_figures
-from tensorspec.plotting.raman_figures import REF_COLORS, draw_reference, orient_axes
+from tensorspec.plotting.backends import raman_matplotlib_engine
+from tensorspec.plotting.backends.raman_matplotlib_engine import REF_COLORS, draw_reference, orient_axes
 
 #: The reference / prediction modules were optional next to the original script; they are part
 #: of tensorspec (core/raman/reference.py, core/raman/batch.py) now.
@@ -137,7 +137,7 @@ class PredictTab(QtWidgets.QWidget):
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
             ref = self.main.engine.build_reference([("1L", f1), ("2L", f2)], DEFAULT_REF,
-                                                 figures=raman_figures)
+                                                 figures=raman_matplotlib_engine)
         except Exception as exc:
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.critical(self, APP_NAME, "Could not build:\n\n%s" % exc)
@@ -173,7 +173,7 @@ class PredictTab(QtWidgets.QWidget):
         out = os.path.join(p, "output") if os.path.isdir(p) else \
             os.path.splitext(p)[0] + "_output"
         preds = self.main.engine.write_predictions(rows, self.ref, out, short_label(p),
-                                                   figures=raman_figures)
+                                                   figures=raman_matplotlib_engine)
         self.main.service.write_table("raman_layer_prediction", preds, "2D_fwhm",
                                       {"reference": self.ref_path or ""})
         self._show(preds, short_label(p), out)
@@ -184,7 +184,7 @@ class PredictTab(QtWidgets.QWidget):
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
-            preds = self.main.engine.predict_folder(folder, self.ref, figures=raman_figures)
+            preds = self.main.engine.predict_folder(folder, self.ref, figures=raman_matplotlib_engine)
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
         self._show(preds, short_label(folder), os.path.join(folder, "output"))

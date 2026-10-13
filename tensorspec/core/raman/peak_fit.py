@@ -11,7 +11,7 @@ the summed fit's maximum, FWHM its width at half maximum, height its maximum
 and area the sum of the components; the components are listed too.
 
 Moved from Raman_Classifier ``raman_peak_fit.py`` (fitting part); the per-folder run is in
-core/raman/batch.py, its PDFs in plotting/raman_figures.py, the CLI in scripts/raman/."""
+core/raman/batch.py, its PDFs in plotting/backends/raman_matplotlib_engine.py, the CLI in scripts/raman/."""
 from __future__ import annotations
 
 import numpy as np
