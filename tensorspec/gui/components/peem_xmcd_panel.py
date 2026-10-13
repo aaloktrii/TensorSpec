@@ -59,7 +59,7 @@ class _Worker(QThread):
 
 class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection, AnalysisSection,
                  RoiDomainSection, QWidget):
-    """Load any XPEEM format, compute pcd / pld / pmld / pmnld / domain_map, ROI statistics."""
+    """Load any PEEM beamline format (UE49 / UView / P3B), compute pcd / pld / pmld / pmnld / domain_map, ROI statistics."""
 
     def __init__(self, service: PeemService | None = None, parent=None):
         super().__init__(parent)
@@ -175,7 +175,7 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         self._log("ERROR: " + msg)
         if hasattr(self, "load_status") and self.btn_load.isEnabled():
             self.load_status.setText("Error: " + msg[:200])
-        QMessageBox.warning(self, "XPEEM", msg)
+        QMessageBox.warning(self, "PEEM", msg)
 
     def _run(self, fn, on_done, *args, **kwargs):
         if self._worker is not None and self._worker.isRunning():
@@ -368,5 +368,3 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
 
     # ------------------------------------------------------------ image analysis
 
-
-XpeemPanel = Ue49Panel = PeemXmcdPanel  # former names

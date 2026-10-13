@@ -1,4 +1,4 @@
-"""XPEEM panel section: 1. Load data (UE49 / BNL UView / ALS P3B) and the load options.
+"""PEEM XMCD-tab section: 1. Load data (UE49 / BNL UView / ALS P3B) and the load options.
 
 Mixin of ``PeemXmcdPanel`` (gui/components/peem_xmcd_panel.py); it uses the panel's shared state
 (service, _name, ROIs, viewer, _log / _err / _run). Moved verbatim from the former ue49_panel.py."""
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tensorspec.core.io import xpeem_loaders
+from tensorspec.core.io import peem_beamline_loaders
 
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
@@ -104,7 +104,7 @@ class LoadSection:
             if p in self._scan_paths:
                 continue
             try:
-                fmt, _ = xpeem_loaders.detect_format(p)
+                fmt, _ = peem_beamline_loaders.detect_format(p)
             except ValueError as exc:
                 self._err(str(exc))
                 continue
@@ -121,7 +121,7 @@ class LoadSection:
         if not n:
             self.load_status.setText("Add files or a folder, then click Load.")
             return
-        missing = [os.path.basename(str(q)) for q in map(xpeem_loaders.partner_folder, self._scan_paths)
+        missing = [os.path.basename(str(q)) for q in map(peem_beamline_loaders.partner_folder, self._scan_paths)
                    if q is not None and os.path.normpath(str(q)) not in self._scan_paths]
         msg = f"{n} item(s) ready. Click Load."
         if missing:
@@ -138,8 +138,8 @@ class LoadSection:
 
     def _add_scans(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "XPEEM files", self._start_dir(),
-            "XPEEM (*.txt *.dat *.P3B *.p3b);;UE49 scan tables (*.txt);;UView (*.dat);;ALS PEEM-3 (*.P3B *.p3b)")
+            self, "PEEM beamline files", self._start_dir(),
+            "PEEM beamline data (*.txt *.dat *.P3B *.p3b);;UE49 scan tables (*.txt);;UView (*.dat);;ALS PEEM-3 (*.P3B *.p3b)")
         self._add_paths(paths)
 
     def _add_folders(self):
@@ -154,7 +154,7 @@ class LoadSection:
 
     @staticmethod
     def _partner_folder(path: str) -> str | None:
-        partner = xpeem_loaders.partner_folder(path)
+        partner = peem_beamline_loaders.partner_folder(path)
         return str(partner) if partner else None
 
     def _clear_scans(self):
@@ -191,7 +191,7 @@ class LoadSection:
         i0 = self.chk_i0.isChecked() if self.chk_i0.isEnabled() else None
         self.load_status.setText(f"Loading {len(self._scan_paths)} item(s)… (online-only Dropbox files download first)")
         self._log("Loading: " + "; ".join(self._scan_paths))
-        self._run(self.service.load_xpeem, self._on_loaded, list(self._scan_paths),
+        self._run(self.service.load_beamline, self._on_loaded, list(self._scan_paths),
                   None, i0_normalize=i0,  # dataset name is automatic
                   tpx3=self.chk_tpx3.isChecked(), drop_bad_frames=self.chk_bad.isChecked())
 

@@ -73,13 +73,13 @@ class PeemPanel(QWidget):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Dataset name (auto from path)")
         load_form.addRow("Name:", self.name_edit)
-        self.btn_from_xpeem = QPushButton("Load from XMCD-imaging tab")
-        self.btn_from_xpeem.setToolTip(
+        self.btn_from_xmcd = QPushButton("Load from XMCD-imaging tab")
+        self.btn_from_xmcd.setToolTip(
             "Use the drift-corrected data of the XMCD-imaging tab: averaged per polarization and photon energy,\n"
             "paired and separated, ready for background subtraction and the sum rule")
-        self.btn_from_xpeem.clicked.connect(self._load_from_xpeem)
-        self.btn_from_xpeem.setVisible(False)  # shown when the PEEM suite connects its XMCD-imaging tab
-        load_form.addRow(self.btn_from_xpeem)
+        self.btn_from_xmcd.clicked.connect(self._load_from_xmcd)
+        self.btn_from_xmcd.setVisible(False)  # shown when the PEEM suite connects its XMCD-imaging tab
+        load_form.addRow(self.btn_from_xmcd)
         btn_row = QHBoxLayout()
         self.btn_load_stack = QPushButton("Load TIF Stack")
         self.btn_load_stack.clicked.connect(self._load_tif_stack)
@@ -340,13 +340,13 @@ class PeemPanel(QWidget):
         self._load_thread.finished_signal.connect(self._on_load_finished)
         self._load_thread.start()
 
-    def set_xpeem_source(self, source):
+    def set_xmcd_source(self, source):
         """source() -> summary dict of the hand-over (see PeemService.to_peem_stack, gui/services/peem_steps/drift_stack.py); set by the PEEM suite (XMCD-imaging tab)."""
-        self._xpeem_source = source
-        self.btn_from_xpeem.setVisible(source is not None)
+        self._xmcd_source = source
+        self.btn_from_xmcd.setVisible(source is not None)
 
-    def _load_from_xpeem(self):
-        source = getattr(self, "_xpeem_source", None)
+    def _load_from_xmcd(self):
+        source = getattr(self, "_xmcd_source", None)
         if source is None:
             return
         self.setCursor(Qt.BusyCursor)

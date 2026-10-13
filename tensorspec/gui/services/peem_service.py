@@ -10,7 +10,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from tensorspec.core.data_models import TensorData
-from tensorspec.core.io import xpeem_loaders
+from tensorspec.core.io import peem_beamline_loaders
 from tensorspec.core.io.peem_loaders import (
     find_beamline_csv,
     load_beamline_csv,
@@ -767,8 +767,8 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
         source_path = Path(path).expanduser().resolve()
         if not source_path.exists():
             raise ValueError(f"Path not found: {source_path}")
-        if not _tif_paths(source_path) and xpeem_loaders.is_xpeem_source(source_path):
-            return self._load_xpeem_path(source_path, name)
+        if not _tif_paths(source_path) and peem_beamline_loaders.is_beamline_source(source_path):
+            return self._load_beamline_path(source_path, name)
 
         _enforce_peem_size(source_path)
         load_directory = source_path if source_path.is_dir() else source_path.parent
@@ -820,14 +820,14 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
             csv_candidates=candidates,
         )
 
-    def _load_xpeem_path(self, source_path: Path, name: str | None) -> dict[str, Any]:
-        """UE49 scan / UView (BNL) / P3B (ALS) data through core/io/xpeem_loaders. A single-
+    def _load_beamline_path(self, source_path: Path, name: str | None) -> dict[str, Any]:
+        """UE49 scan / UView (BNL) / P3B (ALS) data through core/io/peem_beamline_loaders. A single-
         polarization UView folder brings its partner (CL<->CR, LH<->LV) so pairing has both."""
         paths = [source_path]
-        partner = xpeem_loaders.partner_folder(source_path)
+        partner = peem_beamline_loaders.partner_folder(source_path)
         if partner is not None:
             paths.append(partner)
-        tensor = xpeem_loaders.load_xpeem(paths)
+        tensor = peem_beamline_loaders.load_beamline(paths)
         if tensor.value.shape[0] > MAX_PEEM_FRAMES:
             raise ValueError(f"PEEM data exceeds the {MAX_PEEM_FRAMES}-frame limit.")
         fallback = source_path.stem if source_path.is_file() else source_path.name

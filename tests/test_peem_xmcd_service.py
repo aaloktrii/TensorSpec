@@ -1,4 +1,4 @@
-"""End-to-end XPEEM service on synthetic UE49 scans, plus an offscreen suite smoke test."""
+"""End-to-end PEEM service (XMCD-imaging steps) on synthetic UE49 scans, plus an offscreen suite smoke test."""
 import numpy as np
 import pytest
 
@@ -85,7 +85,7 @@ def test_peem_suite_tabs_share_one_service(qapp):
     assert suite.tabs.count() == 2  # XMCD imaging + the original stack panel; XAS is its own suite
     assert suite.panel.service is suite.service  # one PEEM service for both tabs
     assert not hasattr(suite.service, "xas")
-    assert not suite.panel.btn_from_xpeem.isHidden()
+    assert not suite.panel.btn_from_xmcd.isHidden()
     suite.close()
 
 

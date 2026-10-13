@@ -700,7 +700,7 @@ def process_spectra(job: SpectraJob, root: Path, st: Settings, sessions: dict, p
         row["xmcd_quality"] = "suspect" if same_sign else "ok"
         summary["sumrule"] = None
         summary["sumrule_note"] = ("not computed in batch: the stack backgrounds and edge jumps are not reliable "
-                                   "enough for unattended sum rules; use the XPEEM suite XAS/PEEM tabs with a "
+                                   "enough for unattended sum rules; use the PEEM suite's stack / BG / sum-rule tab with a "
                                    "hand-set two-step background")
         row.update({"xmcd_L3_pct": summary["xmcd_L3_percent_of_peak"], "xmcd_L2_pct": summary["xmcd_L2_percent_of_peak"]})
         # L3 dichroism map from the stacks (frames within +-0.3 eV of the L3 XMCD maximum)

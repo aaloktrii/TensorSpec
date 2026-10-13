@@ -64,10 +64,10 @@ Each output is a Dataset with `data` on (y, x), extra image variables, and scala
 
 ## Tests
 
-- `tests/test_ue49_*.py` and `tests/test_xpeem_service.py` use synthetic data with known answers (`core/peem/synthetic.py`).
-- `tests/test_xpeem_realdata.py` runs only when the data folders are set:
+- `tests/test_ue49_*.py` and `tests/test_peem_xmcd_service.py` use synthetic data with known answers (`core/peem/synthetic.py`).
+- `tests/test_peem_realdata.py` runs only when the data folders are set:
   - `UE49_DATA_DIR` = the folder that contains `June 2025/` and `Procedure files/`
-  - `TENSORSPEC_BNL_XPEEM` = a folder of CP/CM-tagged TIFFs
+  - `TENSORSPEC_BNL_PEEM` = a folder of CP/CM-tagged TIFFs
 
 ## Ported since (core/peem/)
 

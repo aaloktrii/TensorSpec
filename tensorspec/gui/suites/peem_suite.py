@@ -4,7 +4,7 @@ Tabs on one shared workspace:
   Stack · BG · sum rule   the original PEEM panel (pair / separate, NCC drift, background, sum rule)
   XMCD imaging            UE49 / BNL UView / ALS P3B loading, stack clean-up, drift correction,
                           stack + asymmetry, image analysis, ROIs and domain maps (data viewer)
-The XMCD-imaging result can be handed to the first tab ("Load from XPEEM tab") for background
+The XMCD-imaging result can be handed to the first tab ("Load from XMCD-imaging tab") for background
 subtraction and the sum rule. XAS spectra are a separate suite (xas_suite.py).
 """
 from __future__ import annotations
@@ -29,12 +29,12 @@ class PEEMSuite(QWidget):
         self.xmcd_panel = PeemXmcdPanel(service=self.service)
         self.panel = PeemPanel()
         self.panel.service = self.service
-        self.panel.set_xpeem_source(self._xpeem_to_peem)
+        self.panel.set_xmcd_source(self._xmcd_to_stack)
         self.tabs.addTab(self.xmcd_panel, "XMCD imaging (load · drift · stack · asymmetry · domains)")
         self.tabs.addTab(self.panel, "Stack · BG · sum rule")
         layout.addWidget(self.tabs)
 
-    def _xpeem_to_peem(self) -> dict:
+    def _xmcd_to_stack(self) -> dict:
         """XMCD-imaging result -> stack tab (background subtraction, sum rule)."""
         name = self.xmcd_panel._name
         if not name:

@@ -1,4 +1,4 @@
-"""XPEEM panel section: 7. Map ROIs, 8. ROI statistics, 9. Domain map and TIFF export.
+"""PEEM XMCD-tab section: 7. Map ROIs, 8. ROI statistics, 9. Domain map and TIFF export.
 
 Mixin of ``PeemXmcdPanel`` (gui/components/peem_xmcd_panel.py); it uses the panel's shared state
 (service, _name, ROIs, viewer, _log / _err / _run). Moved verbatim from the former ue49_panel.py."""

@@ -9,5 +9,5 @@ XMCD imaging (UE49 / BNL / ALS)  drift (align_stack: one entry over all drift me
                                  datasets, ANALYSIS_KINDS), synthetic (test data)
 Beamline specifics               ue49/ (TPX3 detector, batch), esm/ (BNL batch)
 Readers                          core/io/ (peem_loaders, ue49_loaders, uview_loaders, p3b_loaders,
-                                 xpeem_loaders)
+                                 peem_beamline_loaders)
 """

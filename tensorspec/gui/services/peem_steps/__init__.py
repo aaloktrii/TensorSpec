@@ -7,8 +7,8 @@ dichroism and domain workflow (no Qt).
 (load, cleanup, drift_stack, image_analysis, maps_domains; shared helpers in common.py) next to
 its original stack / pair / drift / BG / sum-rule methods. The XMCD-imaging methods are:
 
-    load_xpeem       UE49 scan tables, UView folders (BNL ESM) or .P3B folders (ALS)
-                     -> one PEEM dataset (format detected; core/io/xpeem_loaders.py)
+    load_beamline       UE49 scan tables, UView folders (BNL ESM) or .P3B folders (ALS)
+                     -> one PEEM dataset (format detected; core/io/peem_beamline_loaders.py)
     load_ue49 / load_uview  the same for one format (kept for scripts)
     drift_correct    /processed           step 1: every frame aligned to frame 0 (drift-corrected stack)
     stack            /analysis/stack      step 2: one image per polarization (mean), B aligned onto A

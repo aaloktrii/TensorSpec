@@ -1,4 +1,4 @@
-"""XPEEM panel section: 4. Stack and 5. Asymmetry (plus one-click / PLD / PMLD).
+"""PEEM XMCD-tab section: 4. Stack and 5. Asymmetry (plus one-click / PLD / PMLD).
 
 Mixin of ``PeemXmcdPanel`` (gui/components/peem_xmcd_panel.py); it uses the panel's shared state
 (service, _name, ROIs, viewer, _log / _err / _run). Moved verbatim from the former ue49_panel.py."""

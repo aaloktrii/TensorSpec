@@ -463,7 +463,7 @@ class PeemDriftStackSteps:
         proc = global_workspace.pull_tensor_data(name, "processed")
         pmd = (proc.metadata or {}) if proc is not None else {}
         if proc is None or not pmd.get("drift_corrected"):
-            raise ValueError("Run step 2 (drift correction) in the XPEEM tab first.")
+            raise ValueError("Run step 2 (drift correction) in the XMCD-imaging tab first.")
         frames = np.asarray(proc.value, dtype=np.float32)
         pol = [str(t) for t in pmd.get("pol", [])]
         energy, e_src = resolve_energy(len(raw.value), raw.metadata or {})
@@ -481,7 +481,7 @@ class PeemDriftStackSteps:
             "pol": pol_out,
             "frame_names": [f"{src.get(t, t)}@{e:.2f}eV" for e in points for t in (ta, tb)],
             "derived_from": name,
-            "derived_by": "XPEEM tab: drift-corrected frames averaged per polarization and energy",
+            "derived_by": "XMCD-imaging tab: drift-corrected frames averaged per polarization and energy",
             "drift_method": pmd.get("drift_method_label"),
             "frames_per_point": counts,
             "beamline_table": {"columns": ["energy"], "series": {"energy": points}} if has_e else None,
@@ -501,7 +501,7 @@ class PeemDriftStackSteps:
                "energy_bin_eV": round(energy_bin_eV, 4) if has_e else None}
         if len(points) < 3:
             out["note"] = ("single photon energy: background subtraction and the sum rule need an energy "
-                           "scan (several energies); use the XPEEM tab's asymmetry for single-energy maps")
+                           "scan (several energies); use the XMCD-imaging tab's asymmetry for single-energy maps")
         return out
 
     def get_drift(self, name: str, kind: str = "pcd") -> dict[str, Any] | None:

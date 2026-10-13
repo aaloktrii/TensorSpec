@@ -1,4 +1,4 @@
-"""NSLS-II ESM (21-ID) XPEEM support: Elmitec UView .dat images and the
+"""NSLS-II ESM (21-ID) PEEM support: Elmitec UView .dat images and the
 beamtime folder layout used at BNL (no Qt).
 
 reader  core/io/uview_loaders.py (UKSOFT2001 .dat; image + sample temperature,

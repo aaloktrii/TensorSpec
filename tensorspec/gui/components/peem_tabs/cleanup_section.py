@@ -1,4 +1,4 @@
-"""XPEEM panel section: 2. Stack clean-up before drift (non-destructive edits).
+"""PEEM XMCD-tab section: 2. Stack clean-up before drift (non-destructive edits).
 
 Mixin of ``PeemXmcdPanel`` (gui/components/peem_xmcd_panel.py); it uses the panel's shared state
 (service, _name, ROIs, viewer, _log / _err / _run). Moved verbatim from the former ue49_panel.py."""

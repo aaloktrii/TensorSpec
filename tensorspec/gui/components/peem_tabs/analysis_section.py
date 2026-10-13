@@ -1,4 +1,4 @@
-"""XPEEM panel section: 6. Image analysis on the shown image (SPEEM Igor ports).
+"""PEEM XMCD-tab section: 6. Image analysis on the shown image (SPEEM Igor ports).
 
 Mixin of ``PeemXmcdPanel`` (gui/components/peem_xmcd_panel.py); it uses the panel's shared state
 (service, _name, ROIs, viewer, _log / _err / _run). Moved verbatim from the former ue49_panel.py."""

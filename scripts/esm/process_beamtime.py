@@ -1,4 +1,4 @@
-"""Process an NSLS-II ESM XPEEM beamtime folder (Elmitec UView .dat).
+"""Process an NSLS-II ESM PEEM beamline folder (Elmitec UView .dat).
 
     python scripts/esm/process_beamtime.py "<data>/BNL/<proposal>" [--plan] [--redo]
 

@@ -2,7 +2,7 @@
 
 UE49_DATA_DIR         folder containing the 'June 2025' beamtime days and
                       'Procedure files' (dead-pixel / NormImage TIFFs)
-TENSORSPEC_BNL_XPEEM  the BNL (NSLS-II ESM) beamtime folder, e.g. <data>/BNL/<proposal>
+TENSORSPEC_BNL_PEEM  the BNL (NSLS-II ESM) beamtime folder, e.g. <data>/BNL/<proposal>
 """
 import os
 from pathlib import Path
@@ -14,7 +14,7 @@ from tensorspec.core.workspace import global_workspace
 from tensorspec.gui.services.peem_service import PeemService
 
 UE49 = os.environ.get("UE49_DATA_DIR")
-BNL = os.environ.get("TENSORSPEC_BNL_XPEEM")
+BNL = os.environ.get("TENSORSPEC_BNL_PEEM")
 
 
 def _ue49_service() -> tuple[PeemService, Path]:
@@ -62,7 +62,7 @@ def test_ue49_cr_xmld_matched_fov():
         global_workspace.remove("rt_cr_xmld")
 
 
-@pytest.mark.skipif(not BNL, reason="set TENSORSPEC_BNL_XPEEM to run")
+@pytest.mark.skipif(not BNL, reason="set TENSORSPEC_BNL_PEEM to run")
 def test_bnl_esm_uview_catalog_and_metadata():
     """BNL NSLS-II ESM beamtime: Elmitec UView .dat files."""
     from tensorspec.core.io import uview_loaders as uview

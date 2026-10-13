@@ -1,6 +1,6 @@
-"""One XPEEM loader for the three beamline formats (no Qt).
+"""One PEEM loader for the three beamline formats (no Qt).
 
-``load_xpeem(paths)`` detects the format from the paths / file contents and
+``load_beamline(paths)`` detects the format from the paths / file contents and
 returns the same PEEM ``(frame, y, x)`` TensorData for all of them, with one
 polarization tag per frame in ``metadata["pol"]`` ("CP", "CM", "LH", "LV"):
 
@@ -70,7 +70,7 @@ def partner_folder(path: str | Path) -> Path | None:
     return None
 
 
-def is_xpeem_source(path: str | Path) -> bool:
+def is_beamline_source(path: str | Path) -> bool:
     try:
         detect_format(path)
         return True
@@ -83,7 +83,7 @@ def _is_uview(path: Path) -> bool:
         return fh.read(len(uview_loaders.MAGIC)) == uview_loaders.MAGIC
 
 
-def load_xpeem(
+def load_beamline(
     paths: list[str | Path],
     *,
     i0_normalize: bool | None = None,

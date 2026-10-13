@@ -29,7 +29,7 @@ tensorspec/
 │   │   ├── __init__.py
 │   │   ├── peem_loaders.py   # TIF / ZIP / folder PEEM stacks
 │   │   ├── xas_loaders.py    # 1D XAS/XMCD CSV/TXT (single or paired channels)
-│   │   ├── xpeem_loaders.py  # ONE XPEEM entry: load_xpeem() detects UE49 / UView / P3B -> PEEM TensorData
+│   │   ├── peem_beamline_loaders.py  # ONE beamline entry: load_beamline() detects UE49 / UView / P3B -> PEEM TensorData
 │   │   ├── ue49_loaders.py   # BESSY II UE49: scan .txt + TIFF folder + PolTable (TPX3/dead/flat/I0 via peem/ue49)
 │   │   ├── uview_loaders.py  # Elmitec UView .dat (BNL ESM): reader + CL/CR/LH/LV acquisition folders
 │   │   ├── p3b_loaders.py    # ALS 11.0.1 PEEM-3 .P3B frames + .dat logs; EPU ±0.9 -> CP/CM
@@ -73,7 +73,7 @@ tensorspec/
 │   │   └── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
 │   ├── viewers/               # Reusable Qt widgets for suites to embed (where present)
 │   ├── peem_plots.py          # PEEM XMCD-tab plots (profiles, fits, histogram, FFT, drift, focus check)
-│   └── ue49_preview.py        # Matplotlib preview figures for the XPEEM batch scripts
+│   └── ue49_preview.py        # Matplotlib preview figures for the PEEM beamtime batch scripts
 └── gui/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon

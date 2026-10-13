@@ -1,4 +1,4 @@
-"""Small widget helpers shared by the XPEEM panel sections."""
+"""Small widget helpers shared by the PEEM XMCD-tab sections."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import QDoubleSpinBox

@@ -1,4 +1,4 @@
-"""Generic DataViewerPanel features used by the XPEEM panel (off by default for ARPES / ML)."""
+"""Generic DataViewerPanel features used by the PEEM XMCD tab (off by default for ARPES / ML)."""
 import os
 
 import numpy as np

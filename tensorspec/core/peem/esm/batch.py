@@ -1,4 +1,4 @@
-"""Whole-beamtime processing of NSLS-II ESM XPEEM data (no Qt, no plotting).
+"""Whole-beamtime processing of NSLS-II ESM PEEM data (no Qt, no plotting).
 
 Folder layout (one BNL ESM beamtime, June 2026)::
 

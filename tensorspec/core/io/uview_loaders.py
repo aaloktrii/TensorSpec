@@ -1,4 +1,4 @@
-"""Elmitec UView image files (``UKSOFT2001`` header, e.g. NSLS-II ESM XPEEM/LEEM).
+"""Elmitec UView image files (``UKSOFT2001`` header, e.g. NSLS-II ESM PEEM/LEEM).
 
 Layout used here (verified on the June 2026 BNL files, header version 9):
 

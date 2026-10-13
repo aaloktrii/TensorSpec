@@ -1,10 +1,10 @@
-"""One loader for UE49 / UView / P3B (core/io/xpeem_loaders.py) and XMCD through the service."""
+"""One loader for UE49 / UView / P3B (core/io/peem_beamline_loaders.py) and XMCD through the service."""
 import numpy as np
 import pytest
 from test_als_p3b import write_p3b
 from test_esm_uview_loader import _acq as uview_acq
 
-from tensorspec.core.io import xpeem_loaders
+from tensorspec.core.io import peem_beamline_loaders
 from tensorspec.core.peem import synthetic
 
 
@@ -25,25 +25,25 @@ def _p3b(tmp_path, n=2, shape=(16, 16)):
 
 def test_detect_each_format(tmp_path):
     txt = _ue49(tmp_path)
-    assert xpeem_loaders.detect_format(txt) == ("ue49", txt)
-    assert xpeem_loaders.detect_format(txt.with_suffix("")) == ("ue49", txt)  # image folder -> table
+    assert peem_beamline_loaders.detect_format(txt) == ("ue49", txt)
+    assert peem_beamline_loaders.detect_format(txt.with_suffix("")) == ("ue49", txt)  # image folder -> table
     cl = uview_acq(tmp_path, "CL", 1100)
-    assert xpeem_loaders.detect_format(cl)[0] == "uview"
-    assert xpeem_loaders.detect_format(next(cl.glob("*.dat")))[0] == "uview"
+    assert peem_beamline_loaders.detect_format(cl)[0] == "uview"
+    assert peem_beamline_loaders.detect_format(next(cl.glob("*.dat")))[0] == "uview"
     als = _p3b(tmp_path)
-    assert xpeem_loaders.detect_format(als)[0] == "p3b"
+    assert peem_beamline_loaders.detect_format(als)[0] == "p3b"
     (tmp_path / "junk").mkdir()
     with pytest.raises(ValueError, match="no UE49"):
-        xpeem_loaders.detect_format(tmp_path / "junk")
+        peem_beamline_loaders.detect_format(tmp_path / "junk")
 
 
 def test_mixed_formats_refused(tmp_path):
     with pytest.raises(ValueError, match="mixed formats"):
-        xpeem_loaders.load_xpeem([_ue49(tmp_path), _p3b(tmp_path)])
+        peem_beamline_loaders.load_beamline([_ue49(tmp_path), _p3b(tmp_path)])
 
 
 def test_p3b_stack_pol_and_i0_default_off(tmp_path):
-    t = xpeem_loaders.load_xpeem([_p3b(tmp_path)])
+    t = peem_beamline_loaders.load_beamline([_p3b(tmp_path)])
     md = t.metadata
     assert t.value.shape == (4, 16, 16)
     assert md["pol"] == ["CP", "CP", "CM", "CM"]
@@ -65,7 +65,7 @@ def test_service_xmcd_uses_beamline_sign(tmp_path, make, expected):
     else:
         paths = [_p3b(tmp_path)]
     svc = PeemService()
-    res = svc.load_xpeem(paths, name=f"t_{make}", i0_normalize=False)
+    res = svc.load_beamline(paths, name=f"t_{make}", i0_normalize=False)
     assert res["format"] == make
     svc.compute_pcd(f"t_{make}")  # drift correction on, sign from the beamline
     assert np.nanmean(svc.get_map(f"t_{make}", "pcd")) == pytest.approx(expected, abs=1e-6)
@@ -74,7 +74,7 @@ def test_service_xmcd_uses_beamline_sign(tmp_path, make, expected):
 def test_drift_roi_stored_with_map(tmp_path):
     from tensorspec.gui.services.peem_service import PeemService
     svc = PeemService()
-    svc.load_xpeem([_p3b(tmp_path, shape=(64, 64))], name="t_drift")
+    svc.load_beamline([_p3b(tmp_path, shape=(64, 64))], name="t_drift")
     r = svc.compute_pcd("t_drift")
     assert r["drift_box"] == "central half (default)" and r["drift_box_y0y1x0x1"] == [16, 48, 16, 48]
     roi = {"kind": "rect", "x0": 4, "x1": 40, "y0": 8, "y1": 60}
@@ -89,7 +89,7 @@ def test_drift_roi_stored_with_map(tmp_path):
 def test_step_by_step_drift_stack_asymmetry(tmp_path):
     from tensorspec.gui.services.peem_service import PeemService
     svc = PeemService()
-    svc.load_xpeem([uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)], name="t_steps")
+    svc.load_beamline([uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)], name="t_steps")
     with pytest.raises(ValueError, match="drift correct"):
         svc.stack("t_steps")
     with pytest.raises(ValueError, match="stack"):
@@ -110,7 +110,7 @@ def test_peem_tab_load_folder_accepts_uview_and_adds_partner(tmp_path):
     from pathlib import Path
     from tensorspec.gui.services.peem_service import PeemService
     cl, cr = uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)
-    assert xpeem_loaders.partner_folder(cl) == cr
+    assert peem_beamline_loaders.partner_folder(cl) == cr
     r = PeemService().load_path(Path(cl), name="t_peemtab")
     assert r["format"] == "uview" and r["partner_added"] == cr.name
     assert r["pol_summary"] == {"CP": 3, "CM": 3}
@@ -132,7 +132,7 @@ def test_drift_methods_recover_known_drift(tmp_path, method, filt):
             from test_esm_uview_loader import _write_uview
             _write_uview(f / f"{i:06d}.dat", np.clip(R.apply_shift(base, -true[i, 0], -true[i, 1]), 0, 65535).astype(np.uint16))
     svc = PeemService()
-    svc.load_xpeem(sorted(tmp_path.glob("XPEEM_*")), name=f"t_{method}")
+    svc.load_beamline(sorted(tmp_path.glob("XPEEM_*")), name=f"t_{method}")
     roi = {"kind": "rect", "x0": 40, "x1": 120, "y0": 40, "y1": 120}
     r = svc.drift_correct(f"t_{method}", None if method == "central" else roi, method=method, filt=filt,
                           search_radius=4)
@@ -146,7 +146,7 @@ def test_drift_methods_recover_known_drift(tmp_path, method, filt):
 def test_drift_box_required_for_marquee_and_roi(tmp_path):
     from tensorspec.gui.services.peem_service import PeemService
     svc = PeemService()
-    svc.load_xpeem([uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)], name="t_nobox")
+    svc.load_beamline([uview_acq(tmp_path, "CL", 1100), uview_acq(tmp_path, "CR", 900)], name="t_nobox")
     with pytest.raises(ValueError, match="Draw the marquee"):
         svc.drift_correct("t_nobox", method="roi")
 

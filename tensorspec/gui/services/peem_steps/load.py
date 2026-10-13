@@ -1,4 +1,4 @@
-"""PEEM service, XMCD-imaging steps: Loading UE49 / UView (BNL ESM) / P3B (ALS) data into one PEEM dataset (core/io/xpeem_loaders).
+"""PEEM service, XMCD-imaging steps: Loading UE49 / UView (BNL ESM) / P3B (ALS) data into one PEEM dataset (core/io/peem_beamline_loaders).
 
 Mixin of ``PeemService`` (gui/services/peem_service.py). Moved verbatim from the former
 gui/services/peem_xmcd_service.py."""
@@ -14,7 +14,7 @@ import numpy as np
 from tensorspec.core.data_models import TensorData
 from tensorspec.core.peem.bg import resolve_energy
 from tensorspec.core.io import ue49_loaders as loaders
-from tensorspec.core.io import xpeem_loaders
+from tensorspec.core.io import peem_beamline_loaders
 from tensorspec.core.workspace import global_workspace
 from tensorspec.gui.services.peem_steps.common import _record
 
@@ -36,7 +36,7 @@ class PeemLoadSteps:
     def find_ue49_scans(day_dir: str | Path, prefix: str | None = None) -> list[str]:
         return [str(p) for p in loaders.find_scans(day_dir, prefix)]
 
-    def load_xpeem(
+    def load_beamline(
         self,
         paths: list[str | Path],
         name: str | None = None,
@@ -51,7 +51,7 @@ class PeemLoadSteps:
         i0_normalize None = beamline default (UE49 on, ALS off, UView has no I0).
         Detector maps (set_detector_maps), tpx3 and drop_bad_frames apply to UE49 only.
         """
-        tensor = xpeem_loaders.load_xpeem(
+        tensor = peem_beamline_loaders.load_beamline(
             paths, i0_normalize=i0_normalize, allow_mixed_fov=allow_mixed_fov,
             dead_map_path=self.dead_map_path, norm_image_path=self.norm_image_path,
             tpx3=tpx3, drop_bad_frames=drop_bad_frames)
@@ -78,16 +78,16 @@ class PeemLoadSteps:
             name_filter=name_filter,
             allow_mixed_fov=allow_mixed_fov,
         )
-        tensor.metadata.update(format="ue49", default_convention=xpeem_loaders.DEFAULT_CONVENTION["ue49"])
+        tensor.metadata.update(format="ue49", default_convention=peem_beamline_loaders.DEFAULT_CONVENTION["ue49"])
         return self._push(tensor, name)
 
     def load_uview(self, folders: list[str | Path], name: str | None = None,
                    allow_mixed_fov: bool = False) -> dict[str, Any]:
         """Elmitec UView acquisition folders (BNL ESM, one polarization each) -> PEEM dataset."""
         for f in folders:
-            if xpeem_loaders.detect_format(f)[0] != "uview":
+            if peem_beamline_loaders.detect_format(f)[0] != "uview":
                 raise ValueError(f"{Path(f).name}: not a UView acquisition")
-        return self.load_xpeem(folders, name, allow_mixed_fov=allow_mixed_fov)
+        return self.load_beamline(folders, name, allow_mixed_fov=allow_mixed_fov)
 
     @staticmethod
     def _auto_name(md: dict[str, Any]) -> str:

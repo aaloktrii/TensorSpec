@@ -1636,7 +1636,7 @@ class DataViewerPanel(QWidget):
 
     def configure_view(self, cmap: str | None = None, symmetric: bool | None = None, center: str | None = None,
                        image_origin: bool | None = None, aspect_equal: bool | None = None) -> None:
-        """Set display options on every view (host panels, e.g. XPEEM maps)."""
+        """Set display options on every view (host panels, e.g. PEEM XMCD maps)."""
         for v in self._iter_slice_widgets():
             for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect):
                 w.blockSignals(True)
