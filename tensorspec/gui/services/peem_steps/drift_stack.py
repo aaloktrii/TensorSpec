@@ -12,6 +12,7 @@ import numpy as np
 from tensorspec.core.data_models import TensorData
 from tensorspec.core.peem.bg import resolve_energy
 from tensorspec.core.peem import dichroism, drift, products, registration
+from tensorspec.core.peem.engine import average_by_energy
 from tensorspec.core.workspace import global_workspace
 from tensorspec.gui.services.peem_steps.common import (_beamline_formula, _box, _drift_attrs, _frames_for_pol, _mask,
                                                        _read_edits, _record, _require_raw, _working_frames)
@@ -451,9 +452,9 @@ class PeemDriftStackSteps:
         dataset "<name>_<pair>" whose raw frames are A(E1), B(E1), A(E2), B(E2), ... with the
         energy axis attached. Frames are grouped in energy bins of ``energy_bin_eV`` (None = the
         larger median step of the two polarizations, so separate CP / CM sweeps on different energy
-        points still pair up); bins without both polarizations are dropped. Then
-        energy axis attached, already paired (/processed) and separated (/processed/<A>, <B>),
-        which is the input the PEEM-stack background and sum-rule steps use.
+        points still pair up); bins without both polarizations are dropped (core/peem/engine.
+        average_by_energy). The new dataset is already paired (/processed) and separated
+        (/processed/<A>, <B>), which is the input the PEEM-stack background and sum-rule steps use.
         """
         tags = {"xmcd": ("CP", "CM"), "xld": ("LH", "LV")}.get(pair)
         if tags is None:
@@ -470,26 +471,8 @@ class PeemDriftStackSteps:
         energy = np.asarray(energy, float)[keep]  # energies of the frames kept after clean-up
         has_e = e_src != "index"
         ta, tb = tags
-        ekey = np.zeros(len(pol))
-        if has_e:
-            if energy_bin_eV is None:
-                steps = [np.median(np.diff(np.unique(energy[[i for i, t in enumerate(pol) if t == tg]])))
-                         for tg in tags if sum(t == tg for t in pol) > 1]
-                energy_bin_eV = float(max(steps)) if steps else 0.01
-            energy_bin_eV = max(float(energy_bin_eV), 1e-3)
-            ekey = np.floor((energy - energy.min()) / energy_bin_eV + 0.5)
-        points, imgs, pol_out, counts = [], [], [], []
-        for e in np.unique(ekey):
-            ia = [i for i, t in enumerate(pol) if t == ta and ekey[i] == e]
-            ib = [i for i, t in enumerate(pol) if t == tb and ekey[i] == e]
-            if not ia or not ib:
-                continue
-            points.append(float(np.mean(energy[ia + ib])) if has_e else 0.0)
-            imgs += [frames[ia].mean(axis=0), frames[ib].mean(axis=0)]
-            pol_out += [ta, tb]
-            counts.append([len(ia), len(ib)])
-        if not points:
-            raise ValueError(f"no energy has both {ta} and {tb} frames")
+        stack, pol_out, points, counts, energy_bin_eV = average_by_energy(
+            frames, pol, energy if has_e else None, tags, energy_bin_eV)
         src = (raw.metadata or {}).get("pol_source") or {}
         md = {k: v for k, v in (raw.metadata or {}).items()
               if k in ("format", "beamline", "default_convention", "pol_source", "fov_um", "um_per_px",
@@ -504,7 +487,6 @@ class PeemDriftStackSteps:
             "beamline_table": {"columns": ["energy"], "series": {"energy": points}} if has_e else None,
             "I0": None, "csv_attached": False,
         })
-        stack = np.stack(imgs)
         tensor = TensorData(value=stack, axes=[np.arange(len(stack), dtype=float), raw.axes[1], raw.axes[2]],
                             labels=raw.labels, units=raw.units, data_type="Experimental PEEM", metadata=md)
         label = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{name}_{pair}")[:64]
