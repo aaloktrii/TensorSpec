@@ -107,9 +107,16 @@ class RoiDomainSection:
         mf.addRow(b)
         cl.addWidget(dom)
 
-        b = QPushButton("Export shown map as TIFF…")
+        row = QHBoxLayout()
+        b = QPushButton("Export shown map…")
+        b.setToolTip("Values as a 32-bit TIFF and a colour PNG next to it")
         b.clicked.connect(self._export)
-        cl.addWidget(b)
+        row.addWidget(b)
+        b = QPushButton("More export options…")
+        b.setToolTip("Region, picture size (px, dpi), PNG / PDF / SVG, colours and limits, colour bar, scale bar")
+        b.clicked.connect(self._export_more)
+        row.addWidget(b)
+        cl.addLayout(row)
 
     def _start_polygon(self, target: str):
         self._start_tool("polygon", lambda sh: self._on_polygon(target, sh), "yellow" if target == "roi" else "cyan",
@@ -206,6 +213,50 @@ class RoiDomainSection:
                       threshold=self.dom_thr.value(), normalize=self.dom_norm.currentData(),
                       min_px=self.dom_minpx.value(), smooth_sigma=self.dom_smooth.value(),
                       flatten_sigma=self.dom_flat.value() or None, bg_roi=self._bg_roi)
+
+    def _shown_map(self) -> tuple[str, str, str] | None:
+        name = self._require()
+        kind = self._view_kind()
+        if not name or kind in self._FRAME_KINDS:
+            self._err("Show a computed map first (viewer Layer menu).")
+            return None
+        return name, kind, self._view_var() or "data"
+
+    def _roi_box(self) -> tuple[int, int, int, int] | None:
+        """(x0, x1, y0, y1) of the map ROI (bounding box of a polygon / ellipse)."""
+        r = self._roi
+        if not r:
+            return None
+        if r.get("kind") == "rect":
+            return tuple(int(round(r[k])) for k in ("x0", "x1", "y0", "y1"))
+        if r.get("points"):
+            xs, ys = [p[0] for p in r["points"]], [p[1] for p in r["points"]]
+            return int(min(xs)), int(max(xs)) + 1, int(min(ys)), int(max(ys)) + 1
+        if {"cx", "cy", "rx", "ry"} <= set(r):
+            return (int(r["cx"] - r["rx"]), int(r["cx"] + r["rx"]) + 1, int(r["cy"] - r["ry"]), int(r["cy"] + r["ry"]) + 1)
+        return None
+
+    def _export_more(self):
+        from tensorspec.gui.components.peem_tabs.export_dialog import ExportMapDialog
+
+        shown = self._shown_map()
+        if not shown:
+            return
+        name, kind, var = shown
+        try:
+            dlg = ExportMapDialog(self, self.service.export_options(name, kind, var), self._roi_box())
+        except Exception as exc:
+            self._err(str(exc))
+            return
+        if not dlg.exec():
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export map (file name without extension)", f"{name}_{kind}_{var}")
+        if path:
+            try:
+                files = self.service.export_map(name, kind, path, var, **dlg.options())
+                self._log("Saved " + ", ".join(files))
+            except Exception as exc:
+                self._err(str(exc))
 
     def _export(self):
         name = self._require()

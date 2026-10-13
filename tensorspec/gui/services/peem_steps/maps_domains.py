@@ -44,18 +44,87 @@ class PeemMapsDomainsSteps:
     def export_map_tiff(self, name: str, kind: str, path: str | Path, var: str = "data", png: bool = True) -> str:
         """32-bit float TIFF of the map values (for ImageJ / Igor / analysis) and, with png, a colour
         PNG next to it (<name>.png), scaled like the viewer, for looking at. Returns the TIFF path."""
+        out = Path(path).expanduser()
+        self.export_map(name, kind, out.with_suffix(""), var, pictures=("png",) if png else ())
+        return str(out.with_suffix(".tif"))
+
+    def export_options(self, name: str, kind: str, var: str = "data") -> dict[str, Any]:
+        """What an export dialog starts from: map size, pixel size, colour scale and label the viewer uses."""
+        arr = self.get_map(name, kind, var)
+        hint = self.display_hint(name, kind, var)
+        from tensorspec.plotting import peem_plots
+
+        vmin, vmax = peem_plots.color_limits(arr, hint)
+        upp = self._um_per_px(name)
+        return {"height_px": int(arr.shape[0]), "width_px": int(arr.shape[1]), "um_per_px": upp,
+                "cmap": hint["cmap"], "vmin": vmin, "vmax": vmax,
+                "label": str((self.get_product_attrs(name, kind).get("formula") or "") if var == "data" else ""),
+                "title": f"{name}: {kind} / {var}"}
+
+    def export_map(
+        self,
+        name: str,
+        kind: str,
+        path: str | Path,
+        var: str = "data",
+        *,
+        values: bool = True,
+        pictures: tuple[str, ...] | list[str] = ("png",),
+        crop: tuple[int, int, int, int] | None = None,
+        size_px: tuple[int, int] | None = None,
+        dpi: int = 150,
+        cmap: str | None = None,
+        vmin: float | None = None,
+        vmax: float | None = None,
+        colorbar: bool = True,
+        title: str | None = None,
+        label: str | None = None,
+        scalebar: bool = False,
+        image_only: bool = False,
+    ) -> list[str]:
+        """Export one map. ``path`` without suffix; writes <path>.tif (32-bit float values, if values)
+        and <path>.<fmt> for each picture format in png / pdf / svg. Returns the files written.
+
+        crop        (x0, x1, y0, y1) in map px, applied to the values and the pictures
+        size_px     (width, height) of the pictures in px; None = automatic
+        cmap, vmin, vmax, title, label   None = what the viewer shows (export_options)
+        other options: plotting/peem_plots.save_map_picture
+        """
         import tifffile
 
         from tensorspec.plotting import peem_plots
 
         arr = self.get_map(name, kind, var).astype(np.float32)
-        out = Path(path).expanduser()
-        tifffile.imwrite(str(out), arr)
-        if png:
-            label = (self.get_product_attrs(name, kind).get("formula") or "") if var == "data" else ""
-            peem_plots.save_map_png(arr, out.with_suffix(".png"), self.display_hint(name, kind, var),
-                                    title=f"{name}: {kind} / {var}", label=str(label))
-        return str(out)
+        if crop is not None:
+            x0, x1, y0, y1 = (int(round(v)) for v in crop)
+            x0, x1 = sorted((max(0, x0), min(arr.shape[1], x1)))
+            y0, y1 = sorted((max(0, y0), min(arr.shape[0], y1)))
+            if x1 - x0 < 2 or y1 - y0 < 2:
+                raise ValueError("the crop region is empty")
+            arr = arr[y0:y1, x0:x1]
+        bad = [f for f in pictures if f not in ("png", "pdf", "svg")]
+        if bad:
+            raise ValueError(f"picture formats are png, pdf, svg (got {bad})")
+        if not values and not pictures:
+            raise ValueError("choose at least one file to write")
+        base = Path(path).expanduser()
+        base = base.with_suffix("") if base.suffix.lower() in (".tif", ".tiff", ".png", ".pdf", ".svg") else base
+        opts = self.export_options(name, kind, var)
+        written = []
+        if values:
+            tifffile.imwrite(str(base.with_suffix(".tif")), arr)
+            written.append(str(base.with_suffix(".tif")))
+        for fmt in pictures:
+            f = base.with_suffix(f".{fmt}")
+            peem_plots.save_map_picture(
+                arr, f, self.display_hint(name, kind, var), size_px=size_px, dpi=int(dpi), cmap=cmap,
+                vmin=vmin, vmax=vmax, colorbar=colorbar, title=opts["title"] if title is None else title,
+                label=opts["label"] if label is None else label, um_per_px=opts["um_per_px"],
+                scalebar=scalebar, image_only=image_only)
+            written.append(str(f))
+        _record(name, "export map", {"kind": kind, "var": var, "files": written, "crop": crop,
+                                     "size_px": size_px, "dpi": dpi, "cmap": cmap, "vmin": vmin, "vmax": vmax})
+        return written
 
     # ------------------------------------------------------------- ROI tools
     def roi_statistics(

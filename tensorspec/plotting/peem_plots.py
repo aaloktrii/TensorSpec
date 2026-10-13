@@ -46,18 +46,80 @@ def color_limits(image: np.ndarray, hint: dict) -> tuple[float, float]:
 def save_map_png(image: np.ndarray, path, hint: dict, title: str = "", label: str = "") -> None:
     """Colour picture of a map with its colour bar, scaled like the viewer shows it (a float TIFF of
     asymmetry values around +/-0.1 looks blank in ordinary image viewers)."""
+    save_map_picture(image, path, hint, title=title, label=label)
+
+
+def _nice_length(target: float) -> float:
+    """1, 2 or 5 x 10^n just below ``target``."""
+    if target <= 0:
+        return 0.0
+    e = np.floor(np.log10(target))
+    return max(m for m in (1, 2, 5) if m * 10 ** e <= target) * 10 ** e
+
+
+def save_map_picture(
+    image: np.ndarray,
+    path,
+    hint: dict,
+    *,
+    size_px: tuple[int, int] | None = None,
+    dpi: int = 150,
+    cmap: str | None = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    colorbar: bool = True,
+    title: str = "",
+    label: str = "",
+    um_per_px: float | None = None,
+    scalebar: bool = False,
+    image_only: bool = False,
+) -> None:
+    """Picture of a map (PNG / PDF / SVG from the file suffix).
+
+    size_px      (width, height) of the saved picture in pixels; None = 6 x 5.2 in at ``dpi`` with the
+                 margins trimmed. With image_only the picture is exactly this size (map only, stretched
+                 to fill it). PDF / SVG: the page is size_px / dpi inches.
+    cmap, vmin, vmax   colour map and limits; None = the viewer's (``hint`` / color_limits)
+    scalebar     a micrometre bar in the lower left (needs um_per_px)
+    PDF / SVG text stays editable (TrueType), as in save_pdf.
+    """
+    import matplotlib
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
 
-    fig = Figure(figsize=(6, 5.2))
+    img = np.asarray(image, float)
+    lo, hi = color_limits(img, hint)
+    vmin, vmax = (lo if vmin is None else float(vmin)), (hi if vmax is None else float(vmax))
+    if vmax <= vmin:
+        raise ValueError("the colour maximum must be above the minimum")
+    figsize = (size_px[0] / dpi, size_px[1] / dpi) if size_px else (6, 5.2)
+    fig = Figure(figsize=figsize, dpi=dpi, layout=None if image_only or not size_px else "constrained")
     FigureCanvasAgg(fig)
-    ax = fig.add_subplot()
-    vmin, vmax = color_limits(image, hint)
-    im = ax.imshow(np.asarray(image, float), cmap=hint.get("cmap", "gray"), vmin=vmin, vmax=vmax)
-    ax.set_title(title, fontsize=9)
+    if image_only:
+        ax = fig.add_axes((0, 0, 1, 1))
+        aspect = "auto"
+    else:
+        ax = fig.add_subplot()
+        aspect = "equal"
+    im = ax.imshow(img, cmap=cmap or hint.get("cmap", "gray"), vmin=vmin, vmax=vmax, aspect=aspect,
+                   interpolation="nearest")
     ax.axis("off")
-    fig.colorbar(im, ax=ax, shrink=0.8, label=label)
-    fig.savefig(path, dpi=150, bbox_inches="tight")
+    if not image_only:
+        if title:
+            ax.set_title(title, fontsize=9)
+        if colorbar:
+            fig.colorbar(im, ax=ax, shrink=0.8, label=label)
+    if scalebar and um_per_px:
+        ny, nx = img.shape
+        um = _nice_length(nx * um_per_px / 5)
+        if um > 0:
+            px = um / um_per_px
+            x0, y0 = nx * 0.05, ny * 0.93
+            ax.plot([x0, x0 + px], [y0, y0], "-", color="black", lw=3, solid_capstyle="butt")
+            ax.text(x0 + px / 2, y0 - ny * 0.02, f"{um:g} µm", ha="center", va="bottom", fontsize=9)
+    kw = {} if (size_px or image_only) else {"bbox_inches": "tight"}
+    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}):
+        fig.savefig(path, dpi=dpi, **kw)
 
 
 def line_profile(ax, pr: dict) -> None:

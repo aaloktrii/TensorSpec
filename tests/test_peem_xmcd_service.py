@@ -356,3 +356,32 @@ def test_export_map_writes_float_tiff_and_a_colour_png(tmp_path):
     assert not (tmp_path / "raw.png").exists()
     s.export_map_tiff(n, "stack", tmp_path / "raw.tif", "data", png=False)
     assert (tmp_path / "raw.tif").exists() and not (tmp_path / "raw.png").exists()
+
+
+def test_export_map_with_options_crop_size_formats_and_limits(tmp_path):
+    import tifffile
+    from matplotlib.image import imread
+
+    from tensorspec.core.peem import synthetic
+    from tensorspec.gui.services.peem_service import PeemService
+
+    mz = synthetic.stripe_domains(64, 64, period_px=16)
+    cp, cm = synthetic.helicity_stacks(mz, a0=0.05, n_cp=2, n_cm=2, noise=0.0)
+    pos = synthetic.write_ue49_scan(tmp_path, "X_0002", cp, ["Cr_pos_0000", "Cr_pos_0001"])
+    neg = synthetic.write_ue49_scan(tmp_path, "X_0003", cm, ["Cr_neg_0000", "Cr_neg_0001"])
+    s = PeemService()
+    n = s.load_beamline([pos, neg], "opts", tpx3=False)["name"]
+    s.drift_correct(n, method="central"); s.stack(n); s.asymmetry(n)
+    o = s.export_options(n, "pcd")
+    assert (o["width_px"], o["height_px"]) == (64, 64) and o["cmap"] == "bwr" and o["vmin"] < 0 < o["vmax"]
+    files = s.export_map(n, "pcd", tmp_path / "cut", crop=(10, 50, 4, 24), pictures=("png", "pdf", "svg"),
+                         size_px=(400, 200), dpi=100, cmap="RdBu_r", vmin=-0.1, vmax=0.1, scalebar=True)
+    assert [f.rsplit(".", 1)[1] for f in files] == ["tif", "png", "pdf", "svg"]
+    assert tifffile.imread(tmp_path / "cut.tif").shape == (20, 40)       # crop: y 4-24, x 10-50
+    assert imread(tmp_path / "cut.png").shape[:2] == (200, 400)          # exactly the asked size
+    s.export_map(n, "pcd", tmp_path / "bare.png", values=False, size_px=(128, 128), image_only=True)
+    assert not (tmp_path / "bare.tif").exists() and imread(tmp_path / "bare.png").shape[:2] == (128, 128)
+    with pytest.raises(ValueError, match="crop region is empty"):
+        s.export_map(n, "pcd", tmp_path / "x", crop=(5, 5, 0, 10))
+    with pytest.raises(ValueError, match="maximum must be above"):
+        s.export_map(n, "pcd", tmp_path / "x", vmin=0.1, vmax=-0.1)
