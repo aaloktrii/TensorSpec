@@ -32,30 +32,27 @@ class LoadSection:
     def _build_load(self, cl):
         """Controls of this section, added to the control column ``cl``."""
         # ---------------------------------------------------------------- 1. Load
-        load = QGroupBox("1. Load data (UE49 · BNL UView · ALS P3B)")
+        load = QGroupBox("1. Load data")
         lf = QFormLayout(load)
         self.scan_list = QListWidget()
         self.scan_list.setMaximumHeight(90)
         self.scan_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         lf.addRow(self.scan_list)
         self.pol_combo = QComboBox()
-        for label, tag in (("auto (from the data)", ""), ("circular + (CP · BNL CL)", "CP"),
-                           ("circular − (CM · BNL CR)", "CM"), ("linear horizontal (LH)", "LH"),
+        for label, tag in (("auto (from the data)", ""), ("circular + (CP)", "CP"),
+                           ("circular − (CM)", "CM"), ("linear horizontal (LH)", "LH"),
                            ("linear vertical (LV)", "LV")):
             self.pol_combo.addItem(label, tag)
-        self.pol_combo.setToolTip("Polarization of the selected item(s). Names are not needed: UE49 and ALS "
-                                  "record it in the data; BNL UView files do not, so set it here when the "
-                                  "folder name has no CL / CR / LH / LV.")
+        self.pol_combo.setToolTip("Polarization of the selected item(s). Set it when the data do not record it.")
         self.pol_combo.activated.connect(self._set_item_pol)
         self.scan_list.itemSelectionChanged.connect(self._show_item_pol)
         lf.addRow("Polarization:", self.pol_combo)
         row = QHBoxLayout()
         b_add = QPushButton("Add files…")
-        b_add.setToolTip("UE49 scan .txt, UView .dat or ALS .P3B frames")
+        b_add.setToolTip("Scan tables (.txt), .dat or .P3B images")
         b_add.clicked.connect(self._add_scans)
         b_dirs = QPushButton("Add folder…")
-        b_dirs.setToolTip("One acquisition folder per click: UE49 image folder, UView .dat folder (one polarization; "
-                          "set it in the list if the name has no CL/CR/LH/LV) or ALS .P3B folder (EPU per frame)")
+        b_dirs.setToolTip("One acquisition folder per click")
         b_dirs.clicked.connect(self._add_folders)
         b_clear = QPushButton("Clear")
         b_clear.clicked.connect(self._clear_scans)
@@ -87,9 +84,9 @@ class LoadSection:
             b.clicked.connect(lambda _=False, e=edit: self._pick_tif(e))
             r.addWidget(b)
             df.addRow(label + ":", r)
-        self.chk_tpx3 = QCheckBox("UE49 TPX3 512→514 cross correction")
+        self.chk_tpx3 = QCheckBox("TPX3 detector 512→514 cross correction")
         self.chk_tpx3.setChecked(True)
-        self.chk_i0 = QCheckBox("I0 normalization (ALS: only if I0 passes the check)")
+        self.chk_i0 = QCheckBox("I0 normalization")
         self.chk_i0.setChecked(True)
         self.chk_bad = QCheckBox("Drop I0-spike / unstable-beam frames")
         df.addRow(self.chk_tpx3)
@@ -156,7 +153,7 @@ class LoadSection:
         for r in rows:
             p = self._scan_paths[r]
             if tag and self._scan_detected.get(p, ("",))[0] == "per frame":
-                self._err(f"{os.path.basename(p)}: ALS frames record their polarization (EPU); not changed.")
+                self._err(f"{os.path.basename(p)}: these frames record their polarization; not changed.")
                 continue
             if tag:
                 self._scan_pol[p] = tag
@@ -196,8 +193,7 @@ class LoadSection:
 
     def _add_scans(self):
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "PEEM beamline files", self._start_dir(),
-            "PEEM beamline data (*.txt *.dat *.P3B *.p3b);;UE49 scan tables (*.txt);;UView (*.dat);;ALS PEEM-3 (*.P3B *.p3b)")
+            self, "PEEM data", self._start_dir(), "PEEM data (*.txt *.dat *.P3B *.p3b)")
         self._add_paths(paths)
 
     def _add_folders(self):
@@ -240,7 +236,7 @@ class LoadSection:
 
     def _load(self):
         if not self._scan_paths:
-            self._err("Add files or folders first (UE49 X_0002.txt, UView or P3B acquisition folders).")
+            self._err("Add files or folders first.")
             return
         try:
             self.service.set_detector_maps(self.dead_edit.text().strip() or None,
@@ -264,7 +260,7 @@ class LoadSection:
     def _on_loaded(self, res: dict):
         self._name = res["name"]
         self.drift_ref.setRange(0, max(0, res["shape"][0] - 1))
-        pc = ", ".join(f"{(res.get('pol_source') or {}).get(k, k)} {v}" for k, v in res["pol_counts"].items())
+        pc = ", ".join(f"{k} {v}" for k, v in res["pol_counts"].items())
         self.load_status.setText(f"Loaded '{res['name']}': {res['shape'][0]} frames ({pc}).")
         if res.get("energy_range") and self.e_a.value() == 0:
             lo, hi = res["energy_range"]

@@ -79,7 +79,7 @@ Grand App
 	- [x] XMCD sum-rule analysis for CP/CM (and related pairs)
 	- [x] Layout: left forms-only; right tabs Frame | BG | Sum Rule (previews no longer crowd left scroll)
 - [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/DFT/ARPES/Transport/ML (prevent drag-to-zero)
-- [ ] PEEM Suite, XMCD-imaging tab (`gui/suites/peem_suite.py`, `gui/services/peem_service.py` + `peem_steps/` (one PEEM service), `gui/components/peem_xmcd_panel.py` + `peem_tabs/`, `core/peem/` (registration, igor_drift, stack_edits, dichroism, image_analysis, ...), `core/peem/ue49/`); XAS stays a separate suite; viewer = `data_viewer_panel.py`
+- [ ] PEEM Suite, XPEEM map tab (`gui/suites/peem_suite.py`, `gui/services/peem_service.py` + `peem_steps/` (one PEEM service), `gui/components/peem_xmcd_panel.py` + `peem_tabs/`, `core/peem/` (registration, igor_drift, stack_edits, dichroism, image_analysis, ...), `core/peem/ue49/`); XAS stays a separate suite; viewer = `data_viewer_panel.py`
 	- [x] UE49 scan loader (`<scan>.txt` + TIFF folder + BeamlineSettings PolTable; filename token wins; mixed-FOV refused)
 	- [x] TPX3 512→514 cross correction, dead-pixel, flat field, I0, bad-frame flags, circular FOV crop (ports of `speem_eval_20230427_TPX3.ipf`, `circularcrop*.ipf`)
 	- [x] Sub-pixel FFT registration + drift-corrected co-add; cross-polarization registration on edge images
@@ -90,7 +90,7 @@ Grand App
 	- [x] One PEEM beamline loader `core/io/peem_beamline_loaders.py` (`load_beamline`): detects UE49 / UView / P3B; readers in `core/io/{ue49,uview,p3b}_loaders.py`; one sign for all beamlines: XMCD in the UE49 convention (neg−pos)/(neg+pos) = (CR−CL)/(CR+CL), XLD (LV−LH)/(LV+LH)
 	- [x] BNL NSLS-II ESM Elmitec UView `.dat` (CL/CR → CP/CM), beamtime batch `core/peem/esm/batch.py`, real-data test (`TENSORSPEC_BNL_PEEM`)
 	- [x] ALS 11.0.1 PEEM-3 `.P3B` (EPU ±0.9 → CP/CM, I0 off by default) + day script (`scripts/als/analyze_day.py`)
-	- [x] Main browser keeps the original PEEM Suite and XAS Suite buttons; XMCD imaging is a tab of the PEEM suite
+	- [x] Main browser keeps the original PEEM Suite and XAS Suite buttons; XPEEM map is a tab of the PEEM suite
 	- [x] GUI: one "Add files / Add folders" loader for all three formats; "Drift-correct + XMCD (PCD)"
 	- [x] Loading does not depend on file / folder names: format from the file contents; polarization from the data (UE49 scan table, ALS EPU) or set per item in the load list (BNL UView files do not record it)
 	- [ ] Domain-map series vs current pulse; PEEM-stack ML clustering (`core/ml/clustering.py`) on pixel spectra

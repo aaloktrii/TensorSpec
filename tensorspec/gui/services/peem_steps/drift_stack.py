@@ -14,7 +14,7 @@ from tensorspec.core.peem.bg import resolve_energy
 from tensorspec.core.peem import dichroism, drift, products, registration
 from tensorspec.core.peem.engine import average_by_energy
 from tensorspec.core.workspace import global_workspace
-from tensorspec.gui.services.peem_steps.common import (_beamline_formula, _box, _drift_attrs, _frames_for_pol, _mask,
+from tensorspec.gui.services.peem_steps.common import (_pcd_formula, _box, _drift_attrs, _frames_for_pol, _mask,
                                                        _read_edits, _record, _require_raw, _working_frames)
 
 
@@ -54,7 +54,7 @@ class PeemDriftStackSteps:
             extra={"mean_cp": res["mean_cp"], "mean_cm": res["mean_cm"]},
             attrs={
                 "convention": convention,
-                "formula": _beamline_formula(name, convention),
+                "formula": _pcd_formula(name, convention),
                 "n_cp": int(cp.shape[0]), "n_cm": int(cm.shape[0]),
                 "registered": bool(register),
                 "cm_shift_dy": float(res["total_cm_shift"][0]),
@@ -140,9 +140,8 @@ class PeemDriftStackSteps:
         if not global_workspace.write_processed_data(name, tensor):
             raise ValueError(f"PEEM data '{name}' not found.")
         r = np.hypot(shifts[:, 0], shifts[:, 1])
-        src = md.get("pol_source") or {}
         out = {"name": name, "step": "drift correct",
-               "frames": f"{n} ({', '.join(f'{src.get(k, k)} {wpol.count(k)}' for k in dict.fromkeys(wpol))}) "
+               "frames": f"{n} ({', '.join(f'{k} {wpol.count(k)}' for k in dict.fromkeys(wpol))}) "
                          f"aligned together to frame {ref_index}",
                "method": self.DRIFT_METHODS[method], "filter": filt or "none",
                "box_y0y1x0x1": [int(v) for v in box],
@@ -205,7 +204,6 @@ class PeemDriftStackSteps:
         fb, _ = _frames_for_pol(name, tb, "processed")
         box = tuple(pmd["drift_box_y0y1x0x1"])
         mean_a, mean_b, refine = dichroism.stack_means(fa, fb, box)
-        src = (_require_raw(name).metadata or {}).get("pol_source") or {}
         pol = [str(t) for t in pmd.get("pol", [])]
         ia = [i for i, t in enumerate(pol) if t == ta]
         ib = [i for i, t in enumerate(pol) if t == tb]
@@ -216,7 +214,7 @@ class PeemDriftStackSteps:
                    # sums of the frames (Igor co-adds are sums); same alignment as the means
                    f"sum_{ta.lower()}": mean_a * len(ia), f"sum_{tb.lower()}": mean_b * len(ib)},
             attrs={"pair": pair, "channel_a": ta, "channel_b": tb,
-                   "channel_a_name": src.get(ta, ta), "channel_b_name": src.get(tb, tb),
+                   "channel_a_name": ta, "channel_b_name": tb,
                    "n_a": len(ia), "n_b": len(ib), "source_node": "processed",
                    "refine_shift_dy": float(refine[0]), "refine_shift_dx": float(refine[1]),
                    "drift_dy_px": [float(v) for v in np.concatenate([dy[ia], dy[ib]])],
@@ -227,7 +225,7 @@ class PeemDriftStackSteps:
         )
         self._write(name, "stack", ds)
         out = {"name": name, "step": "2. stack", "pair": pair,
-               "images": f"{src.get(ta, ta)}: {len(ia)} frames -> 1 image; {src.get(tb, tb)}: {len(ib)} frames -> 1 image",
+               "images": f"{ta}: {len(ia)} frames -> 1 image; {tb}: {len(ib)} frames -> 1 image",
                "B_onto_A_shift_px": [round(float(refine[0]), 3), round(float(refine[1]), 3)],
                "next": "3. asymmetry"}
         _record(name, "stack", out)
@@ -249,7 +247,7 @@ class PeemDriftStackSteps:
             if convention is None:
                 convention = (_require_raw(name).metadata or {}).get("default_convention") or dichroism.UNIVERSAL_CONVENTION
             sign = dichroism.CONVENTIONS[convention]
-            kind, formula = "pcd", _beamline_formula(name, convention)
+            kind, formula = "pcd", _pcd_formula(name, convention)
         else:
             sign, kind, formula = -1.0, "pld", dichroism.XLD_FORMULA  # A = LH, B = LV -> (LV-LH)/(LV+LH)
         asym = sign * dichroism.asymmetry(a, b)
@@ -477,13 +475,12 @@ class PeemDriftStackSteps:
         ta, tb = tags
         stack, pol_out, points, counts, energy_bin_eV = average_by_energy(
             frames, pol, energy if has_e else None, tags, energy_bin_eV)
-        src = (raw.metadata or {}).get("pol_source") or {}
         md = {k: v for k, v in (raw.metadata or {}).items()
               if k in ("format", "beamline", "default_convention", "pol_source", "fov_um", "um_per_px",
                        "temperature_K", "loader", "i0_normalized")}
         md.update({
             "pol": pol_out,
-            "frame_names": [f"{src.get(t, t)}@{e:.2f}eV" for e in points for t in (ta, tb)],
+            "frame_names": [f"{t}@{e:.2f}eV" for e in points for t in (ta, tb)],
             "derived_from": name,
             "derived_by": "XMCD-imaging tab: drift-corrected frames averaged per polarization and energy",
             "drift_method": pmd.get("drift_method_label"),
@@ -498,7 +495,7 @@ class PeemDriftStackSteps:
         self.pair(label, "CP_CM" if pair == "xmcd" else "LH_LV")
         sep = self.separate(label)
         out = {"name": label, "from": name, "pair": pair,
-               "channels": [src.get(t, t) for t in (ta, tb)], "separated": sep["channels"],
+               "channels": [ta, tb], "separated": sep["channels"],
                "n_energies": len(points), "n_frames": int(len(stack)), "pol_summary": {ta: len(points), tb: len(points)},
                "energy_range_eV": [min(points), max(points)] if has_e else None,
                "frames_per_point": counts,
@@ -516,8 +513,7 @@ class PeemDriftStackSteps:
             at = dict((proc.metadata or {}) if proc is not None else {})
             if "drift_dy_px" in at:
                 at.setdefault("drift_n_a", len(at["drift_dy_px"]))
-                src = at.get("pol_source") or {}
-                at["_pol_names"] = [src.get(str(t), str(t)) for t in at.get("pol", [])]
+                at["_pol_names"] = [str(t) for t in at.get("pol", [])]
         else:
             ds = global_workspace.pull_analysis_data(name, kind)
             at = {} if ds is None else ds.attrs

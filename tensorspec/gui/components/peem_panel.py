@@ -73,9 +73,9 @@ class PeemPanel(QWidget):
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Dataset name (auto from path)")
         load_form.addRow("Name:", self.name_edit)
-        self.btn_from_xmcd = QPushButton("Load from XMCD-imaging tab")
+        self.btn_from_xmcd = QPushButton("Load from XPEEM map")
         self.btn_from_xmcd.setToolTip(
-            "Use the drift-corrected data of the XMCD-imaging tab: averaged per polarization and photon energy,\n"
+            "Use the drift-corrected data of the XPEEM map tab: averaged per polarization and photon energy,\n"
             "paired and separated, ready for background subtraction and the sum rule")
         self.btn_from_xmcd.clicked.connect(self._load_from_xmcd)
         self.btn_from_xmcd.setVisible(False)  # shown when the PEEM suite connects its XMCD-imaging tab
@@ -320,7 +320,7 @@ class PeemPanel(QWidget):
 
     def _load_folder(self):
         path = QFileDialog.getExistingDirectory(
-            self, "Load folder (TIF stack, UE49 scan, UView .dat or ALS .P3B)")
+            self, "Load folder (TIF stack or PEEM acquisition)")
         if path:
             self._start_load(path)
 
@@ -353,15 +353,15 @@ class PeemPanel(QWidget):
         try:
             summary = source()
         except Exception as exc:  # noqa: BLE001 - shown to the user
-            QMessageBox.warning(self, "Load from XMCD-imaging tab", str(exc))
-            self.status_label.setText(f"Load from XMCD-imaging tab failed: {exc}")
+            QMessageBox.warning(self, "Load from XPEEM map", str(exc))
+            self.status_label.setText(f"Load from XPEEM map failed: {exc}")
             return
         finally:
             self.unsetCursor()
         summary.setdefault("csv_prompt", False)
         self._on_load_finished(True, summary, "")
         e = summary.get("energy_range_eV")
-        extra = [f"from XMCD-imaging tab '{summary['from']}'", f"{summary['n_energies']} energies"
+        extra = [f"from XPEEM map '{summary['from']}'", f"{summary['n_energies']} energies"
                  + (f" ({e[0]:.2f}-{e[1]:.2f} eV)" if e else ""),
                  f"separated: {', '.join(summary['separated'])}"]
         if summary.get("note"):

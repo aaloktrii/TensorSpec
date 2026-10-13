@@ -116,9 +116,7 @@ def _drift_attrs(shape: tuple[int, ...], reg_roi: dict | None, a_shifts, b_shift
             "drift_box_source": "drawn drift ROI" if reg_roi else "central half (default)"}
 
 
-def _beamline_formula(name: str, convention: str) -> str:
-    """pcd formula in the beamline's own channel names, e.g. (CR-CL)/(CR+CL) for UView."""
+def _pcd_formula(name: str, convention: str) -> str:
+    """pcd formula in the polarization tags, e.g. (CM-CP)/(CM+CP) (same for every data source)."""
     a, b = ("CM", "CP") if dichroism.CONVENTIONS[convention] < 0 else ("CP", "CM")
-    src = (_require_raw(name).metadata or {}).get("pol_source") or {}
-    a, b = src.get(a, a), src.get(b, b)
     return f"({a}-{b})/({a}+{b})"

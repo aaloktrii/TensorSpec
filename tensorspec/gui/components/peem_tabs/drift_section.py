@@ -30,7 +30,7 @@ class DriftSection:
     def _build_drift(self, cl):
         """Controls of this section, added to the control column ``cl``."""
         # ---------------------------------------------------------------- 3. Drift
-        drift = QGroupBox("3. Drift correction (all CL + CR frames together)")
+        drift = QGroupBox("3. Drift correction (all frames together)")
         dfm = QFormLayout(drift)
         info = QLabel("Every frame of both polarizations is aligned to one reference frame.")
         info.setWordWrap(True)
@@ -41,7 +41,7 @@ class DriftSection:
         self.drift_method.addItem("ROI template tracking (NCC, drawn box)", "roi")
         self.drift_method.addItem("NCC ROI (original TensorSpec, whole px, drawn box)", "ncc_roi")
         self.drift_method.addItem("Igor autoImageCorrelation (fixed window, whole px)", "igor_auto")
-        self.drift_method.addItem("Igor driftCorrection (co-add, one CL↔CR shift, no per-frame)", "igor_pair")
+        self.drift_method.addItem("Igor driftCorrection (co-add, one shift between the polarizations)", "igor_pair")
         self.drift_method.addItem("Igor marqueeDriftCorrection (drawn box)", "igor_marquee")
         self.drift_method.addItem("Igor marqueeImageRegistration (drawn box)", "igor_registration")
         self.drift_method.setToolTip(
@@ -53,7 +53,7 @@ class DriftSection:
             "    frame, whole pixels, brute-force search within the radius (slow for large radii)\n"
             "Igor autoImageCorrelation: each frame vs the reference, fixed window, whole pixels\n"
             "Igor driftCorrection: co-add each polarization WITHOUT shifting (autoCoaddXMCD), then ONE\n"
-            "    shift of the CR image onto the CL image; for stable acquisitions only\n"
+            "    shift of the second polarization onto the first; for stable acquisitions only\n"
             "Igor marqueeDriftCorrection: box correlation, aligned frames added to the reference,\n"
             "    up to 3 passes, optional x N interpolation (1/N px steps)\n"
             "Igor marqueeImageRegistration: least squares in the box; translation + rotation / skew / scale")
@@ -64,14 +64,17 @@ class DriftSection:
         b.clicked.connect(self._start_drift_rect)
         dfm.addRow(b)
         self.drift_filter = QComboBox()
-        self.drift_filter.addItem("none (intensity)", "none")
-        self.drift_filter.addItem("edges, smoothed σ 2 px (same for CL and CR)", "smooth_edges")
-        self.drift_filter.addItem("high-pass", "highpass")
-        self.drift_filter.addItem("find edges (Igor filter 2)", "find_edges")
-        self.drift_filter.addItem("sharpen (Igor filter 3)", "sharpen")
-        self.drift_filter.setToolTip("Edges look the same in both helicities, so CR frames are not pulled\n"
-                                     "toward the reversed CL domain pattern")
-        dfm.addRow("Image filter:", self.drift_filter)
+        self.drift_filter.addItem("the images as they are", "none")
+        self.drift_filter.addItem("edges, smoothed (best for opposite polarizations)", "smooth_edges")
+        self.drift_filter.addItem("fine detail only (high-pass)", "highpass")
+        self.drift_filter.addItem("edges, not smoothed", "find_edges")
+        self.drift_filter.addItem("sharpened images", "sharpen")
+        self.drift_filter.setToolTip(
+            "What the frames are matched on to find their shifts. Only copies used for the matching are\n"
+            "filtered; the frames themselves are shifted unfiltered.\n"
+            "Opposite polarizations show reversed magnetic contrast but the same edges, so matching on\n"
+            "edges does not confuse the domain pattern with a shift.")
+        dfm.addRow("Match frames on:", self.drift_filter)
         self.drift_ref = QSpinBox()
         self.drift_ref.setRange(0, 0)
         dfm.addRow("Reference frame:", self.drift_ref)

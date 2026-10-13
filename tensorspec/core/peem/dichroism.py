@@ -32,7 +32,7 @@ from tensorspec.core.peem import registration
 
 CONVENTIONS = {"ue49": -1.0, "cm_minus_cp": -1.0, "cp_minus_cm": 1.0}
 UNIVERSAL_CONVENTION = "ue49"  # (neg - pos)/(neg + pos) = (CR - CL)/(CR + CL), every beamline
-XMCD_FORMULA = "(CR-CL)/(CR+CL)"
+XMCD_FORMULA = "(CM-CP)/(CM+CP)"  # (neg-pos)/(neg+pos)
 XLD_FORMULA = "(LV-LH)/(LV+LH)"
 
 # Opposite helicities / polarizations show reversed magnetic contrast, so plain

@@ -2,7 +2,7 @@
 
 Each function draws one result of the PEEM service onto a matplotlib Axes / Figure the panel owns
 (gui/components/peem_xmcd_panel.py keeps the canvas, titles and redraws). Moved verbatim from the
-section mixins in gui/components/peem_tabs/ (analysis, drift, cleanup).
+section mixins in gui/components/peem_tabs/ (analysis, drift).
 """
 from __future__ import annotations
 
@@ -95,15 +95,3 @@ def drift(ax, d: dict) -> None:
         ax2.set_ylim(0, 1.05)
         ax2.set_ylabel("template match (NCC)", color="0.5")
     ax.legend(frameon=False, loc="lower right")
-
-
-def frame_sharpness(ax, sd: np.ndarray, thr: float, rel: float) -> np.ndarray:
-    """Focus check: std in the box per raw frame vs the threshold; returns the frames below it."""
-    ax.plot(np.arange(len(sd)), sd, "o-", ms=3)
-    ax.axhline(thr, color="r", ls="--", lw=0.8, label=f"{rel:.2f} × median")
-    low = np.nonzero(sd < thr)[0]
-    ax.plot(low, sd[low], "rx", ms=8, label=f"{len(low)} below")
-    ax.set_xlabel("raw frame")
-    ax.set_ylabel("std in box (counts)")
-    ax.legend(frameon=False)
-    return low

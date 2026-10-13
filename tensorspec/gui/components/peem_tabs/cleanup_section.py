@@ -22,7 +22,6 @@ from tensorspec.core.peem import stack_edits
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
 from tensorspec.gui.components.peem_tabs.common import _dspin
-from tensorspec.plotting import peem_plots
 
 
 class CleanupSection:
@@ -32,7 +31,7 @@ class CleanupSection:
         clean = QGroupBox("2. Stack clean-up (optional: tick to show)")
         clean.setCheckable(True)
         clean.setChecked(False)
-        clean.setToolTip("Exclude / defocused frames, top-up, normalize / subtract a frame, disable pixels.\n"
+        clean.setToolTip("Exclude / include frames, normalize to or subtract a frame.\n"
                          "Raw data are never changed; saved edits apply even when this is collapsed.")
         clean_body = QWidget()
         cf = QFormLayout(clean_body)
@@ -41,58 +40,19 @@ class CleanupSection:
         self.frames_edit.setPlaceholderText("frames, e.g. 5, 12-14 (blank = current frame)")
         cf.addRow("Frames:", self.frames_edit)
         r = QHBoxLayout()
-        for label, fn in (("Exclude", lambda: self._edit_exclude(True)), ("Include", lambda: self._edit_exclude(False)),
-                          ("Include all", self._edit_include_all)):
+        for label, fn in (("Exclude", lambda: self._edit_exclude(True)), ("Include", lambda: self._edit_exclude(False))):
             b = QPushButton(label)
             b.clicked.connect(fn)
             r.addWidget(b)
         cf.addRow(r)
         r = QHBoxLayout()
-        b = QPushButton("Find defocused")
-        b.setToolTip("Igor RemoveDefocussedLayers: std of every frame in the box (or central half)")
-        b.clicked.connect(self._edit_find_defocused)
-        r.addWidget(b)
-        self.defocus_rel = _dspin(0, 1, 0.8, 0.05, 2)
-        self.defocus_rel.setPrefix("< ")
-        self.defocus_rel.setSuffix(" × median std")
-        r.addWidget(self.defocus_rel)
-        b = QPushButton("Exclude below")
-        b.setToolTip("Exclude the frames whose std in the box is below this fraction of the median")
-        b.clicked.connect(self._edit_exclude_defocused)
-        r.addWidget(b)
-        cf.addRow(r)
-        r = QHBoxLayout()
-        self.topup_factor = _dspin(0.5, 2, 1.05, 0.01, 3)
-        self.topup_factor.setPrefix("× ")
-        r.addWidget(QLabel("Top-up (injection frames):"))
-        r.addWidget(self.topup_factor)
-        b = QPushButton("Apply")
-        b.setToolTip("Igor TopUpCorrection: frames during injection x factor. Frames from the ring-current\n"
-                     "jumps if the files have it (UE49 CurrentTable, ALS BEAM_CURRENT), else the Frames field")
-        b.clicked.connect(self._edit_topup)
-        r.addWidget(b)
-        cf.addRow(r)
-        r = QHBoxLayout()
         b = QPushButton("Normalize to frame")
-        b.setToolTip("Igor NormalizeStackToThisLayer: every frame / that frame x its RMS (Frames field or current frame)")
+        b.setToolTip("Every frame / that frame x its RMS (Frames field or current frame)")
         b.clicked.connect(lambda: self._edit_refop("normalize_to"))
         r.addWidget(b)
         b = QPushButton("Subtract frame")
-        b.setToolTip("Igor SubtractThisLayerFromStack: every frame - that frame")
+        b.setToolTip("Every frame - that frame")
         b.clicked.connect(lambda: self._edit_refop("subtract"))
-        r.addWidget(b)
-        b = QPushButton("Undo")
-        b.clicked.connect(self._edit_refop_clear)
-        r.addWidget(b)
-        cf.addRow(r)
-        r = QHBoxLayout()
-        self.btn_pixels = QPushButton("Disable pixels (click)")
-        self.btn_pixels.setCheckable(True)
-        self.btn_pixels.setToolTip("Igor DisablePixel: each clicked pixel -> mean of its diagonal neighbours at ±2 px")
-        self.btn_pixels.toggled.connect(self._pixel_mode)
-        r.addWidget(self.btn_pixels)
-        b = QPushButton("Clear pixels")
-        b.clicked.connect(self._edit_clear_pixels)
         r.addWidget(b)
         cf.addRow(r)
         r = QHBoxLayout()
@@ -151,74 +111,11 @@ class CleanupSection:
             if fr is not None:
                 self._edit_call(self.service.set_excluded, fr, exclude)
 
-    def _edit_include_all(self):
-        self._edit_call(self.service.include_all)
-
-    def _edit_find_defocused(self):
-        name = self._require()
-        if not name:
-            return
-        r = self.service.frame_sharpness(name, self._reg_roi)
-        sd, med = r["std"], r["median"]
-        thr = self.defocus_rel.value() * med
-        y0, y1, x0, x1 = r["box_y0y1x0x1"]
-        ax = self._plot(f"focus check · std in box x {x0}-{x1}, y {y0}-{y1}")
-        low = peem_plots.frame_sharpness(ax, sd, thr, self.defocus_rel.value())
-        self.pfig.tight_layout()
-        self.pcanvas.draw_idle()
-        self._log(f"Defocused (below threshold): {low.tolist()}")
-
-    def _edit_exclude_defocused(self):
-        self._edit_call(self.service.exclude_defocused, self.defocus_rel.value(), self._reg_roi)
-
-    def _edit_topup(self):
-        name = self._require()
-        if not name:
-            return
-        auto = self.service.injection_frames(name)
-        fr = None if auto else self._edit_frames()
-        if not auto and fr is None:
-            return
-        self._edit_call(self.service.set_topup, self.topup_factor.value(), fr)
-
     def _edit_refop(self, op: str):
         if self._require():
             fr = self._edit_frames(single=True)
             if fr is not None:
                 self._edit_call(self.service.set_reference_frame_op, op, fr[0])
-
-    def _edit_refop_clear(self):
-        name = self._require()
-        if name:
-            self.service.set_reference_frame_op(name, "normalize_to", None)
-            self._edit_call(self.service.set_reference_frame_op, "subtract", None)
-
-    def _pixel_mode(self, on: bool):
-        if on and not self._require():
-            self.btn_pixels.setChecked(False)
-            return
-        view = self.viewer.primary_view()
-        if view is not None:
-            view.cancel_tool()
-        if on and view is not None:
-            cid = view.canvas.mpl_connect("button_press_event", lambda ev, v=view: self._on_pixel_click(v, ev))
-            view._tool = ("cid", cid)  # pauses the crosshair while picking pixels
-            self._log("Click pixels to disable; click the button again to stop.")
-
-    def _on_pixel_click(self, view, ev):
-        if ev.inaxes is not view.ax_main or ev.xdata is None:
-            return
-        y = int(round(view._axis_to_index(ev.ydata, view.y_idx)))
-        x = int(round(view._axis_to_index(ev.xdata, view.x_idx)))
-        self._edit_call(self.service.disable_pixels, [[y, x]], True)
-        self._log(f"Disabled pixel (y {y}, x {x})")
-        if self.btn_pixels.isChecked():  # the redraw replaced the view: keep picking
-            self._pixel_mode(True)
-
-    def _edit_clear_pixels(self):
-        name = self._require()
-        if name:
-            self._edit_call(self.service.disable_pixels, self.service.get_edits(name)["pixel_fixes"], False)
 
     def _edit_reset(self):
         self._edit_call(self.service.reset_edits)

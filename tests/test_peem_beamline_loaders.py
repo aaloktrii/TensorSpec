@@ -95,12 +95,12 @@ def test_step_by_step_drift_stack_asymmetry(tmp_path):
     with pytest.raises(ValueError, match="stack"):
         svc.asymmetry("t_steps")
     r1 = svc.drift_correct("t_steps")
-    assert r1["frames"].startswith("6 (CL 3, CR 3)") and svc.get_drift("t_steps", "processed") is not None
+    assert r1["frames"].startswith("6 (CP 3, CM 3)") and svc.get_drift("t_steps", "processed") is not None
     r2 = svc.stack("t_steps")
-    assert r2["images"].startswith("CL: 3 frames -> 1 image")
+    assert r2["images"].startswith("CP: 3 frames -> 1 image")
     assert svc.list_products("t_steps") == ["stack"]
     r3 = svc.asymmetry("t_steps")
-    assert r3["formula"] == "(CR-CL)/(CR+CL)"
+    assert r3["formula"] == "(CM-CP)/(CM+CP)"
     assert np.nanmean(svc.get_map("t_steps", "pcd")) == pytest.approx(-0.1, abs=1e-6)
     assert np.nanmean(svc.get_map("t_steps", "pcd", "difference")) == pytest.approx(-200.0, abs=1e-3)
     assert svc.get_drift("t_steps", "pcd")["n_a"] == 3
@@ -136,7 +136,7 @@ def test_drift_methods_recover_known_drift(tmp_path, method, filt):
     roi = {"kind": "rect", "x0": 40, "x1": 120, "y0": 40, "y1": 120}
     r = svc.drift_correct(f"t_{method}", None if method == "central" else roi, method=method, filt=filt,
                           search_radius=4)
-    assert "8 (CL 4, CR 4) aligned together to frame 0" in r["frames"]
+    assert "8 (CP 4, CM 4) aligned together to frame 0" in r["frames"]
     dr = svc.get_drift(f"t_{method}", "processed")
     assert np.abs(dr["dy"] - true[:, 0]).max() < 0.3 and np.abs(dr["dx"] - true[:, 1]).max() < 0.3
     if method == "roi":
@@ -271,7 +271,7 @@ def test_load_list_sets_polarization_of_unnamed_folders(qapp, tmp_path, monkeypa
 
 @pytest.mark.parametrize("tags, expected", [(("CL", "CR"), -0.1), (("LH", "LV"), -0.1)])
 def test_universal_asymmetry_step_by_step(tmp_path, tags, expected):
-    """XMCD = UE49 sign (CR-CL)/(CR+CL), XLD = (LV-LH)/(LV+LH) for every beamline (first tag 1100, second 900)."""
+    """XMCD = (CM-CP)/(CM+CP), XLD = (LV-LH)/(LV+LH) for every data source (first tag 1100, second 900)."""
     from tensorspec.gui.services.peem_service import PeemService
     svc = PeemService()
     name = f"t_univ_{tags[0]}"
@@ -280,5 +280,5 @@ def test_universal_asymmetry_step_by_step(tmp_path, tags, expected):
     svc.stack(name, pair="xmcd" if tags[0] == "CL" else "xld")
     out = svc.asymmetry(name)
     kind = "pcd" if tags[0] == "CL" else "pld"
-    assert out["formula"] == ("(CR-CL)/(CR+CL)" if kind == "pcd" else "(LV-LH)/(LV+LH)")
+    assert out["formula"] == ("(CM-CP)/(CM+CP)" if kind == "pcd" else "(LV-LH)/(LV+LH)")
     assert np.nanmean(svc.get_map(name, kind)) == pytest.approx(expected, abs=1e-6)

@@ -72,14 +72,14 @@ tensorspec/
 │   │   ├── pyvista_engine.py    # Fast GPU rendering for 3D crystal structures & volumes
 │   │   └── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
 │   ├── viewers/               # Reusable Qt widgets for suites to embed (where present)
-│   ├── peem_plots.py          # PEEM XMCD-tab plots (profiles, fits, histogram, FFT, drift, focus check)
+│   ├── peem_plots.py          # PEEM XPEEM-map plots (profiles, fits, histogram, FFT, drift)
 │   └── ue49_preview.py        # Matplotlib preview figures for the PEEM beamtime batch scripts
 └── gui/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon
     ├── services/             # Non-HTTP service layer between panels and core
     │   ├── peem_service.py   # THE PEEM service (both PEEM-suite tabs): stack / pair / drift / BG / sum rule
-    │   ├── peem_steps/       # XMCD-imaging steps, mixins of PeemService: load, cleanup, drift_stack,
+    │   ├── peem_steps/       # XPEEM-map steps, mixins of PeemService: load, cleanup, drift_stack,
     │   │                     #   image_analysis, maps_domains (+ common.py helpers)
     │   └── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     ├── components/           # Reusable, isolated UI panels
@@ -98,7 +98,7 @@ tensorspec/
         ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
         ├── dft_suite.py
         ├── arpes_suite.py
-        ├── peem_suite.py         # Tabs: XMCD imaging (peem_xmcd_panel) · Stack / BG / sum rule (peem_panel)
+        ├── peem_suite.py         # Tabs: XPEEM map (peem_xmcd_panel) · Stack / BG / sum rule (peem_panel)
         ├── xas_suite.py
         ├── transport_suite.py    # Shell until transport_engine ships
         └── ml_suite.py
