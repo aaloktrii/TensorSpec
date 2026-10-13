@@ -38,6 +38,7 @@ from tensorspec.core.peem.sumrule import (
     pick_source_kind,
 )
 from tensorspec.core.workspace import global_workspace
+from tensorspec.gui.services.peem_steps.annotations import PeemAnnotationSteps
 from tensorspec.gui.services.peem_steps.cleanup import PeemCleanupSteps
 from tensorspec.gui.services.peem_steps.drift_stack import PeemDriftStackSteps
 from tensorspec.gui.services.peem_steps.image_analysis import PeemImageAnalysisSteps
@@ -751,7 +752,7 @@ def _load_summary(
 
 
 class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImageAnalysisSteps,
-                  PeemMapsDomainsSteps):
+                  PeemMapsDomainsSteps, PeemAnnotationSteps):
     """Qt-facing PEEM operations via global_workspace.
 
     The one PEEM service of the PEEM suite: the stack / pair / drift / BG / sum-rule methods below,

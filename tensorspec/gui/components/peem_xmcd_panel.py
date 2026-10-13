@@ -71,11 +71,35 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         self._scan_paths: list[str] = []
         self._scan_pol: dict[str, str] = {}  # polarization set by the user, per item
         self._scan_detected: dict[str, tuple[str | None, str]] = {}  # detect_pol per item
-        self._roi: dict | None = None
-        self._bg_roi: dict | None = None
-        self._reg_roi: dict | None = None  # drift-correction box (rect)
+        self._pending_rois: dict[str, dict | None] = {}  # regions set before any data is loaded
         self._worker: _Worker | None = None
         self._setup_ui()
+
+    # ---------------------------------------------- regions / profiles (stored by the service)
+    def _get_region(self, which: str) -> dict | None:
+        if self._name:
+            return self.service.get_rois(self._name)[which]
+        return self._pending_rois.get(which)
+
+    def _set_region(self, which: str, roi: dict | None) -> None:
+        if self._name:
+            self.service.set_roi(self._name, which, roi)
+        else:
+            self._pending_rois[which] = roi
+
+    _roi = property(lambda self: self._get_region("roi"), lambda self, v: self._set_region("roi", v))
+    _bg_roi = property(lambda self: self._get_region("bg"), lambda self, v: self._set_region("bg", v))
+    _reg_roi = property(lambda self: self._get_region("drift_box"),  # drift-correction box (rect)
+                        lambda self, v: self._set_region("drift_box", v))
+
+    @property
+    def _profiles(self) -> list[dict]:
+        return self.service.list_profiles(self._name) if self._name else []
+
+    @property
+    def _last_profile(self) -> dict | None:
+        profiles = self._profiles
+        return profiles[-1] if profiles else None
 
     # ------------------------------------------------------------------ UI
     def _setup_ui(self):

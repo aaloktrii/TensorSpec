@@ -376,7 +376,14 @@ class LoadSection:
                   pol=dict(self._scan_pol) or None)
 
     def _on_loaded(self, res: dict):
+        # regions of the previous dataset (or set before loading) carry over when the new one has none
+        carry = self.service.get_rois(self._name) if self._name else dict(self._pending_rois)
         self._name = res["name"]
+        have = self.service.get_rois(self._name)
+        for which, roi in carry.items():
+            if roi is not None and have.get(which) is None:
+                self.service.set_roi(self._name, which, roi)
+        self._pending_rois.clear()
         self.drift_ref.setRange(0, max(0, res["shape"][0] - 1))
         pc = ", ".join(f"{k} {v}" for k, v in res["pol_counts"].items())
         self.load_status.setText(f"Loaded '{res['name']}': {res['shape'][0]} frames ({pc}).")

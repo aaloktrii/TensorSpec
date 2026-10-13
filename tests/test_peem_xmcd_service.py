@@ -229,3 +229,25 @@ def test_several_profiles_clear_and_illustrator_pdf(qapp, xmcd_dataset, tmp_path
     assert (tmp_path / "profiles.csv").read_text().startswith("distance_1_")
     p._an_clear_profiles()
     assert p._profiles == [] and not any(ov.get("color") == "#1f77b4" for ov in p.viewer.overlays)
+
+
+def test_regions_and_profiles_live_in_the_back_end(qapp, xmcd_dataset):
+    """Any front end sees the same regions / profiles: they are stored in the dataset by the service."""
+    svc, _, _ = xmcd_dataset
+    box = {"kind": "rect", "x0": 8, "x1": 40, "y0": 8, "y1": 40}
+    svc.set_roi("synth_xmcd", "drift_box", box)  # e.g. set from a script
+    pr = svc.add_profile("synth_xmcd", (10, 4), (10, 60), halfwidth=2)
+    assert svc.get_rois("synth_xmcd")["drift_box"] == box and svc.get_rois("synth_xmcd")["roi"] is None
+    assert len(pr["values"]) > 10 and svc.list_profiles("synth_xmcd")[0]["line"] == [[10.0, 4.0], [10.0, 60.0]]
+    assert global_workspace.pull_analysis_data("synth_xmcd", "annotations") is not None  # with the data
+    assert "annotations" not in svc.list_products("synth_xmcd")  # not a map layer
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    p = PeemXmcdPanel(service=svc)
+    p._name = "synth_xmcd"
+    assert p._reg_roi == box and len(p._profiles) == 1  # the Qt panel shows what the service holds
+    p._roi = {"kind": "rect", "x0": 1, "x1": 9, "y0": 1, "y1": 9}  # drawn in the panel ...
+    assert svc.get_rois("synth_xmcd")["roi"]["x1"] == 9  # ... is stored by the service
+    p._an_clear_profiles()
+    assert svc.list_profiles("synth_xmcd") == []
+    log = global_workspace.get("synth_xmcd")["tree"]["history"].attrs["log"]
+    assert any("PEEM set drift_box" in line for line in log) and any("PEEM add profile" in line for line in log)

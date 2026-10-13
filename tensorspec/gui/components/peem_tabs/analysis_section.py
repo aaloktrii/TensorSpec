@@ -208,22 +208,15 @@ class AnalysisSection:
         if not self._need_line():
             return None
         kind, var, fr = self._view_args()
-        pr = self._an_call(self.service.line_profile, self._name, kind, var, fr, *self._line, self.line_hw.value())
+        pr = self._an_call(self.service.add_profile, self._name, *self._line, self.line_hw.value(), kind, var, fr)
         if pr is None:
             return None
-        if not hasattr(self, "_profiles"):
-            self._profiles = []
-        (y1, x1), (y2, x2) = self._line
-        n = len(self._profiles) + 1
-        pr = {**pr, "line": self._line, "label": f"{n}: {kind}/{var} ({x1:.0f},{y1:.0f})→({x2:.0f},{y2:.0f})"}
-        self._profiles.append(pr)
-        self._last_profile = pr
         self._draw_profiles()
         self._refresh_view()  # the profile's line in its colour
         return pr
 
     def _draw_profiles(self):
-        profiles = getattr(self, "_profiles", [])
+        profiles = self._profiles
         if not profiles:
             return
         ax = self._plot(f"{len(profiles)} profile(s) · half-width {profiles[-1]['halfwidth']} px")
@@ -233,15 +226,16 @@ class AnalysisSection:
         self.pcanvas.draw_idle()
 
     def _an_clear_profiles(self):
-        self._profiles = []
-        self._last_profile = None
+        if self._name:
+            self.service.clear_profiles(self._name)
         self.plot_box.setVisible(False)
         self._refresh_view()
 
     def _current_profile(self):
         """The last profile if it is of the current line, else the current line's profile (added)."""
-        last = getattr(self, "_last_profile", None)
-        if last is not None and last.get("line") == getattr(self, "_line", None) \
+        last = self._last_profile
+        line = getattr(self, "_line", None)
+        if last is not None and line is not None and [list(map(float, p)) for p in line] == last["line"] \
                 and last["halfwidth"] == self.line_hw.value():
             return last
         return self._an_profile()
