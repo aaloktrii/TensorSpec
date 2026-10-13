@@ -25,8 +25,10 @@ def draw_selection(ax, mf, row: int, col: int):
 
 def draw_quantity_map(fig, ax, mf, data, quantity: str, fit_tally: dict, cfg: dict,
                       optical=None, optical_image=None, show_optical=False,
-                      show_grid=False, sel=None):
-    """Map of ``data`` (FWHM(2D) map or a raw band-height grid) on the map grid."""
+                      show_grid=False, sel=None, area=None, cbar_label=None, title=None):
+    """Map of ``data`` (FWHM(2D) map, raw band height or band-window integral) on the map grid.
+    ``area``: (x0, x1, y0, y1) of the selected area, drawn as a dashed outline.
+    ``cbar_label`` / ``title`` override the defaults for quantities other than FWHM / height."""
     fwhm = quantity == "FWHM(2D)"
     finite = np.isfinite(data)
     if finite.any():
@@ -42,7 +44,7 @@ def draw_quantity_map(fig, ax, mf, data, quantity: str, fit_tally: dict, cfg: di
                    vmin=vmin, vmax=vmax, interpolation="nearest",
                    aspect="equal", zorder=1)
     cb = side_colorbar(fig, ax, im)
-    cb.set_label("FWHM(2D)  [cm$^{-1}$]" if fwhm else "%s  [counts]" % quantity)
+    cb.set_label(cbar_label or ("FWHM(2D)  [cm$^{-1}$]" if fwhm else "%s  [counts]" % quantity))
 
     if fwhm and not finite.any():
         # An all-NaN map is otherwise indistinguishable from a map that
@@ -65,11 +67,13 @@ def draw_quantity_map(fig, ax, mf, data, quantity: str, fit_tally: dict, cfg: di
         draw_map_grid(ax, mf)
     if sel is not None:
         draw_selection(ax, mf, *sel)
+    if area is not None:
+        draw_area(ax, area)
 
     ax.set_xlabel("X  [µm]")
     ax.set_ylabel("Y  [µm]")
     ax.set_title("%s   (%d × %d pixels)"
-                 % ("FWHM of the 2D band" if fwhm else quantity + " (raw)",
+                 % (title or ("FWHM of the 2D band" if fwhm else quantity + " (raw)"),
                     mf.shape[1], mf.shape[0]))
     # An equal-aspect image in a wide canvas is anchored right by default
     # once the colorbar has taken its slice, stranding the map in the
@@ -125,3 +129,39 @@ def draw_g_fit(ax, x, y):
             label="G fit")
     ax.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=4,
               borderpad=0.3, handlelength=1.4)
+
+
+# -- map areas (2 · Map ▸ area spectrum) ------------------------------------------------------------
+
+def draw_area(ax, rect):
+    """Dashed outline of a selected area (x0, x1, y0, y1)."""
+    x0, x1, y0, y1 = rect
+    ax.add_patch(mpatches.Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False,
+                                    edgecolor="#ff1744", lw=1.6, ls="--", zorder=5))
+
+
+def make_area_selector(ax, on_select):
+    """Drag-a-rectangle selector on a map axes; on_select(x0, x1, y0, y1) in data units.
+    Keep the returned object referenced, or it stops responding."""
+    from matplotlib.widgets import RectangleSelector
+
+    def done(press, release):
+        if None in (press.xdata, press.ydata, release.xdata, release.ydata):
+            return
+        on_select(press.xdata, release.xdata, press.ydata, release.ydata)
+    return RectangleSelector(ax, done, useblit=False, button=[1], interactive=False,
+                             props=dict(edgecolor="#ff1744", fill=False, ls="--", lw=1.4))
+
+
+def draw_area_spectrum(ax, wn, spec, n_pixels: int, band, mode: str = "sum"):
+    """The integrated spectrum of a map area, with the 2D band window."""
+    ax.plot(wn, spec, lw=0.8, color="#333", label="area spectrum (%s)" % mode)
+    lo, hi = band
+    ax.axvspan(lo, hi, color="#ffd54f", alpha=0.30, label="2D band region")
+    ax.set_xlabel("Raman shift  [cm$^{-1}$]")
+    ax.set_ylabel("Intensity  [counts]")
+    ax.legend(loc="upper right", fontsize=7, framealpha=0.85, ncol=2,
+              borderpad=0.3, handlelength=1.4)
+    ax.set_title("Area: %d pixels, spectra %s" % (n_pixels, "summed" if mode == "sum" else "averaged"),
+                 fontsize=9)
+

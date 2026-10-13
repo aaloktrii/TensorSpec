@@ -126,3 +126,15 @@ def test_fit_model_matches_band_by_band_fit():
     assert res["bands"]["G"]["n"] == g["n"] == 2
     assert res["bands"]["2D"]["n"] == 1
     assert FitModel.from_dict(model.to_dict()) == model
+
+
+def test_area_spectrum_sums_pixels_inside_rectangle(tmp_path):
+    from tensorspec.core.raman import roi
+    _, mf = raman_loaders.load_raman(str(write_spot_folder(tmp_path / "area")))   # x 0,2,4  y 0,2
+    axis, spec, idx = roi.area_spectrum(mf, (1.0, 4.5, -1.0, 1.0), "sum")       # x 2,4 at y 0
+    assert sorted(mf.x[idx]) == [2.0, 4.0] and set(mf.y[idx]) == {0.0}
+    np.testing.assert_allclose(spec, mf.data[idx].sum(0))
+    _, mean, _ = roi.area_spectrum(mf, (4.5, 1.0, 1.0, -1.0), "mean")           # corners in any order
+    np.testing.assert_allclose(mean, mf.data[idx].mean(0))
+    _, empty, none = roi.area_spectrum(mf, (10, 11, 10, 11))
+    assert none.size == 0 and np.isnan(empty).all()

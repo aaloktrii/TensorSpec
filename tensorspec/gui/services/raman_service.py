@@ -55,6 +55,7 @@ class RamanService:
         self.asym_maps: Dict[str, Optional[np.ndarray]] = {
             "hwhm": None, "area": None, "residual": None}
         self.name: Optional[str] = None                   # workspace key of the loaded map
+        self.clear_area()
 
     # -- naming --------------------------------------------------------------------------------
     def suggest_name(self, suffix: str) -> str:
@@ -92,6 +93,7 @@ class RamanService:
         self.ratio_maps = {"height": None, "area": None}
         self.fits = []
         self.fwhm_map = None
+        self.clear_area()
         self.name = workspace_name(mf.path)
         global_workspace.push_spectroscopy_data(self.name, raman_loaders.map_to_tensor(mf))
         return res
@@ -206,9 +208,44 @@ class RamanService:
         if self.mapfile_raw is None:
             return False
         self.mapfile = apply_map_transform(self.mapfile_raw, self.current_transform())
+        self.clear_area()                       # the rectangle was drawn in the old placement
         self.rebuild_maps()
         self.write_twod_fit()
         return True
+
+    # -- map area (2 · Map) --------------------------------------------------------------------
+    AREA_MODE = "sum"
+
+    def clear_area(self):
+        self.area_rect = None
+        self.area_indices = None
+        self.area_axis = None
+        self.area_spectrum = None
+        self.area_fit = None
+
+    def set_area(self, rect) -> int:
+        """Sum the spectra of the pixels inside ``rect`` (x0, x1, y0, y1 in µm). Returns the
+        number of pixels; 0 leaves no area selected."""
+        if self.mapfile is None:
+            return 0
+        axis, spec, idx = self.engine.area_spectrum(self.mapfile, rect, self.AREA_MODE)
+        if idx.size == 0:
+            self.clear_area()
+            return 0
+        self.area_rect, self.area_indices = tuple(rect), idx
+        self.area_axis, self.area_spectrum, self.area_fit = axis, spec, None
+        return int(idx.size)
+
+    def fit_area(self, model):
+        """Fit the area spectrum with the step-1 model and write /analysis/raman_roi."""
+        if self.area_spectrum is None:
+            return None
+        self.area_fit = self.engine.fit_spectrum(self.area_axis, self.area_spectrum, model)
+        if self.name is not None:
+            ds = products.roi_dataset(self.area_axis, self.area_spectrum, self.area_rect,
+                                      self.area_indices, self.AREA_MODE, self.area_fit, model)
+            global_workspace.write_analysis_data(self.name, "raman_roi", ds)
+        return self.area_fit
 
     # -- settings ------------------------------------------------------------------------------
     def config_to_json(self) -> dict:

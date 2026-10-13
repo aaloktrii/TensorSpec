@@ -10,8 +10,8 @@ display as before; core/raman/products.py turns them into xr.Dataset for /analys
 """
 from __future__ import annotations
 
-from tensorspec.core.raman import (batch, fit_model, multi_lorentz, peak_fit, reference, strain_doping,
-                                   tools, voigt_2d)
+from tensorspec.core.raman import (batch, fit_model, multi_lorentz, peak_fit, reference, roi,
+                                   strain_doping, tools, voigt_2d)
 
 
 class RamanEngineRouter:
@@ -61,6 +61,11 @@ class RamanEngineRouter:
         """Voigt fits of every spectrum of a map (2D band, then G when covered): a
         batch.MapFitter whose run() the GUI calls off its main thread."""
         return batch.MapFitter(mapfile, cfg, progress)
+
+    # -- map areas -----------------------------------------------------------------------------
+    def area_spectrum(self, mapfile, rect, mode="sum"):
+        """Spectra of the map pixels inside a rectangle, summed (or averaged) into one."""
+        return roi.area_spectrum(mapfile, rect, mode)
 
     # -- preprocessing -------------------------------------------------------------------------
     def si_shift(self, wavenumber, intensity, ref=tools.SI_REF):

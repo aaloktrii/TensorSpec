@@ -1,5 +1,5 @@
 """Shared widgets of the Raman tabs: screen-fitted dialog sizing, the editable Bouhafs threshold
-table and the number formatter used in the tabs' tables. The figure widgets (Canvas, toolbar,
+table, the fitted-peak table filler and the number formatter used in the tabs' tables. The figure widgets (Canvas, toolbar,
 export) are in plotting/viewers/raman_canvas.py.
 
 Moved from Raman_Classifier ``raman_map_classifier_8 (1).py`` (Small widgets, _fmt)."""
@@ -164,3 +164,22 @@ class ThresholdTable(QtWidgets.QTableWidget):
 
 def _fmt(v, nd=3) -> str:
     return "" if v is None or not np.isfinite(v) else ("%.*f" % (nd, v))
+
+
+def fill_peak_table(tbl: QtWidgets.QTableWidget, bands):
+    """One row per fitted peak (band, #, centre, FWHM, height, area) of fit_spectrum()'s bands,
+    for bands that were fitted successfully. ``bands``: [(name, band result), ...]."""
+    tbl.setRowCount(0)
+    for name, b in bands:
+        if "x" not in b or not b.get("ok"):
+            continue
+        for k, c in enumerate(b["comps"]):
+            r = tbl.rowCount()
+            tbl.insertRow(r)
+            for col, txt in enumerate([name, str(k + 1),
+                                       "%.2f ± %.2f" % (c["pos"], c["pos_err"]),
+                                       "%.2f ± %.2f" % (c["fwhm"], c["fwhm_err"]),
+                                       "%.0f ± %.0f" % (c["height"], c["height_err"]),
+                                       "%.0f" % c["area"]]):
+                tbl.setItem(r, col, QtWidgets.QTableWidgetItem(txt))
+
