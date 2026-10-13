@@ -261,3 +261,18 @@ def test_prepare_sum_rule_is_one_back_end_call(xmcd_dataset):
     assert global_workspace.pull_tensor_data("synth_xmcd", "processed/CP").value.shape[0] == 3
     with pytest.raises(ValueError):
         svc.prepare_sum_rule("synth_xmcd", "LH_LV")  # no linear frames
+
+
+def test_display_hint_is_a_back_end_call(qapp, xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    from tensorspec.plotting import peem_plots
+    svc.compute_pcd("synth_xmcd", convention="cp_minus_cm")
+    assert svc.display_hint("synth_xmcd", "raw", "", 0) == {"cmap": "gray", "symmetric": False, "center": "0"}
+    assert svc.display_hint("synth_xmcd", "pcd") == {"cmap": "bwr", "symmetric": True, "center": "0"}
+    offset = np.full((8, 8), 0.05) + np.random.default_rng(0).normal(0, 0.01, (8, 8))  # map with a flux offset
+    assert peem_plots.display_hint("pcd", "data", offset)["center"] == "median"
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    p = PeemXmcdPanel(service=svc)
+    p._name = "synth_xmcd"
+    p._refresh_views(select="pcd")  # the panel applies the service's choice
+    assert p.viewer.primary_view().combo_cmap.currentText() == "bwr"

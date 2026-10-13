@@ -11,6 +11,7 @@ import numpy as np
 from tensorspec.core.peem.bg import resolve_energy
 from tensorspec.core.peem import image_analysis
 from tensorspec.core.workspace import global_workspace
+from tensorspec.plotting import peem_plots
 from tensorspec.gui.services.peem_steps.common import _require_raw, _working_frames, _record, _mask
 
 
@@ -27,6 +28,13 @@ class PeemImageAnalysisSteps:
         if kind in ("raw", "processed"):
             return np.asarray(self.get_view_tensor(name, kind, int(frame)), dtype=float)
         return np.asarray(self.get_map(name, kind, var or "data"), dtype=float)
+
+    def display_hint(self, name: str, kind: str, var: str = "data", frame: int = 0) -> dict[str, Any]:
+        """Colour scale for the image a front end shows: {cmap, symmetric, center}
+        (plotting/peem_plots.display_hint)."""
+        signed = kind in peem_plots.SIGNED_KINDS and (var or "") in peem_plots.SIGNED_VARS
+        img = self.view_image(name, kind, var, frame) if signed else None
+        return peem_plots.display_hint(kind, var, img)
 
     @staticmethod
     def layer_name(kind: str, var: str = "data") -> str:

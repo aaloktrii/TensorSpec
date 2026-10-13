@@ -9,6 +9,25 @@ from __future__ import annotations
 import numpy as np
 
 
+SIGNED_KINDS = {"pcd", "pld", "pmld", "pmnld", "domain_map"}
+SIGNED_VARS = ("", "data", "difference", "flattened", "bg_removed", "fft_filtered", "data_original")
+
+
+def display_hint(kind: str, var: str, image: np.ndarray | None = None) -> dict:
+    """Colour scale for a shown image: signed maps (asymmetries, domain map) diverging blue-white-red
+    with symmetric limits, everything else gray. The centre is 0, or the median when the map
+    carries an offset larger than its spread (e.g. data without I0: flux offset between the two
+    polarizations). Moved from the XPEEM-map panel (_on_layer_changed)."""
+    signed = kind in SIGNED_KINDS and (var or "") in SIGNED_VARS
+    center = "0"
+    if signed and image is not None and kind != "domain_map":
+        fin = np.asarray(image, float)
+        fin = fin[np.isfinite(fin)]
+        if fin.size and abs(float(np.median(fin))) > float(np.std(fin)):
+            center = "median"
+    return {"cmap": "bwr" if signed else "gray", "symmetric": signed, "center": center}
+
+
 def line_profile(ax, pr: dict) -> None:
     """Profile A->B (PeemService.line_profile)."""
     ax.plot(pr["distance"], pr["values"], "k-", lw=1)

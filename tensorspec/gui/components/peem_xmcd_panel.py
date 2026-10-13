@@ -302,7 +302,6 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
 
     # ------------------------------------------------------------ view (TensorSpec data viewer)
     _FRAME_KINDS = ("raw", "cleaned", "processed", "stacked")
-    _SIGNED = {"pcd", "pld", "pmld", "pmnld", "domain_map"}
 
     def _current_layer(self) -> str:
         view = self.viewer.primary_view()
@@ -377,17 +376,13 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
 
     def _on_layer_changed(self, *_):
         """Signed maps: RWB with symmetric limits; intensity / means: gray (user can change it)."""
-        kind, var = self._view_kind(), self._view_var()
-        signed = kind in self._SIGNED and var in ("", "data", "difference", "flattened", "bg_removed",
-                                                  "fft_filtered", "data_original")
-        center = "0"
-        img = self._current_image()
-        if signed and img is not None and kind != "domain_map":
-            fin = img[np.isfinite(img)]
-            # e.g. BNL / ALS maps without I0 carry a flux offset: white at the median, not at 0
-            if fin.size and abs(float(np.median(fin))) > float(np.std(fin)):
-                center = "median"
-        self.viewer.configure_view(cmap="bwr" if signed else "gray", symmetric=signed, center=center)
+        if not self._name or self.viewer.tensor_data is None:
+            return
+        try:
+            hint = self.service.display_hint(self._name, self._view_kind(), self._view_var(), self._frame())
+        except ValueError:  # e.g. a layer of a map that is being replaced
+            return
+        self.viewer.configure_view(**hint)
 
     def _on_view_changed(self, *_):
         self._frames_dirty = True
