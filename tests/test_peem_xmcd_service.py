@@ -307,3 +307,26 @@ def test_asymmetry_show_list_filled_by_the_service(qapp, xmcd_dataset):
     assert items[0] == ("Show: asymmetry", "data") and items[-1][1] == "mean_cm"
     p.asym_out.setCurrentIndex(1)
     assert p._view_kind() == "pcd" and p._view_var() == "difference"
+
+
+def test_background_and_sum_rule_are_reproducible(tmp_path):
+    """Same data + settings -> same numbers (the BG ensemble / window jitter use a fixed seed)."""
+    energy = np.linspace(570.0, 595.0, 26)
+    edge = 1.0 + 0.8 * np.exp(-0.5 * ((energy - 577.0) / 1.0) ** 2) + 0.4 * np.exp(-0.5 * ((energy - 586.0) / 1.2) ** 2)
+    rng = np.random.default_rng(1)
+    frames = lambda s: np.stack([np.full((16, 16), 1000 * e * (1 + s)) + rng.normal(0, 5, (16, 16)) for e in edge])
+    pos = synthetic.write_ue49_scan(tmp_path, "Mono_S_0001", frames(0.02), [f"Cr_pos_{i:04d}" for i in range(26)], energy=energy)
+    neg = synthetic.write_ue49_scan(tmp_path, "Mono_S_0002", frames(-0.02), [f"Cr_neg_{i:04d}" for i in range(26)], energy=energy)
+    svc = PeemService()
+    svc.load_ue49([pos, neg], name="synth_scan", tpx3=False)
+    try:
+        svc.drift_correct("synth_scan", method="central")
+        n = svc.to_peem_stack("synth_scan", "xmcd")["name"]
+        kw = dict(node="processed/CP", method="linear", e0=570.0, e1=573.0)
+        a, b = svc.bg_preview(n, **kw), svc.bg_preview(n, **kw)
+        assert np.array_equal(np.asarray(a["bg"]), np.asarray(b["bg"]))
+        sk = dict(nh=3.0, l3_lo=574.0, l3_hi=582.0, l2_lo=582.0, l2_hi=592.0, r_lo=570.0, r_hi=595.0)
+        assert repr(svc.sumrule_preview(n, **sk)) == repr(svc.sumrule_preview(n, **sk))
+        global_workspace.remove(n)
+    finally:
+        global_workspace.remove("synth_scan")

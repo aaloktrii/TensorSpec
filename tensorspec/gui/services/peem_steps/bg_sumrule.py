@@ -115,7 +115,7 @@ def _run_bg_fit(
     roi_dict: dict | None = None,
     ensemble_delta: float | None = None,
     ensemble_n: int = 21,
-    seed: int | None = None,
+    seed: int | None = 0,  # fixed: the same data and settings give the same numbers (None = new seed each call)
 ) -> _BgFitResult:
     stack, source_tensor, raw = _pull_bg_source(name, node, channel)
     energy, energy_source = resolve_energy(stack.shape[0], raw.metadata or {})
@@ -417,7 +417,7 @@ def _run_sumrule(
     window_delta: float | None = None,
     window_n: int = 21,
     bg_delta: float | None = None,
-    seed: int | None = None,
+    seed: int | None = 0,  # fixed: the same data and settings give the same numbers (None = new seed each call)
 ) -> _SumruleResult:
     raw = _require_tensor(name)
     tags = _sumrule_tags(name)
