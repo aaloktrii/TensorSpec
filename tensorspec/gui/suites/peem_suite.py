@@ -1,7 +1,7 @@
 """PEEM suite container (main PEEM suite of the launcher ribbon).
 
 Tabs on one shared workspace:
-  Stack · BG · sum rule   the original PEEM panel (pair / separate, NCC drift, background, sum rule)
+  Sum Rule                the original PEEM panel: load, background, sum rule (pairing is automatic)
   XPEEM map               loading (format and polarization from the data), stack clean-up, drift
                           correction, stack + asymmetry, image analysis, ROIs and domain maps (data viewer)
 The XPEEM-map result can be handed to the first tab ("Load from XPEEM map") for background
@@ -32,7 +32,7 @@ class PEEMSuite(QWidget):
         self.panel.set_xmcd_source(self._xmcd_to_stack)
         self.xmcd_panel.set_xas_target(self._to_xas_tab)
         self.tabs.addTab(self.xmcd_panel, "XPEEM map")
-        self.tabs.addTab(self.panel, "Stack · BG · sum rule")
+        self.tabs.addTab(self.panel, "Sum Rule")
         layout.addWidget(self.tabs)
 
     def _to_xas_tab(self):
@@ -45,7 +45,8 @@ class PEEMSuite(QWidget):
         name = self.xmcd_panel._name
         if not name:
             raise ValueError("Load data in the XPEEM map tab first (and run its drift correction).")
-        return self.service.to_peem_stack(name, self.xmcd_panel.pair_combo.currentData())
+        return self.service.to_peem_stack(name, self.xmcd_panel.pair_combo.currentData(),
+                                          source=self.xmcd_panel.send_source.currentData())
 
 
 if __name__ == "__main__":

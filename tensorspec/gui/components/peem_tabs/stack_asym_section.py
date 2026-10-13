@@ -43,12 +43,21 @@ class StackAsymSection:
         self.stack_out.setToolTip("Stacked images in the viewer (after Stack)")
         self.stack_out.currentIndexChanged.connect(self._show_stack_output)
         sk.addRow(self.stack_out)
-        self.btn_to_xas = QPushButton("XAS from ROI + sum rule →")
-        self.btn_to_xas.setToolTip("The stacked images (one per polarization and photon energy) go to the\n"
-                                   "'Stack · BG · sum rule' tab: draw an ROI there for its XAS, background and sum rule")
+        self.send_source = QComboBox()
+        self.send_source.addItem("stacked images (per polarization / energy)", "stacked")
+        self.send_source.addItem("drift-corrected frames (all, paired + separated)", "processed")
+        self.btn_to_xas = QPushButton("→ Sum Rule")
+        self.btn_to_xas.setToolTip("Push these images to the Sum Rule tab (ROI XAS, background, sum rule);\n"
+                                   "they arrive paired and separated into the two polarizations")
         self.btn_to_xas.clicked.connect(self._send_to_xas)
-        self.btn_to_xas.setVisible(False)  # shown when the PEEM suite connects its stack tab
-        sk.addRow(self.btn_to_xas)
+        self._send_row = QWidget()
+        sr = QHBoxLayout(self._send_row)
+        sr.setContentsMargins(0, 0, 0, 0)
+        sr.addWidget(QLabel("Send:"))
+        sr.addWidget(self.send_source, 1)
+        sr.addWidget(self.btn_to_xas)
+        self._send_row.setVisible(False)  # shown when the PEEM suite connects its Sum Rule tab
+        sk.addRow(self._send_row)
         cl.addWidget(stk)
 
         # ---------------------------------------------------------------- 4. Asymmetry
@@ -132,7 +141,7 @@ class StackAsymSection:
     def set_xas_target(self, send):
         """send() hands the stacked images to the stack / BG / sum-rule tab (set by the PEEM suite)."""
         self._xas_target = send
-        self.btn_to_xas.setVisible(send is not None)
+        self._send_row.setVisible(send is not None)
 
     def _send_to_xas(self):
         if self._require() and getattr(self, "_xas_target", None):

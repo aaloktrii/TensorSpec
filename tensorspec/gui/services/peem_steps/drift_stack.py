@@ -470,8 +470,12 @@ class PeemDriftStackSteps:
                                                                  energy_bin_eV)
         return stack, pol_out, points, counts, width, has_e
 
-    def to_peem_stack(self, name: str, pair: str = "xmcd", energy_bin_eV: float | None = None) -> dict[str, Any]:
-        """Hand the drift-corrected result of tab 1 to the PEEM-stack tab (background, sum rule).
+    def to_peem_stack(self, name: str, pair: str = "xmcd", energy_bin_eV: float | None = None,
+                      source: str = "stacked") -> dict[str, Any]:
+        """Hand the XPEEM-map result to the Sum Rule tab (background, sum rule).
+
+        source "stacked" (default, described below) or "processed": every drift-corrected frame,
+        paired i-th A with i-th B (core/peem/engine.pair_stack) and separated.
 
         The drift-corrected frames (/processed, step 1) are grouped by photon energy and
         averaged per polarization, giving one A and one B image per energy. They become a new
@@ -482,9 +486,13 @@ class PeemDriftStackSteps:
         average_by_energy). The new dataset is already paired (/processed) and separated
         (/processed/<A>, <B>), which is the input the PEEM-stack background and sum-rule steps use.
         """
+        if source == "processed":
+            return self._frames_to_sum_rule(name, pair)
+        if source != "stacked":
+            raise ValueError('source must be "stacked" or "processed"')
         raw = _require_raw(name)
-        pmd = global_workspace.pull_tensor_data(name, "processed").metadata or {}
         stack, pol_out, points, counts, energy_bin_eV, has_e = self.stacked_frames(name, pair, energy_bin_eV)
+        pmd = global_workspace.pull_tensor_data(name, "processed").metadata or {}
         ta, tb = pol_out[:2]
         md = {k: v for k, v in (raw.metadata or {}).items()
               if k in ("format", "beamline", "default_convention", "pol_source", "fov_um", "um_per_px",
@@ -513,7 +521,50 @@ class PeemDriftStackSteps:
                "energy_bin_eV": round(energy_bin_eV, 4) if has_e else None}
         if len(points) < 3:
             out["note"] = ("single photon energy: background subtraction and the sum rule need an energy "
-                           "scan (several energies); use the XMCD-imaging tab's asymmetry for single-energy maps")
+                           "scan (several energies); use the XPEEM map's asymmetry for single-energy maps")
+        return out
+
+    def _frames_to_sum_rule(self, name: str, pair: str) -> dict[str, Any]:
+        """Every drift-corrected frame -> new dataset '<name>_<pair>_frames', paired and separated."""
+        tags = {"xmcd": ("CP", "CM"), "xld": ("LH", "LV")}.get(pair)
+        if tags is None:
+            raise ValueError('pair must be "xmcd" or "xld"')
+        raw = _require_raw(name)
+        proc = global_workspace.pull_tensor_data(name, "processed")
+        pmd = (proc.metadata or {}) if proc is not None else {}
+        if proc is None or not pmd.get("drift_corrected"):
+            raise ValueError("Run the drift correction first.")
+        pol = [str(t) for t in pmd.get("pol", [])]
+        sel = [i for i, t in enumerate(pol) if t in tags]
+        energy, e_src = resolve_energy(len(raw.value), raw.metadata or {})
+        keep = np.asarray(pmd.get("raw_frame_index", range(len(pol))), dtype=int)
+        energy = np.asarray(energy, float)[keep][sel]
+        has_e = e_src != "index"
+        md = {k: v for k, v in (raw.metadata or {}).items()
+              if k in ("format", "beamline", "default_convention", "pol_source", "fov_um", "um_per_px",
+                       "temperature_K", "loader", "i0_normalized")}
+        names = list(pmd.get("frame_names") or [f"frame_{i}" for i in range(len(pol))])
+        md.update({
+            "pol": [pol[i] for i in sel], "frame_names": [names[i] for i in sel], "derived_from": name,
+            "derived_by": "XPEEM map: drift-corrected frames", "drift_method": pmd.get("drift_method_label"),
+            "beamline_table": {"columns": ["energy"], "series": {"energy": energy.tolist()}} if has_e else None,
+            "I0": None, "csv_attached": False,
+        })
+        frames = np.asarray(proc.value, dtype=np.float32)[sel]
+        tensor = TensorData(value=frames, axes=[np.arange(len(frames), dtype=float), raw.axes[1], raw.axes[2]],
+                            labels=raw.labels, units=raw.units, data_type="Experimental PEEM", metadata=md)
+        label = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{name}_{pair}_frames")[:64]
+        global_workspace.push_spectroscopy_data(label, tensor)
+        paired = self.pair(label, "CP_CM" if pair == "xmcd" else "LH_LV")
+        sep = self.separate(label)
+        ta, tb = tags
+        out = {"name": label, "from": name, "pair": pair, "source": "drift-corrected frames",
+               "channels": [ta, tb], "separated": sep["channels"], "n_frames": int(len(frames)),
+               "n_pairs": paired.get("n_pairs"), "pol_summary": {t: md["pol"].count(t) for t in tags},
+               "n_energies": int(len(np.unique(energy))) if has_e else 1,
+               "energy_range_eV": [float(energy.min()), float(energy.max())] if has_e else None}
+        if paired.get("unpaired_count"):
+            out["note"] = f"{paired['unpaired_count']} frame(s) without a partner were left out"
         return out
 
     def get_drift(self, name: str, kind: str = "pcd") -> dict[str, Any] | None:

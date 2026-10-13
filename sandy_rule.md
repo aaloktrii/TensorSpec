@@ -98,7 +98,7 @@ tensorspec/
         ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
         ├── dft_suite.py
         ├── arpes_suite.py
-        ├── peem_suite.py         # Tabs: XPEEM map (peem_xmcd_panel) · Stack / BG / sum rule (peem_panel)
+        ├── peem_suite.py         # Tabs: XPEEM map (peem_xmcd_panel) · Sum Rule (peem_panel)
         ├── xas_suite.py
         ├── transport_suite.py    # Shell until transport_engine ships
         └── ml_suite.py

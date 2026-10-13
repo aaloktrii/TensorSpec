@@ -83,10 +83,12 @@ def test_peem_suite_tabs_share_one_service(qapp):
     from tensorspec.gui.suites.peem_suite import PEEMSuite
 
     suite = PEEMSuite()
-    assert suite.tabs.count() == 2  # XMCD imaging + the original stack panel; XAS is its own suite
+    assert suite.tabs.count() == 2  # XPEEM map + Sum Rule; XAS is its own suite
     assert suite.panel.service is suite.service  # one PEEM service for both tabs
     assert not hasattr(suite.service, "xas")
     assert not suite.panel.btn_from_xmcd.isHidden()
+    assert [suite.tabs.tabText(i) for i in range(2)] == ["XPEEM map", "Sum Rule"]
+    assert not hasattr(suite.panel, "btn_pair") and not hasattr(suite.panel, "btn_drift")  # options 2 / 3 gone
     suite.close()
 
 
@@ -157,12 +159,16 @@ def test_stacked_frames_view_and_send_to_xas_tab(qapp, xmcd_dataset):
     stack, tags, *_ = svc.stacked_frames("synth_xmcd")
     assert tags == ["CP", "CM"] and stack.shape[0] == 2  # one energy: CP image, CM image
     assert np.allclose(p.viewer.tensor_data.value, stack)
-    assert not p.btn_to_xas.isHidden()
+    assert not p._send_row.isHidden() and suite.tabs.tabText(1) == "Sum Rule"
     p.pair_combo.setCurrentIndex(p.pair_combo.findData("xmcd"))
-    p._send_to_xas()
-    assert suite.tabs.currentWidget() is suite.panel  # the stack / BG / sum-rule tab now shows the stacks
-    assert "synth_xmcd_xmcd" in [suite.panel.dataset_combo.itemText(i) for i in range(suite.panel.dataset_combo.count())] \
-        if hasattr(suite.panel, "dataset_combo") else True
+    for src, dataset, n in (("stacked", "synth_xmcd_xmcd", 2), ("processed", "synth_xmcd_xmcd_frames", 6)):
+        p.send_source.setCurrentIndex(p.send_source.findData(src))
+        p._send_to_xas()
+        assert suite.tabs.currentWidget() is suite.panel  # the Sum Rule tab now shows the pushed images
+        assert suite.panel._dataset_name == dataset
+        assert global_workspace.pull_tensor_data(dataset, "raw").value.shape[0] == n
+        assert global_workspace.pull_tensor_data(dataset, "processed/CP") is not None  # paired + separated
+        global_workspace.remove(dataset)
     suite.close()
 
 
@@ -187,3 +193,13 @@ def test_numbers_can_be_typed_for_line_box_and_rois(qapp, xmcd_dataset):
     # number fields hold only numbers (units are in the labels)
     own = [s for s in p.findChildren(QAbstractSpinBox) if hasattr(s, "prefix") and not p.viewer.isAncestorOf(s)]
     assert own and all(not s.prefix() and not s.suffix() for s in own)
+
+
+def test_sum_rule_tab_pairs_and_separates_on_load(qapp, xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    from tensorspec.gui.components.peem_panel import PeemPanel
+    panel = PeemPanel()
+    panel.service = svc
+    panel._on_load_finished(True, {"name": "synth_xmcd", "n_frames": 6, "pol_summary": {"CP": 3, "CM": 3}}, "")
+    assert "paired 3 (" in panel.status_label.text()
+    assert global_workspace.pull_tensor_data("synth_xmcd", "processed/CM") is not None

@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSlider,
-    QSpinBox,
     QSplitter,
     QTabWidget,
     QVBoxLayout,
@@ -96,44 +95,7 @@ class PeemPanel(QWidget):
         load_form.addRow(self.status_label)
         control_layout.addWidget(load_group)
 
-        pair_group = QGroupBox("2. Pair / Separate")
-        pair_form = QFormLayout(pair_group)
-        self.pair_mode = QComboBox()
-        self.pair_mode.addItem("Auto", "auto")
-        self.pair_mode.addItem("CP / CM", "CP_CM")
-        self.pair_mode.addItem("LH / LV", "LH_LV")
-        pair_form.addRow("Pair mode:", self.pair_mode)
-        pair_btns = QHBoxLayout()
-        self.btn_pair = QPushButton("Stack Pairs")
-        self.btn_pair.clicked.connect(self._pair)
-        self.btn_separate = QPushButton("Separate")
-        self.btn_separate.clicked.connect(self._separate)
-        pair_btns.addWidget(self.btn_pair)
-        pair_btns.addWidget(self.btn_separate)
-        pair_form.addRow(pair_btns)
-        control_layout.addWidget(pair_group)
-
-        drift_group = QGroupBox("3. Drift")
-        drift_form = QFormLayout(drift_group)
-        self.drift_algo_label = QLabel("NCC ROI (ncc_roi)")
-        drift_form.addRow("Algorithm:", self.drift_algo_label)
-        self.drift_source = QComboBox()
-        self.drift_source.addItem("Raw", "raw")
-        self.drift_source.addItem("Processed", "processed")
-        drift_form.addRow("Source:", self.drift_source)
-        self.drift_ref = QSpinBox()
-        self.drift_ref.setRange(0, 9999)
-        drift_form.addRow("Ref frame:", self.drift_ref)
-        self.drift_radius = QSpinBox()
-        self.drift_radius.setRange(1, 200)
-        self.drift_radius.setValue(10)
-        drift_form.addRow("Search radius:", self.drift_radius)
-        self.btn_drift = QPushButton("Apply Drift")
-        self.btn_drift.clicked.connect(self._apply_drift)
-        drift_form.addRow(self.btn_drift)
-        control_layout.addWidget(drift_group)
-
-        bg_group = QGroupBox("4. Background")
+        bg_group = QGroupBox("2. Background")
         bg_form = QFormLayout(bg_group)
         self.bg_node = QComboBox()
         self.bg_node.addItem("Raw", "raw")
@@ -170,7 +132,7 @@ class PeemPanel(QWidget):
         control_layout.addWidget(bg_group)
         self._sync_bg_method_ui()
 
-        sum_group = QGroupBox("5. XMCD Sum Rule")
+        sum_group = QGroupBox("3. XMCD Sum Rule")
         sum_form = QFormLayout(sum_group)
         self.sum_nh = QDoubleSpinBox()
         self.sum_nh.setRange(0.0, 20.0)
@@ -385,9 +347,21 @@ class PeemPanel(QWidget):
         ]
         if summary.get("partner_added"):
             parts.append(f"+ partner folder {summary['partner_added']}")
+        if not summary.get("separated"):  # loaded here (not from the XPEEM map): pair + separate for BG / sum rule
+            parts.append(self._auto_pair_separate(summary["name"]))
         if summary.get("csv_prompt"):
             parts.append("Attach CSV if needed.")
         self.status_label.setText(" | ".join(parts))
+
+    def _auto_pair_separate(self, name: str) -> str:
+        """Pair CP/CM (or LH/LV) frames and separate the channels, as the background and sum rule need."""
+        try:
+            paired = self.service.pair(name, "auto")
+            sep = self.service.separate(name)
+        except Exception as exc:  # noqa: BLE001 - e.g. one polarization only
+            return f"not paired ({exc})"
+        self._refresh_meta()
+        return f"paired {paired['n_pairs']} ({', '.join(sep['channels'])})"
 
     def _attach_csv(self):
         name = self._require_dataset()
@@ -404,56 +378,6 @@ class PeemPanel(QWidget):
             )
         except Exception as exc:
             QMessageBox.critical(self, "CSV error", str(exc))
-
-    def _pair(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            result = self.service.pair(name, self.pair_mode.currentData())
-            self._refresh_meta()
-            self.status_label.setText(
-                f"Paired {result['n_pairs']} pairs ({result.get('unpaired_count', 0)} unpaired)"
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Pair error", str(exc))
-
-    def _separate(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            result = self.service.separate(name)
-            self._refresh_meta()
-            self.status_label.setText(f"Separated channels: {', '.join(result['channels'])}")
-        except Exception as exc:
-            QMessageBox.critical(self, "Separate error", str(exc))
-
-    def _apply_drift(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            frame = self.service.get_view_tensor(
-                name, node=self.drift_source.currentData(), frame_index=self.drift_ref.value()
-            )
-            ny, nx = frame.shape
-            roi = self.service.default_drift_roi(ny, nx)
-            result = self.service.drift(
-                name,
-                ref_index=self.drift_ref.value(),
-                roi_dict=roi,
-                search_radius=self.drift_radius.value(),
-                source=self.drift_source.currentData(),
-            )
-            self._refresh_meta()
-            algo = result.get("drift_method", "ncc_roi")
-            self.drift_algo_label.setText(f"NCC ROI ({algo})")
-            self.status_label.setText(
-                f"Drift applied (max |dx|={result['max_abs_dx']}, |dy|={result['max_abs_dy']})"
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Drift error", str(exc))
 
     def _bg_kwargs(self) -> dict:
         method = self.bg_method.currentData()
@@ -633,7 +557,6 @@ class PeemPanel(QWidget):
         self.frame_slider.setRange(0, max(0, n - 1))
         if self.frame_slider.value() > max(0, n - 1):
             self.frame_slider.setValue(0)
-        self.drift_ref.setMaximum(max(0, n - 1))
         self.frame_slider.blockSignals(False)
 
     def _refresh_frame_view(self):
