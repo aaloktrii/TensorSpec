@@ -115,8 +115,10 @@ def load_scan(
     tpx3: bool = True,
     name_filter: str | None = None,
     skip_missing: bool = False,
+    pol: str | None = None,
 ) -> dict[str, Any]:
-    """Load one scan. Returns dict(frames (n,y,x), names, pol, table, settings, missing).
+    """Load one scan. ``pol`` (CP / CM / LH / LV, set by the user) tags every frame and overrides
+    the image-name tokens and the PolTable. Returns dict(frames (n,y,x), names, pol, table, settings, missing).
 
     ``skip_missing`` drops rows whose TIFF is absent (listed in ``missing``)
     instead of raising.
@@ -170,7 +172,7 @@ def load_scan(
         raise ValueError(f"inconsistent image shapes in {txt_path.name}: {sorted(shapes)}")
 
     table = {k: [v[i] for i in keep] for k, v in cols.items()}
-    resolved = [resolve_pol(n, scan_pol) for n in names]
+    resolved = [(pol, "user") for _ in names] if pol else [resolve_pol(n, scan_pol) for n in names]
     pol = [r[0] for r in resolved]
     conflicts = sorted({n for n, (tag, src) in zip(names, resolved)
                         if src == "filename" and scan_pol and tag != scan_pol})
@@ -200,6 +202,7 @@ def load_scans(
     name_filter: str | None = None,
     allow_mixed_fov: bool = False,
     skip_missing: bool = False,
+    pol: dict[str, str] | None = None,
 ) -> TensorData:
     """Load and concatenate UE49 scans into a PEEM ``(frame, y, x)`` TensorData.
 
@@ -212,8 +215,9 @@ def load_scans(
         raise ValueError("no scan tables given")
     dead = detector.load_detector_map(dead_map_path) if dead_map_path else None
     norm = detector.load_detector_map(norm_image_path) if norm_image_path else None
+    pol_set = {str(Path(k)): v for k, v in (pol or {}).items()}
     scans = [load_scan(p, dead_map=dead, norm_image=norm, tpx3=tpx3, name_filter=name_filter,
-                       skip_missing=skip_missing) for p in paths]
+                       skip_missing=skip_missing, pol=pol_set.get(str(p))) for p in paths]
     if len({s["frames"].shape[1:] for s in scans}) != 1:
         raise ValueError("scans have different image sizes")
 

@@ -45,8 +45,12 @@ class PeemLoadSteps:
         tpx3: bool = True,
         drop_bad_frames: bool = False,
         allow_mixed_fov: bool = False,
+        pol: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Any of the three formats -> PEEM dataset in the workspace.
+
+        pol: {path: CP / CM / LH / LV} for items whose data do not record the polarization
+        (core/io/peem_beamline_loaders.detect_pol); file and folder names are not needed.
 
         i0_normalize None = beamline default (UE49 on, ALS off, UView has no I0).
         Detector maps (set_detector_maps), tpx3 and drop_bad_frames apply to UE49 only.
@@ -54,7 +58,7 @@ class PeemLoadSteps:
         tensor = peem_beamline_loaders.load_beamline(
             paths, i0_normalize=i0_normalize, allow_mixed_fov=allow_mixed_fov,
             dead_map_path=self.dead_map_path, norm_image_path=self.norm_image_path,
-            tpx3=tpx3, drop_bad_frames=drop_bad_frames)
+            tpx3=tpx3, drop_bad_frames=drop_bad_frames, pol=pol)
         return self._push(tensor, name)
 
     def load_ue49(

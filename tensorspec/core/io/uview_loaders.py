@@ -133,8 +133,13 @@ def _frame_files(path: Path) -> list[Path]:
     return [path] if path.suffix.lower() == ".dat" else []
 
 
-def load_uview_folders(paths: list[str | Path], allow_mixed_fov: bool = False) -> TensorData:
-    """Acquisition folders (or single ``.dat`` files) -> PEEM ``(frame, y, x)`` TensorData."""
+def load_uview_folders(paths: list[str | Path], allow_mixed_fov: bool = False,
+                       pol: dict[str, str] | None = None) -> TensorData:
+    """Acquisition folders (or single ``.dat`` files) -> PEEM ``(frame, y, x)`` TensorData.
+
+    UView files do not record the polarization, so it comes from ``pol`` ({path: CL / CR / LH /
+    LV}, set by the user) or else from the CL / CR / LH / LV token of the folder name."""
+    pol_set = {str(Path(k)): v.upper() for k, v in (pol or {}).items()}
     if not paths:
         raise ValueError("no UView folders given")
     frames, pol, names, scan_of, metas, bad = [], [], [], [], [], []
@@ -144,9 +149,10 @@ def load_uview_folders(paths: list[str | Path], allow_mixed_fov: bool = False) -
         files = _frame_files(p)
         if not files:
             raise ValueError(f"{p}: no .dat frames")
-        tok = pol_from_name(p.name if p.is_dir() else p.stem) or pol_from_name(p.parent.name)
-        if tok is None:
-            raise ValueError(f"{p.name}: no CL/CR/LH/LV token in the name; cannot assign a polarization")
+        tok = pol_set.get(str(p)) or pol_from_name(p.name if p.is_dir() else p.stem) or pol_from_name(p.parent.name)
+        if tok not in POL_ALIAS:
+            raise ValueError(f"{p.name}: the files do not record the polarization and the name has no CL/CR/LH/LV; "
+                             "set its polarization in the load list")
         scan = p.name if p.is_dir() else p.stem
         n0 = len(frames)
         for f in files:

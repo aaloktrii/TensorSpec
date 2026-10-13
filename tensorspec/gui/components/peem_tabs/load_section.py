@@ -7,7 +7,9 @@ from __future__ import annotations
 import os
 
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -34,14 +36,26 @@ class LoadSection:
         lf = QFormLayout(load)
         self.scan_list = QListWidget()
         self.scan_list.setMaximumHeight(90)
+        self.scan_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         lf.addRow(self.scan_list)
+        self.pol_combo = QComboBox()
+        for label, tag in (("auto (from the data)", ""), ("circular + (CP · BNL CL)", "CP"),
+                           ("circular − (CM · BNL CR)", "CM"), ("linear horizontal (LH)", "LH"),
+                           ("linear vertical (LV)", "LV")):
+            self.pol_combo.addItem(label, tag)
+        self.pol_combo.setToolTip("Polarization of the selected item(s). Names are not needed: UE49 and ALS "
+                                  "record it in the data; BNL UView files do not, so set it here when the "
+                                  "folder name has no CL / CR / LH / LV.")
+        self.pol_combo.activated.connect(self._set_item_pol)
+        self.scan_list.itemSelectionChanged.connect(self._show_item_pol)
+        lf.addRow("Polarization:", self.pol_combo)
         row = QHBoxLayout()
         b_add = QPushButton("Add files…")
         b_add.setToolTip("UE49 scan .txt, UView .dat or ALS .P3B frames")
         b_add.clicked.connect(self._add_scans)
         b_dirs = QPushButton("Add folder…")
-        b_dirs.setToolTip("One acquisition folder per click: UE49 image folder, UView .dat folder (one polarization, "
-                          "_CL_/_CR_/_LH_/_LV_ in the name) or ALS .P3B folder (EPU ±0.9 per frame)")
+        b_dirs.setToolTip("One acquisition folder per click: UE49 image folder, UView .dat folder (one polarization; "
+                          "set it in the list if the name has no CL/CR/LH/LV) or ALS .P3B folder (EPU per frame)")
         b_dirs.clicked.connect(self._add_folders)
         b_clear = QPushButton("Clear")
         b_clear.clicked.connect(self._clear_scans)
@@ -105,21 +119,65 @@ class LoadSection:
                 continue
             try:
                 fmt, _ = peem_beamline_loaders.detect_format(p)
+                self._scan_detected[p] = peem_beamline_loaders.detect_pol(p)
             except ValueError as exc:
                 self._err(str(exc))
                 continue
             self._scan_paths.append(p)
-            name = os.path.basename(p) + ("/" if os.path.isdir(p) else "")
-            self.scan_list.addItem(f"[{fmt}] {name}")
+            self.scan_list.addItem("")
             self.scan_list.item(self.scan_list.count() - 1).setToolTip(p)
+            self._item_text(len(self._scan_paths) - 1, fmt)
             self._set_format(fmt)
             self._log(f"Added [{fmt}] {p}")
         self._update_load_status()
+
+    def _item_text(self, i: int, fmt: str | None = None):
+        p = self._scan_paths[i]
+        item = self.scan_list.item(i)
+        fmt = fmt or item.text()[1:].split("]")[0]
+        tag, src = self._scan_detected.get(p, (None, ""))
+        if p in self._scan_pol:
+            pol = f"{self._scan_pol[p]} (set)"
+        else:
+            pol = f"{tag} ({src})" if tag else "? — set the polarization"
+        item.setText(f"[{fmt}] {os.path.basename(p)}{'/' if os.path.isdir(p) else ''} · {pol}")
+
+    def _show_item_pol(self):
+        rows = [self.scan_list.row(it) for it in self.scan_list.selectedItems()]
+        tags = {self._scan_pol.get(self._scan_paths[r], "") for r in rows}
+        self.pol_combo.setCurrentIndex(max(0, self.pol_combo.findData(tags.pop())) if len(tags) == 1 else 0)
+
+    def _set_item_pol(self):
+        rows = [self.scan_list.row(it) for it in self.scan_list.selectedItems()]
+        if not rows:
+            self._err("Select an item in the list first, then choose its polarization.")
+            return
+        tag = self.pol_combo.currentData()
+        for r in rows:
+            p = self._scan_paths[r]
+            if tag and self._scan_detected.get(p, ("",))[0] == "per frame":
+                self._err(f"{os.path.basename(p)}: ALS frames record their polarization (EPU); not changed.")
+                continue
+            if tag:
+                self._scan_pol[p] = tag
+            else:
+                self._scan_pol.pop(p, None)
+            self._item_text(r)
+        self._update_load_status()
+
+    def _unset_pol(self) -> list[str]:
+        return [os.path.basename(p) for p in self._scan_paths
+                if p not in self._scan_pol and not self._scan_detected.get(p, (None,))[0]]
 
     def _update_load_status(self):
         n = len(self._scan_paths)
         if not n:
             self.load_status.setText("Add files or a folder, then click Load.")
+            return
+        unset = self._unset_pol()
+        if unset:
+            self.load_status.setText(f"Set the polarization of: {', '.join(unset)} (select it, then choose "
+                                     "Polarization). The data do not record it.")
             return
         missing = [os.path.basename(str(q)) for q in map(peem_beamline_loaders.partner_folder, self._scan_paths)
                    if q is not None and os.path.normpath(str(q)) not in self._scan_paths]
@@ -167,6 +225,8 @@ class LoadSection:
             self._log(f"Unloaded '{self._name}'.")
         self._name = None
         self._scan_paths.clear()
+        self._scan_pol.clear()
+        self._scan_detected.clear()
         self.scan_list.clear()
         self.plot_box.setVisible(False)
         self.view_combo.blockSignals(True)
@@ -188,12 +248,18 @@ class LoadSection:
         except ValueError as exc:
             self._err(str(exc))
             return
+        unset = self._unset_pol()
+        if unset:
+            self._err(f"Set the polarization of {', '.join(unset)} first: select it in the list and choose "
+                      "Polarization (its files do not record it).")
+            return
         i0 = self.chk_i0.isChecked() if self.chk_i0.isEnabled() else None
         self.load_status.setText(f"Loading {len(self._scan_paths)} item(s)… (online-only Dropbox files download first)")
         self._log("Loading: " + "; ".join(self._scan_paths))
         self._run(self.service.load_beamline, self._on_loaded, list(self._scan_paths),
                   None, i0_normalize=i0,  # dataset name is automatic
-                  tpx3=self.chk_tpx3.isChecked(), drop_bad_frames=self.chk_bad.isChecked())
+                  tpx3=self.chk_tpx3.isChecked(), drop_bad_frames=self.chk_bad.isChecked(),
+                  pol=dict(self._scan_pol) or None)
 
     def _on_loaded(self, res: dict):
         self._name = res["name"]

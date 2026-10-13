@@ -202,3 +202,68 @@ def test_ncc_roi_drift_uses_the_original_engine(tmp_path):
     assert r["method"].startswith("NCC ROI (original")
     d = svc.get_drift("t_ncc", "processed")
     assert np.allclose(np.c_[d["dy"], d["dx"]], true)
+
+
+def test_loading_does_not_need_names(tmp_path):
+    """Renamed acquisitions load: format from the file contents, polarization from the data
+    (UE49 scan table, ALS EPU) or set by the user (UView files do not record it)."""
+    import shutil
+    # BNL UView: folders without CL / CR in the name
+    a, b = tmp_path / "first", tmp_path / "second"
+    shutil.move(uview_acq(tmp_path, "CL", 1100), a)
+    shutil.move(uview_acq(tmp_path, "CR", 900), b)
+    assert peem_beamline_loaders.detect_format(a)[0] == "uview"
+    assert peem_beamline_loaders.detect_pol(a)[0] is None
+    with pytest.raises(ValueError, match="set its polarization"):
+        peem_beamline_loaders.load_beamline([a, b])
+    t = peem_beamline_loaders.load_beamline([a, b], pol={str(a): "CP", str(b): "CM"})
+    assert set(t.metadata["pol"]) == {"CP", "CM"} and t.metadata["pol"][0] == "CP"
+    # ALS: frames renamed without '#NNNN'; a .P3B that is not a raw frame is skipped
+    d = _p3b(tmp_path)
+    for i, f in enumerate(sorted(d.glob("*.P3B"))):
+        f.rename(d / f"frame_{i}.P3B")
+    (d / "processed.P3B").write_bytes(b"not a raw frame")
+    t = peem_beamline_loaders.load_beamline([d])
+    assert t.metadata["pol"] == ["CP", "CP", "CM", "CM"]
+    assert peem_beamline_loaders.detect_pol(d)[0] == "per frame"
+    with pytest.raises(ValueError, match="cannot be set by hand"):
+        peem_beamline_loaders.load_beamline([d], pol={str(d): "CM"})
+    # UE49: scan table + image folder renamed together; tokens are in the table's image names
+    (tmp_path / "u").mkdir()
+    txt = _ue49(tmp_path / "u")
+    new = txt.with_name("my_scan.txt")
+    txt.rename(new)
+    txt.with_suffix("").rename(new.with_suffix(""))
+    assert peem_beamline_loaders.detect_pol(new) == (None, "mixed / no polarization in the scan")  # pos + neg
+    t = peem_beamline_loaders.load_beamline([new], tpx3=False)
+    assert t.metadata["pol"] == ["CP", "CP", "CM", "CM"]
+
+
+def test_load_list_sets_polarization_of_unnamed_folders(qapp, tmp_path, monkeypatch):
+    import shutil
+    from PySide6.QtWidgets import QMessageBox
+    from tensorspec.core.workspace import global_workspace
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    errors = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: errors.append(a[2])))
+    a, b = tmp_path / "first", tmp_path / "second"
+    shutil.move(uview_acq(tmp_path, "CL", 1100), a)
+    shutil.move(uview_acq(tmp_path, "CR", 900), b)
+    p = PeemXmcdPanel()
+    p._run = lambda fn, done, *args, **kw: done(fn(*args, **kw))  # synchronous for the test
+    p._add_paths([str(a), str(b)])
+    assert "? — set the polarization" in p.scan_list.item(0).text()
+    assert "Set the polarization of: first, second" in p.load_status.text()
+    p._load()
+    assert errors and "Set the polarization" in errors[-1] and p._name is None
+    for row, tag in ((0, "CP"), (1, "CM")):
+        p.scan_list.setCurrentRow(row)
+        p.pol_combo.setCurrentIndex(p.pol_combo.findData(tag))
+        p._set_item_pol()
+    assert p.scan_list.item(1).text().endswith("· CM (set)")
+    p._load()
+    try:
+        assert p._name and global_workspace.pull_tensor_data(p._name, "raw").metadata["pol"].count("CP") > 0
+    finally:
+        if p._name:
+            global_workspace.remove(p._name)

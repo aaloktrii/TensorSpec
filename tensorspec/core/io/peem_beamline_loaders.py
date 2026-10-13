@@ -9,11 +9,15 @@ format     what to pass                                 polarization from
 =========  ===========================================  ==========================================
 ue49       ``X_0002.txt`` scan tables (or the image     file name pos / neg / _lh / _lv
            folder next to one)                          (BeamlineSettings PolTable as fallback)
-uview      acquisition folders of UView ``.dat``        folder name _CL_ / _CR_ / _LH_ / _LV_
-           frames (``UKSOFT2001``), or single ``.dat``  (CL -> CP, CR -> CM)
-p3b        acquisition folders of ``*#*.P3B`` frames    EPU_POLARIZATION of every frame
+uview      acquisition folders of UView ``.dat``        not in the files: ``pol`` (user) or the
+           frames (``UKSOFT2001``), or single ``.dat``  folder name _CL_ / _CR_ / _LH_ / _LV_
+p3b        acquisition folders of ``.P3B`` frames       EPU_POLARIZATION of every frame
                                                         (+0.9 -> CP, -0.9 -> CM)
 =========  ===========================================  ==========================================
+
+Names are not needed: the format is detected from the files (UView by its header, P3B by its
+records, UE49 by the scan table next to its image folder), and ``pol`` ({path: CP / CM / LH /
+LV}) sets the polarization of an item whose data do not record it (``detect_pol`` tells which).
 
 Beamline-specific corrections run only where they exist: TPX3 cross / dead pixel /
 flat field for UE49, I0 for UE49 (on by default) and ALS (off by default; used only
@@ -70,6 +74,29 @@ def partner_folder(path: str | Path) -> Path | None:
     return None
 
 
+POL_TAGS = ("CP", "CM", "LH", "LV")
+_UVIEW_LABEL = {"CP": "CL", "CM": "CR", "LH": "LH", "LV": "LV"}
+
+
+def detect_pol(path: str | Path) -> tuple[str | None, str]:
+    """(tag CP / CM / LH / LV, or "per frame", or None; where it comes from) for one item, without
+    loading images. None = the data do not tell: the user sets it (``load_beamline(pol=...)``)."""
+    fmt, p = detect_format(path)
+    if fmt == "p3b":
+        return "per frame", "EPU polarization recorded in every frame"
+    if fmt == "uview":
+        tok = uview_loaders.pol_from_name(p.name if p.is_dir() else p.stem) or uview_loaders.pol_from_name(p.parent.name)
+        return (uview_loaders.POL_ALIAS[tok], f"folder name ({tok})") if tok else (None, "not recorded in UView files")
+    names = [n for n in ue49_loaders.read_scan_table(p).get("ImageNameTable", []) if n]
+    tags = {ue49_loaders.pol_from_name(n) for n in names} - {"unknown"}
+    if len(tags) == 1:
+        return tags.pop(), "image names in the scan table"
+    scan_pol = ue49_loaders.pol_from_settings(ue49_loaders.read_beamline_settings(p.with_suffix("") / "BeamlineSettings.txt"))
+    if scan_pol and not tags:
+        return scan_pol, "BeamlineSettings PolTable (can lag the helicity switch by one scan)"
+    return None, "mixed / no polarization in the scan" if tags else "no polarization in the scan"
+
+
 def is_beamline_source(path: str | Path) -> bool:
     try:
         detect_format(path)
@@ -92,11 +119,14 @@ def load_beamline(
     norm_image_path: str | Path | None = None,
     tpx3: bool = True,
     drop_bad_frames: bool = False,
+    pol: dict[str, str] | None = None,
 ) -> TensorData:
     """Load UE49 / UView / P3B acquisitions (all of one format) into one PEEM dataset.
 
     i0_normalize: None = the beamline default (UE49 on, ALS off, UView has no I0).
     dead_map_path / norm_image_path / tpx3 / drop_bad_frames apply to UE49 only.
+    pol: {path: CP / CM / LH / LV} for items whose data do not record the polarization (UView
+    always, UE49 scans without tokens); ALS frames carry it, so it is not accepted there.
     """
     if not paths:
         raise ValueError("no files or folders given")
@@ -106,13 +136,23 @@ def load_beamline(
         raise ValueError(f"mixed formats {sorted(fmts)}: load one beamline at a time")
     fmt = fmts.pop()
     norm = list(dict.fromkeys(p for _, p in found))
+    pol_set: dict[str, str] = {}
+    for given, (_, q) in zip(paths, found):
+        tag = (pol or {}).get(str(given)) or (pol or {}).get(str(q))
+        if tag:
+            if tag not in POL_TAGS:
+                raise ValueError(f"polarization must be one of {POL_TAGS}, got {tag!r}")
+            pol_set[str(q)] = tag
+    if pol_set and fmt == "p3b":
+        raise ValueError("ALS .P3B frames record their polarization (EPU); it cannot be set by hand")
     if fmt == "ue49":
         tensor = ue49_loaders.load_scans(
             norm, dead_map_path=dead_map_path, norm_image_path=norm_image_path, tpx3=tpx3,
             i0_normalize=True if i0_normalize is None else i0_normalize,
-            drop_bad_frames=drop_bad_frames, allow_mixed_fov=allow_mixed_fov)
+            drop_bad_frames=drop_bad_frames, allow_mixed_fov=allow_mixed_fov, pol=pol_set)
     elif fmt == "uview":
-        tensor = uview_loaders.load_uview_folders(norm, allow_mixed_fov=allow_mixed_fov)
+        tensor = uview_loaders.load_uview_folders(
+            norm, allow_mixed_fov=allow_mixed_fov, pol={k: _UVIEW_LABEL[v] for k, v in pol_set.items()})
     else:
         tensor = p3b_loaders.load_p3b_folders(norm, i0_normalize=bool(i0_normalize),
                                               allow_mixed_fov=allow_mixed_fov)

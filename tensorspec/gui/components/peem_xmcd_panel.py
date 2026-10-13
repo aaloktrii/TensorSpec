@@ -66,6 +66,8 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         self.service = service or PeemService()
         self._name: str | None = None
         self._scan_paths: list[str] = []
+        self._scan_pol: dict[str, str] = {}  # polarization set by the user, per item
+        self._scan_detected: dict[str, tuple[str | None, str]] = {}  # detect_pol per item
         self._roi: dict | None = None
         self._bg_roi: dict | None = None
         self._reg_roi: dict | None = None  # drift-correction box (rect)

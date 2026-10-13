@@ -92,6 +92,7 @@ Grand App
 	- [x] ALS 11.0.1 PEEM-3 `.P3B` (EPU ±0.9 → CP/CM, I0 off by default) + day script (`scripts/als/analyze_day.py`)
 	- [x] Main browser keeps the original PEEM Suite and XAS Suite buttons; XMCD imaging is a tab of the PEEM suite
 	- [x] GUI: one "Add files / Add folders" loader for all three formats; "Drift-correct + XMCD (PCD)"
+	- [x] Loading does not depend on file / folder names: format from the file contents; polarization from the data (UE49 scan table, ALS EPU) or set per item in the load list (BNL UView files do not record it)
 	- [ ] Domain-map series vs current pulse; PEEM-stack ML clustering (`core/ml/clustering.py`) on pixel spectra
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)

@@ -101,10 +101,22 @@ def read_dat(path: str | Path) -> dict[str, np.ndarray]:
     return {h: a[:, i] for i, h in enumerate(hdr)}
 
 
+def _is_raw_frame(path: Path) -> bool:
+    try:
+        return read_p3b(path, with_image=False)[1].get("EPU_POLARIZATION") is not None
+    except Exception:  # noqa: BLE001 - not a readable frame
+        return False
+
+
 def frame_files(acq: str | Path) -> list[Path]:
     acq = Path(acq)
     if acq.is_dir():
-        return sorted(acq.glob("*#*.P3B"))
+        numbered = sorted(acq.glob("*#*.P3B"))
+        if numbered:
+            return numbered
+        # renamed frames: every .P3B that is a raw frame (has EPU_POLARIZATION; the viewer's
+        # processed Result.P3B has none)
+        return [f for f in sorted(acq.glob("*.[Pp]3[Bb]")) if _is_raw_frame(f)]
     return [acq] if acq.suffix.upper() == ".P3B" else []
 
 
@@ -140,7 +152,7 @@ def load_p3b_folders(paths: list[str | Path], i0_normalize: bool = False,
     for p in map(Path, paths):
         files = frame_files(p)
         if not files:
-            raise ValueError(f"{p}: no *#*.P3B frames")
+            raise ValueError(f"{p}: no .P3B frames")
         scan = p.name if p.is_dir() else p.name.split("#")[0]
         tags = []
         for f in files:
