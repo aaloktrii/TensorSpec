@@ -96,11 +96,11 @@ def test_plan_and_run(beamtime):
     assert rows["Sample_2_110K_20um_579eV_0deg_XMCD_vs_RT"]["status"] == "ok"
     xas = next(r for r in res["rows"] if r["type"] == "spectra:XAS")
     assert "7 frames but" in xas["energy_note"]  # (571-570)/0.2 + 1 = 6 points named
-    # pcd = (CL - CR)/(CL + CR): CL is brighter where mz = +1
+    # pcd = (CR - CL)/(CR + CL) (UE49 sign): CL is brighter where mz = +1, so pcd = -mz
     import xarray as xr
     nc = root / rows["Sample_2_110K_20um_579eV_0deg_XMCD"]["path"] / "merged" / "maps.nc"
     with xr.open_dataset(nc) as ds:
         pcd = ds["pcd"].values
     inner = (slice(20, -20), slice(20, -20))
     ok = np.isfinite(pcd[inner])
-    assert np.mean(np.sign(pcd[inner][ok]) == mz[inner][ok]) > 0.9
+    assert np.mean(np.sign(pcd[inner][ok]) == -mz[inner][ok]) > 0.9

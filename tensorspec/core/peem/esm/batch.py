@@ -17,7 +17,7 @@ every frame (sample temperature, COL/DPS/MCH/PCH pressures, timestamps).
 * XAS      ROI spectrum; energies from the folder name (E0 + step * index)
 * LEEM     single images exported as TIFF + preview
 
-Sign convention: pcd = (CL - CR) / (CL + CR). CL is mapped to the internal "CP"
+Sign convention: pcd = (CR - CL) / (CR + CL), the UE49 sign (neg-pos)/(neg+pos). CL is mapped to the internal "CP"
 channel and CR to "CM"; flip ``convention`` if your helicity naming differs.
 """
 from __future__ import annotations
@@ -161,7 +161,7 @@ def summarize_meta(metas: list[dict[str, Any]]) -> dict[str, Any]:
 
 @dataclass
 class Settings:
-    convention: str = "cp_minus_cm"  # (CL - CR)/(CL + CR)
+    convention: str = "cm_minus_cp"  # (CR - CL)/(CR + CL) = UE49 sign
     fov_shrink: float = 0.9
     domain_threshold: float = 0.15
     domain_smooth: float = 1.5

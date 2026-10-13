@@ -48,9 +48,9 @@ class StackAsymSection:
         # ---------------------------------------------------------------- 4. Asymmetry
         dich = QGroupBox("5. Asymmetry")
         dl = QFormLayout(dich)
-        sign = QLabel("XMCD = (CL−CR)/(CL+CR)   ·   XLD = (LV−LH)/(LV+LH)\n"
-                      "same for every beamline (CL = BNL CL · UE49 pos · ALS +0.9)")
-        sign.setToolTip("Universal asymmetry; PMLD / PMNLD use the same XLD sign")
+        sign = QLabel("XMCD = (neg−pos)/(neg+pos) = (CR−CL)/(CR+CL)   ·   XLD = (LV−LH)/(LV+LH)\n"
+                      "UE49 sign for every beamline (pos = BNL CL = ALS +0.9)")
+        sign.setToolTip("Same asymmetry for every beamline; PMLD / PMNLD use the same XLD sign")
         dl.addRow(sign)
         b = QPushButton("Subtract + asymmetry")
         b.setToolTip("From the stacked images A (CL) and B (CR): difference A-B and asymmetry (A-B)/(A+B)")

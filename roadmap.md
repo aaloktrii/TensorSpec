@@ -87,7 +87,7 @@ Grand App
 	- [x] ROI average / background ROI / f+ f- f0 (port of `ROIAverage.ipf`)
 	- [x] `/analysis/domain_map` (Spatial Domain Analysis three-state classification; SDA toolkit when importable)
 	- [ ] Vector map with 4-point skew correction (`CalcSkew`), dispersion removal, SECO fit, MergeScans, hysteresis, profiles
-	- [x] One PEEM beamline loader `core/io/peem_beamline_loaders.py` (`load_beamline`): detects UE49 / UView / P3B; readers in `core/io/{ue49,uview,p3b}_loaders.py`; one universal sign for all beamlines: XMCD (CL−CR)/(CL+CR), XLD (LV−LH)/(LV+LH)
+	- [x] One PEEM beamline loader `core/io/peem_beamline_loaders.py` (`load_beamline`): detects UE49 / UView / P3B; readers in `core/io/{ue49,uview,p3b}_loaders.py`; one sign for all beamlines: XMCD in the UE49 convention (neg−pos)/(neg+pos) = (CR−CL)/(CR+CL), XLD (LV−LH)/(LV+LH)
 	- [x] BNL NSLS-II ESM Elmitec UView `.dat` (CL/CR → CP/CM), beamtime batch `core/peem/esm/batch.py`, real-data test (`TENSORSPEC_BNL_PEEM`)
 	- [x] ALS 11.0.1 PEEM-3 `.P3B` (EPU ±0.9 → CP/CM, I0 off by default) + day script (`scripts/als/analyze_day.py`)
 	- [x] Main browser keeps the original PEEM Suite and XAS Suite buttons; XMCD imaging is a tab of the PEEM suite

@@ -140,10 +140,9 @@ def test_0613_xmcd_more_reproducible_than_igor():
             svc.compute_pcd(name, crop_roi=roi)
             a = svc.get_map(name, "pcd")
             maps.append(a)
-            # Igor's co-adds in the universal sign (pos - neg)/(pos + neg); Igor itself shows
-            # (neg - pos)/(neg + pos), the negative of this
-            ig = dichroism.asymmetry(tifffile.imread(day / f"Cr_pos_{tag}.tif").astype(float),
-                                     tifffile.imread(day / f"Cr_neg_{tag}.tif").astype(float))
+            # Igor's XMCD (neg - pos)/(neg + pos): the suite uses the same UE49 sign
+            ig = dichroism.asymmetry(tifffile.imread(day / f"Cr_neg_{tag}.tif").astype(float),
+                                     tifffile.imread(day / f"Cr_pos_{tag}.tif").astype(float))
             igor.append(np.where(np.isfinite(a), ig, np.nan))
             assert _corr(a, ig) > 0.5  # same magnetic contrast as the Igor XMCD
         finally:

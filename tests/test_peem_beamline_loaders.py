@@ -47,14 +47,14 @@ def test_p3b_stack_pol_and_i0_default_off(tmp_path):
     md = t.metadata
     assert t.value.shape == (4, 16, 16)
     assert md["pol"] == ["CP", "CP", "CM", "CM"]
-    assert md["format"] == "p3b" and md["default_convention"] == "cp_minus_cm"
+    assert md["format"] == "p3b" and md["default_convention"] == "ue49"
     assert md["i0_normalized"] is False and md["um_per_px"] == pytest.approx(20.76 / 16)
 
 
 @pytest.mark.parametrize("make, expected", [
-    ("ue49", 0.1),    # universal (CL-CR)/(CL+CR): UE49 pos = CL (1100), neg = CR (900)
-    ("uview", 0.1),   # (CL-CR)/(CL+CR)
-    ("p3b", 0.1),     # +0.9 = CL
+    ("ue49", -0.1),   # UE49 sign (neg-pos)/(neg+pos) everywhere: pos (1100), neg (900)
+    ("uview", -0.1),  # (CR-CL)/(CR+CL): CL = pos
+    ("p3b", -0.1),    # (I-0.9 - I+0.9)/sum: +0.9 = pos
 ])
 def test_service_xmcd_uses_beamline_sign(tmp_path, make, expected):
     from tensorspec.gui.services.peem_service import PeemService
@@ -100,9 +100,9 @@ def test_step_by_step_drift_stack_asymmetry(tmp_path):
     assert r2["images"].startswith("CL: 3 frames -> 1 image")
     assert svc.list_products("t_steps") == ["stack"]
     r3 = svc.asymmetry("t_steps")
-    assert r3["formula"] == "(CL-CR)/(CL+CR)"
-    assert np.nanmean(svc.get_map("t_steps", "pcd")) == pytest.approx(0.1, abs=1e-6)
-    assert np.nanmean(svc.get_map("t_steps", "pcd", "difference")) == pytest.approx(200.0, abs=1e-3)
+    assert r3["formula"] == "(CR-CL)/(CR+CL)"
+    assert np.nanmean(svc.get_map("t_steps", "pcd")) == pytest.approx(-0.1, abs=1e-6)
+    assert np.nanmean(svc.get_map("t_steps", "pcd", "difference")) == pytest.approx(-200.0, abs=1e-3)
     assert svc.get_drift("t_steps", "pcd")["n_a"] == 3
 
 
@@ -269,9 +269,9 @@ def test_load_list_sets_polarization_of_unnamed_folders(qapp, tmp_path, monkeypa
             global_workspace.remove(p._name)
 
 
-@pytest.mark.parametrize("tags, expected", [(("CL", "CR"), 0.1), (("LH", "LV"), -0.1)])
+@pytest.mark.parametrize("tags, expected", [(("CL", "CR"), -0.1), (("LH", "LV"), -0.1)])
 def test_universal_asymmetry_step_by_step(tmp_path, tags, expected):
-    """XMCD = (CL-CR)/(CL+CR), XLD = (LV-LH)/(LV+LH) for every beamline (first tag 1100, second 900)."""
+    """XMCD = UE49 sign (CR-CL)/(CR+CL), XLD = (LV-LH)/(LV+LH) for every beamline (first tag 1100, second 900)."""
     from tensorspec.gui.services.peem_service import PeemService
     svc = PeemService()
     name = f"t_univ_{tags[0]}"
@@ -280,5 +280,5 @@ def test_universal_asymmetry_step_by_step(tmp_path, tags, expected):
     svc.stack(name, pair="xmcd" if tags[0] == "CL" else "xld")
     out = svc.asymmetry(name)
     kind = "pcd" if tags[0] == "CL" else "pld"
-    assert out["formula"] == ("(CL-CR)/(CL+CR)" if kind == "pcd" else "(LV-LH)/(LV+LH)")
+    assert out["formula"] == ("(CR-CL)/(CR+CL)" if kind == "pcd" else "(LV-LH)/(LV+LH)")
     assert np.nanmean(svc.get_map(name, kind)) == pytest.approx(expected, abs=1e-6)

@@ -22,8 +22,8 @@ def main() -> int:
     ap.add_argument("root")
     ap.add_argument("--plan", action="store_true")
     ap.add_argument("--redo", action="store_true")
-    ap.add_argument("--convention", default="cp_minus_cm", choices=["cp_minus_cm", "cm_minus_cp"],
-                    help="cp_minus_cm: pcd = (CL-CR)/(CL+CR)")
+    ap.add_argument("--convention", default="cm_minus_cp", choices=["cp_minus_cm", "cm_minus_cp"],
+                    help="cm_minus_cp (default, UE49 sign): pcd = (CR-CL)/(CR+CL)")
     a = ap.parse_args()
     root = Path(a.root)
     if a.plan:

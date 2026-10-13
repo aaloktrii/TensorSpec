@@ -384,7 +384,7 @@ def _summary(a: np.ndarray) -> dict[str, float]:
 class Settings:
     dead_map: str | None
     norm_image: str | None
-    convention: str = "cp_minus_cm"  # universal: (CL-CR)/(CL+CR) = (pos-neg)/(pos+neg)
+    convention: str = "ue49"  # (neg-pos)/(neg+pos) = (CR-CL)/(CR+CL), same for every beamline
     fov_shrink: float = 0.9
     domain_threshold: float = 0.15
     domain_smooth: float = 1.5

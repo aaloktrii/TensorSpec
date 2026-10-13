@@ -1,6 +1,6 @@
 """Analyse one ALS PEEM-3 (BL 11.0.1) day folder, e.g. ``Jun2021/210601``.
 
-    python scripts/als/analyze_day.py "<data>/ALS/<beamtime>/<day>" [--convention cp_minus_cm]
+    python scripts/als/analyze_day.py "<data>/ALS/<beamtime>/<day>" [--convention cm_minus_cp]
 
 Each acquisition (a folder of ``#NNNN.P3B`` frames, or a single loose frame) is
 classified from its frame metadata:
@@ -95,8 +95,8 @@ def main() -> int:
                     help="normalize XMCD frames by I0. Off by default: on 2021-06-26 I0 passed the variation "
                          "check but did not track the image intensity (within-helicity correlation -0.7..+0.6) "
                          "and flipped the sign of the measured asymmetry")
-    ap.add_argument("--convention", default="cp_minus_cm", choices=["cp_minus_cm", "cm_minus_cp"],
-                    help="cp_minus_cm: pcd = (I(+) - I(-))/(I(+) + I(-))")
+    ap.add_argument("--convention", default="cm_minus_cp", choices=["cp_minus_cm", "cm_minus_cp"],
+                    help="cm_minus_cp (default, UE49 sign): pcd = (I(-) - I(+))/(I(-) + I(+))")
     a = ap.parse_args()
     day = Path(a.day)
     out = day / "tensorspec_peem"

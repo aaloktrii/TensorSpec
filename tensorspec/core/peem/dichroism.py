@@ -2,12 +2,13 @@
 
 Output kinds (written to ``/analysis/<kind>`` by :mod:`products`):
 
-Universal signs (every beamline): XMCD = (CL - CR)/(CL + CR), XLD = (LV - LH)/(LV + LH).
-CL is the internal "CP" channel: BNL CL, UE49 pos and ALS EPU +0.9 all load as CP.
+Signs used for every beamline: XMCD = the UE49 convention (neg - pos)/(neg + pos)
+= (CR - CL)/(CR + CL); XLD = (LV - LH)/(LV + LH). The internal "CP" channel is UE49 pos,
+BNL CL and ALS EPU +0.9; "CM" is UE49 neg, BNL CR and ALS -0.9.
 
-pcd    circular dichroism asymmetry  A_c = s * (I_CP - I_CM) / (I_CP + I_CM), s = +1
-       (``convention="cp_minus_cm"``, universal). ``"ue49"`` / ``"cm_minus_cp"`` (s = -1)
-       reproduce the UE49 Igor sign (neg - pos)/(neg + pos) for comparisons.
+pcd    circular dichroism asymmetry  A_c = s * (I_CP - I_CM) / (I_CP + I_CM), s = -1
+       (``convention="ue49"`` = ``"cm_minus_cp"``, the default everywhere);
+       ``"cp_minus_cm"`` (s = +1) gives the opposite sign for comparisons.
 pld    linear dichroism asymmetry    A_l(E) = (I_LV - I_LH) / (I_LV + I_LH)
 pmld   magnetic linear dichroism, the part of A_l that reverses between the
        two L2 multiplet peaks E_A, E_B:  [A_l(E_A) - A_l(E_B)] / 2
@@ -30,8 +31,8 @@ import numpy as np
 from tensorspec.core.peem import registration
 
 CONVENTIONS = {"ue49": -1.0, "cm_minus_cp": -1.0, "cp_minus_cm": 1.0}
-UNIVERSAL_CONVENTION = "cp_minus_cm"
-XMCD_FORMULA = "(CL-CR)/(CL+CR)"
+UNIVERSAL_CONVENTION = "ue49"  # (neg - pos)/(neg + pos) = (CR - CL)/(CR + CL), every beamline
+XMCD_FORMULA = "(CR-CL)/(CR+CL)"
 XLD_FORMULA = "(LV-LH)/(LV+LH)"
 
 # Opposite helicities / polarizations show reversed magnetic contrast, so plain

@@ -16,7 +16,7 @@ values are looked up by name (robust) instead of walking every record.
 ``load_uview_folders`` builds a PEEM dataset from acquisition folders (one
 polarization each, from the ``_CL_`` / ``_CR_`` / ``_LH_`` / ``_LV_`` name
 token). CL is stored as the internal "CP" channel and CR as "CM", so ``pcd``
-with convention ``cp_minus_cm`` gives (CL - CR)/(CL + CR).
+with the default convention ``ue49`` gives (CR - CL)/(CR + CL).
 """
 from __future__ import annotations
 

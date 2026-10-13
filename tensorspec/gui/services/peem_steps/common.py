@@ -117,7 +117,7 @@ def _drift_attrs(shape: tuple[int, ...], reg_roi: dict | None, a_shifts, b_shift
 
 
 def _beamline_formula(name: str, convention: str) -> str:
-    """pcd formula in the beamline's own channel names, e.g. (CL-CR)/(CL+CR) for UView."""
+    """pcd formula in the beamline's own channel names, e.g. (CR-CL)/(CR+CL) for UView."""
     a, b = ("CM", "CP") if dichroism.CONVENTIONS[convention] < 0 else ("CP", "CM")
     src = (_require_raw(name).metadata or {}).get("pol_source") or {}
     a, b = src.get(a, a), src.get(b, b)

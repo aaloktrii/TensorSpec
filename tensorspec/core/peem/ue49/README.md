@@ -34,7 +34,7 @@ Each output is a Dataset with `data` on (y, x), extra image variables, and scala
 
 | kind | definition |
 |---|---|
-| `pcd` | Circular dichroism. Universal sign for every beamline: `(CL−CR)/(CL+CR)` = `(CP−CM)/(CP+CM)` (UE49 pos = CL). The UE49 Igor sign `(CM−CP)/(CM+CP)` is still available as `convention="ue49"`. CM is registered onto CP using edge images. |
+| `pcd` | Circular dichroism. UE49 sign for every beamline: `(neg−pos)/(neg+pos)` = `(CR−CL)/(CR+CL)` = `(CM−CP)/(CM+CP)` (UE49 pos = BNL CL = ALS +0.9). `convention="cp_minus_cm"` gives the opposite sign. CM is registered onto CP using edge images. |
 | `pld` | Universal `(LV−LH)/(LV+LH)`. The PMLD step stores it at E_A, with `pld_b` at E_B. |
 | `pmld` | Magnetic linear dichroism, the part that reverses between the two L2 multiplet peaks: `[pld(E_A) − pld(E_B)]/2`. |
 | `pmnld` | Non-magnetic (natural or crystal-field) linear dichroism, the part common to both peaks: `[pld(E_A) + pld(E_B)]/2`. |

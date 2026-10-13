@@ -17,7 +17,7 @@ frame (cryostat temperature, pressures, lens voltages; column sets vary).
 
 ``load_p3b_folders`` builds a PEEM dataset; the polarization of every frame is
 its EPU_POLARIZATION (+0.9 -> "CP", -0.9 -> "CM"), so ``pcd`` with convention
-``cp_minus_cm`` gives (I(+0.9) - I(-0.9))/(I(+0.9) + I(-0.9)).
+the default convention ``ue49`` gives (I(-0.9) - I(+0.9))/(I(-0.9) + I(+0.9)).
 """
 from __future__ import annotations
 
