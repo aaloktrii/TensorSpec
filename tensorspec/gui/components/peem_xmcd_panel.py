@@ -234,6 +234,8 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         self._log(json.dumps(res, indent=1, default=lambda o: round(float(o), 6)
                              if isinstance(o, (np.floating, float)) else str(o)))
         self._refresh_views(select=show_kind)
+        if res.get("warnings"):
+            QMessageBox.warning(self, "Check the result", "\n\n".join(res["warnings"]))
 
     def _export_plot_pdf(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export plot as PDF", os.path.expanduser("~/profile.pdf"), "PDF (*.pdf)")

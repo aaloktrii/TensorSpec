@@ -61,3 +61,20 @@ def test_average_by_energy_single_energy_scan():
                                                            ("CP", "CM"))
     assert tags == ["CP", "CM"] and counts == [[2, 2]] and points == pytest.approx([576.6])
     assert stack[:, 0, 0].tolist() == [0.5, 2.5]
+
+
+def test_drift_warnings_flag_a_locked_filter_a_small_box_and_the_search_radius():
+    box = (0, 60, 0, 90)  # 60 x 90 px: a third is 20 px
+    assert drift.drift_warnings(np.array([[0.0, 0.0], [0.5, 1.0], [3.0, 4.0]]), box, "marquee") == []
+    locked = drift.drift_warnings(np.zeros((5, 2)), box, "central")
+    assert len(locked) == 1 and "fixed pattern" in locked[0]
+    big = drift.drift_warnings(np.array([[0.0, 0.0], [12.0, 25.0]]), box, "marquee")
+    assert len(big) == 1 and "third of the box" in big[0]
+    edge = drift.drift_warnings(np.array([[0.0, 0.0], [0.0, 6.0]]), box, "roi", search_radius=6)
+    assert any("search radius" in w for w in edge)
+
+
+def test_align_stack_returns_the_warnings():
+    frames = np.ones((3, 32, 32))  # flat frames: nothing to track, every shift is 0
+    *_, extra, _ = drift.align_stack(frames, ["CP", "CM", "CM"], "central")
+    assert "fixed pattern" in extra["warnings"][0]

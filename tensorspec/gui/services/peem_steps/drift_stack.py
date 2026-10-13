@@ -147,8 +147,9 @@ class PeemDriftStackSteps:
                "box_y0y1x0x1": [int(v) for v in box],
                "drift_max_px": round(float(r.max()), 2),
                "drift_last_frame_px": [round(float(shifts[-1, 0]), 2), round(float(shifts[-1, 1]), 2)],
-               **{k: v for k, v in extra.items() if not isinstance(v, list) or len(v) <= 4},
+               **{k: v for k, v in extra.items() if k != "warnings" and (not isinstance(v, list) or len(v) <= 4)},
                "next": "stack (one image per polarization)"}
+        warnings = list(extra.get("warnings", []))
         if len(keep) < len(raw.value):
             out["excluded_frames"] = sorted(set(range(len(raw.value))) - set(int(i) for i in keep))
         if score is not None:
@@ -156,8 +157,10 @@ class PeemDriftStackSteps:
             out["ncc_min"] = round(float(score.min()), 3)
             out["ncc_worst_frame"] = worst
             if score.min() < 0.5:
-                out["warning"] = (f"frame {worst} matched the template poorly (NCC {score.min():.2f}): "
-                                  "use a box with sharper features, a larger search radius or a smoothed-edge filter")
+                warnings.append(f"frame {worst} matched the template poorly (NCC {score.min():.2f}): "
+                                "use a box with sharper features, a larger search radius or a smoothed-edge filter")
+        if warnings:
+            out["warnings"] = warnings
         _record(name, "drift correct", out)
         return out
 

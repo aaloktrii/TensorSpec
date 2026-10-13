@@ -9,6 +9,8 @@ are aligned together onto one reference frame. Moved verbatim from the XMCD-imag
   roi                 registration.track_template (NCC template tracking, sub-pixel)
   ncc_roi             engine.drift_correct (the original PEEM-panel drift, whole px)
   igor_*              igor_drift ports of the SPEEM procedures
+
+``drift_warnings`` flags runs that did not track the sample (returned in the extras as "warnings").
 """
 from __future__ import annotations
 
@@ -109,4 +111,36 @@ def align_stack(
         extra = {"transform": transform,
                  "rotation_deg" if transform == "rotation" else f"{transform}_param":
                      [round(float(np.degrees(v) if transform == "rotation" else v), 4) for v in ex]}
-    return aligned, np.asarray(shifts, dtype=float), score, extra, tuple(int(v) for v in box)
+    shifts = np.asarray(shifts, dtype=float)
+    warnings = drift_warnings(shifts, box, method, ref_index, search_radius)
+    if warnings:
+        extra["warnings"] = warnings
+    return aligned, shifts, score, extra, tuple(int(v) for v in box)
+
+
+def drift_warnings(
+    shifts: np.ndarray, box: tuple[int, int, int, int], method: str, ref_index: int = 0, search_radius: int = 20,
+) -> list[str]:
+    """Signs that a drift run did not track the sample (plain text for any front end).
+
+    - no shift in any frame: an edge / high-pass filter can lock onto the detector's fixed pixel
+      pattern, which does not move with the sample (seen on real UView data with find_edges);
+    - drift larger than a third of the box: the features leave the box and the match jumps;
+    - drift at the search radius (ROI / NCC ROI): the true shift may be larger than the search.
+    """
+    shifts = np.asarray(shifts, dtype=float)
+    out = []
+    if len(shifts) > 1 and np.abs(shifts).max() < 0.05:
+        fix = ("match frames on the central half with 'smooth edges'" if method == "igor_pair"  # always edge-filters
+               else "try the filter 'none' or 'smooth edges'")
+        out.append("no drift found in any frame: the filter may have locked onto the detector's fixed "
+                   f"pattern; {fix} (or the stack really did not drift)")
+    rel = np.hypot(*(shifts - shifts[ref_index]).T)
+    y0, y1, x0, x1 = box
+    third = min(y1 - y0, x1 - x0) / 3
+    if rel.max() > third:
+        out.append(f"drift up to {rel.max():.0f} px is more than a third of the box ({y1 - y0} x {x1 - x0} px): "
+                   "draw a larger box or match frames on the central half")
+    if method in ("roi", "ncc_roi") and np.abs(shifts - shifts[ref_index]).max() >= search_radius - 0.5:
+        out.append(f"drift reached the search radius ({search_radius} px): increase the search radius")
+    return out
