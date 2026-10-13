@@ -135,10 +135,11 @@ def test_stack_step_shows_stacked_images_and_sums(qapp, xmcd_dataset):
     st = global_workspace.pull_analysis_data("synth_xmcd", "stack")
     labels = [p.stack_out.itemText(i) for i in range(p.stack_out.count())]
     assert labels[0] == "Show: CP stacked (mean, 3 frames)" and "CP + CM" in labels[2]
-    expect = {"a_mean": "mean_cp", "b_mean": "mean_cm", "data": "data", "a_sum": "sum_cp", "b_sum": "sum_cm"}
+    assert [p.stack_out.itemData(i) for i in range(p.stack_out.count())] == \
+        [v for _, v in svc.stack_outputs("synth_xmcd")] == ["mean_cp", "mean_cm", "data", "sum_cp", "sum_cm"]
     for i in range(p.stack_out.count()):
         p.stack_out.setCurrentIndex(i)
-        var = expect[p.stack_out.currentData()]
+        var = p.stack_out.currentData()
         assert p._view_kind() == "stack" and (p._view_var() or "data") == var
         assert np.allclose(p._current_image(), st[var].values, equal_nan=True)
     assert np.allclose(st["sum_cp"].values, 3 * st["mean_cp"].values)
@@ -276,3 +277,33 @@ def test_display_hint_is_a_back_end_call(qapp, xmcd_dataset):
     p._name = "synth_xmcd"
     p._refresh_views(select="pcd")  # the panel applies the service's choice
     assert p.viewer.primary_view().combo_cmap.currentText() == "bwr"
+
+
+
+def test_show_lists_come_from_the_back_end(xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    assert svc.stack_outputs("synth_xmcd") == [] and svc.asymmetry_outputs("synth_xmcd") == []
+    svc.drift_correct("synth_xmcd")
+    svc.stack("synth_xmcd")
+    svc.asymmetry("synth_xmcd")
+    assert svc.asymmetry_outputs("synth_xmcd") == [
+        ("asymmetry", "data"), ("difference", "difference"),
+        ("first stacked image (CP)", "mean_cp"), ("second stacked image (CM)", "mean_cm")]
+    assert svc.asymmetry_outputs("synth_xmcd", "xld") == []  # no XLD map
+
+
+def test_asymmetry_show_list_filled_by_the_service(qapp, xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    p = PeemXmcdPanel(service=svc)
+    p._run = lambda fn, done, *args, **kw: done(fn(*args, **kw))
+    p._name = "synth_xmcd"
+    p._refresh_views(select="raw")
+    assert p.asym_out.currentData() is None  # placeholder before the step
+    svc.drift_correct("synth_xmcd")
+    p._stack_step()
+    p._asym_step()
+    items = [(p.asym_out.itemText(i), p.asym_out.itemData(i)) for i in range(p.asym_out.count())]
+    assert items[0] == ("Show: asymmetry", "data") and items[-1][1] == "mean_cm"
+    p.asym_out.setCurrentIndex(1)
+    assert p._view_kind() == "pcd" and p._view_var() == "difference"

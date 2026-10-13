@@ -34,12 +34,13 @@ class StackAsymSection:
         self.pair_combo.addItem("XMCD (CP / CM)", "xmcd")
         self.pair_combo.addItem("XLD (LH / LV)", "xld")
         sk.addRow("Polarization pair:", self.pair_combo)
+        self.pair_combo.currentIndexChanged.connect(lambda *_: self._refresh_asym_outputs())
         b = QPushButton("Stack")
         b.setToolTip("Average the drift-corrected frames of each polarization, then align the two images on edges")
         b.clicked.connect(self._stack_step)
         sk.addRow(b)
         self.stack_out = QComboBox()
-        self._set_stack_labels("CP", "CM")
+        self._fill_show(self.stack_out, [], "Show: (after Stack)")
         self.stack_out.setToolTip("Stacked images in the viewer (after Stack)")
         self.stack_out.currentIndexChanged.connect(self._show_stack_output)
         sk.addRow(self.stack_out)
@@ -70,10 +71,7 @@ class StackAsymSection:
         b.clicked.connect(self._asym_step)
         dl.addRow(b)
         self.asym_out = QComboBox()
-        self.asym_out.addItem("Show: asymmetry", "data")
-        self.asym_out.addItem("Show: difference", "difference")
-        self.asym_out.addItem("Show: first stacked image (CP / LH)", "a")
-        self.asym_out.addItem("Show: second stacked image (CM / LV)", "b")
+        self._fill_show(self.asym_out, [], "Show: (after the asymmetry step)")
         self.asym_out.currentIndexChanged.connect(self._show_asym_output)
         dl.addRow(self.asym_out)
         adv = QGroupBox("One-click and more maps")
@@ -125,18 +123,18 @@ class StackAsymSection:
         if name:
             self._run(self.service.stack, self._on_stacked, name, pair=self.pair_combo.currentData())
 
-    def _set_stack_labels(self, a: str, b: str, n_a: int | None = None, n_b: int | None = None):
-        na = f", {n_a} frames" if n_a else ""
-        nb = f", {n_b} frames" if n_b else ""
-        cur = self.stack_out.currentData() or "a_mean"
-        self.stack_out.blockSignals(True)
-        self.stack_out.clear()
-        for label, key in ((f"Show: {a} stacked (mean{na})", "a_mean"), (f"Show: {b} stacked (mean{nb})", "b_mean"),
-                           (f"Show: {a} + {b} (sum of the two stacked images)", "data"),
-                           (f"Show: {a}, sum of frames", "a_sum"), (f"Show: {b}, sum of frames", "b_sum")):
-            self.stack_out.addItem(label, key)
-        self.stack_out.setCurrentIndex(max(0, self.stack_out.findData(cur)))
-        self.stack_out.blockSignals(False)
+    @staticmethod
+    def _fill_show(combo: QComboBox, outputs: list[tuple[str, str]], empty: str):
+        """Fill a Show list with the service's (label, variable) pairs; keep the chosen position."""
+        pos = max(0, combo.currentIndex())
+        combo.blockSignals(True)
+        combo.clear()
+        for label, var in outputs:
+            combo.addItem(f"Show: {label}", var)
+        if not outputs:
+            combo.addItem(empty, None)
+        combo.setCurrentIndex(min(pos, combo.count() - 1))
+        combo.blockSignals(False)
 
     def set_xas_target(self, send):
         """send() hands the stacked images to the stack / BG / sum-rule tab (set by the PEEM suite)."""
@@ -148,46 +146,34 @@ class StackAsymSection:
             self._xas_target()
 
     def _on_stacked(self, res: dict):
-        at = self.service.get_product_attrs(self._name, "stack")
-        self._set_stack_labels(at.get("channel_a_name", "A"), at.get("channel_b_name", "B"),
-                               at.get("n_a"), at.get("n_b"))
+        self._fill_show(self.stack_out, self.service.stack_outputs(self._name), "Show: (after Stack)")
         self._show_result(res, "stack")
         self._show_stack_output()
 
     def _show_stack_output(self, *_):
         """Show the chosen stacked image (layer in the viewer)."""
-        if not self._name or "stack" not in self.service.list_products(self._name):
-            return
-        want = self.stack_out.currentData()
-        if want != "data":
-            at = self.service.get_product_attrs(self._name, "stack")
-            tag = at.get("channel_a" if want.startswith("a") else "channel_b", "")
-            want = f"{'mean' if want.endswith('mean') else 'sum'}_{str(tag).lower()}"
-            if want not in self.service.map_variables(self._name, "stack"):
-                self._err("Run Stack again to get the sums of the frames (older result).")
-                return
-        self._select("stack", want)
+        var = self.stack_out.currentData()
+        if self._name and var:
+            self._select("stack", var)
 
     def _show_asym_output(self, *_):
         """Show the chosen output of the asymmetry step (layer in the viewer)."""
-        if not self._name:
-            return
-        kind = "pcd" if self.pair_combo.currentData() == "xmcd" else "pld"
-        if kind not in self.service.list_products(self._name):
-            return
-        want = self.asym_out.currentData()
-        if want in ("a", "b"):
-            means = [v for v in self.service.map_variables(self._name, kind) if v.startswith("mean_")]
-            want = means[0 if want == "a" else 1] if len(means) == 2 else "data"
-        self._select(kind, want)
+        var = self.asym_out.currentData()
+        if self._name and var:
+            self._select("pcd" if self.pair_combo.currentData() == "xmcd" else "pld", var)
 
     def _asym_step(self):
         name = self._require()
         if name:
             pair = self.pair_combo.currentData()
             self._run(self.service.asymmetry,
-                      lambda r: (self._show_result(r, "pcd" if pair == "xmcd" else "pld"), self._show_asym_output()),
+                      lambda r: (self._show_result(r, "pcd" if pair == "xmcd" else "pld"),
+                                 self._refresh_asym_outputs(), self._show_asym_output()),
                       name, convention=dichroism.UNIVERSAL_CONVENTION, crop_roi=self._crop())
+
+    def _refresh_asym_outputs(self, *_):
+        outputs = self.service.asymmetry_outputs(self._name, self.pair_combo.currentData()) if self._name else []
+        self._fill_show(self.asym_out, outputs, "Show: (after the asymmetry step)")
 
     def _pld(self):
         name = self._require()

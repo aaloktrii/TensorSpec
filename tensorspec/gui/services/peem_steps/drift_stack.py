@@ -231,6 +231,34 @@ class PeemDriftStackSteps:
         _record(name, "stack", out)
         return out
 
+    def stack_outputs(self, name: str) -> list[tuple[str, str]]:
+        """What a front end can show after Stack: [(label, variable of /analysis/stack)]; [] before."""
+        if "stack" not in self.list_products(name):
+            return []
+        at = self.get_product_attrs(name, "stack")
+        a, b = str(at.get("channel_a", "A")), str(at.get("channel_b", "B"))
+        na = f", {at['n_a']} frames" if at.get("n_a") else ""
+        nb = f", {at['n_b']} frames" if at.get("n_b") else ""
+        have = set(self.map_variables(name, "stack"))
+        out = [(f"{a} stacked (mean{na})", f"mean_{a.lower()}"), (f"{b} stacked (mean{nb})", f"mean_{b.lower()}"),
+               (f"{a} + {b} (sum of the two stacked images)", "data"),
+               (f"{a}, sum of frames", f"sum_{a.lower()}"), (f"{b}, sum of frames", f"sum_{b.lower()}")]
+        return [(label, var) for label, var in out if var in have]
+
+    def asymmetry_outputs(self, name: str, pair: str = "xmcd") -> list[tuple[str, str]]:
+        """What a front end can show after the asymmetry step: [(label, variable of /analysis/pcd or
+        /analysis/pld)]; [] before. pair: xmcd -> pcd, xld -> pld."""
+        kind = "pcd" if pair == "xmcd" else "pld"
+        if kind not in self.list_products(name):
+            return []
+        have = self.map_variables(name, kind)
+        out = [("asymmetry", "data"), ("difference", "difference")]
+        means = [v for v in have if v.startswith("mean_")]
+        if len(means) == 2:
+            out += [(f"first stacked image ({means[0][5:].upper()})", means[0]),
+                    (f"second stacked image ({means[1][5:].upper()})", means[1])]
+        return [(label, var) for label, var in out if var in have]
+
     def asymmetry(self, name: str, convention: str | None = None, crop_roi: dict | None = None) -> dict[str, Any]:
         """Step 3: asymmetry of the stacked images (/analysis/stack).
 
