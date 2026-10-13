@@ -293,6 +293,7 @@ class TensorSpecMainBrowser(QMainWindow):
             ("ARPES Suite", self.launch_arpes_suite),
             ("PEEM Suite", self.launch_peem_suite),
             ("XAS Suite", self.launch_xas_suite),
+            ("Raman Suite", self.launch_raman_suite),
             ("Transport Suite", self.launch_transport_suite),
             ("Machine Learning", self.launch_ml_suite),
         ]
@@ -633,6 +634,15 @@ class TensorSpecMainBrowser(QMainWindow):
             "tensorspec.gui.suites.xas_suite",
             "XASSuite",
             size=(1000, 700),
+        )
+
+    def launch_raman_suite(self):
+        self._launch_panel_suite(
+            "Raman Suite",
+            "TensorSpec - Raman Suite",
+            "tensorspec.gui.suites.raman_suite",
+            "RamanSuite",
+            size=(1500, 960),  # original Raman Map Classifier window size
         )
 
     def launch_transport_suite(self):
