@@ -332,7 +332,23 @@ class CrystalViewerSuite(QWidget):
         vac_row.addStretch()
         layout.addLayout(vac_row)
 
+        builder_row = QHBoxLayout()
+        builder_row.addWidget(QLabel("DFT cell builder:"))
+        self.combo_stack_builder = QComboBox()
+        self.combo_stack_builder.addItem("Plain (native lattices)", "plain")
+        self.combo_stack_builder.addItem("Bernevig (homobilayer twist)", "bernevig")
+        self.combo_stack_builder.setToolTip(
+            "Plain (default): Draw/Push uses native lattices. No silent Bernevig, "
+            "no auto-strain just to force a common cell.\n"
+            "Bernevig: opt-in commensurate homobilayer (equal atoms, unstrained match)."
+        )
+        self.combo_stack_builder.currentIndexChanged.connect(self._sync_stack_builder_ui)
+        builder_row.addWidget(self.combo_stack_builder)
+        builder_row.addStretch()
+        layout.addLayout(builder_row)
+
         bernevig_group = QGroupBox("Bernevig twist")
+        self.bernevig_group = bernevig_group
         bernevig_layout = QGridLayout(bernevig_group)
 
         bernevig_layout.addWidget(QLabel("θ (°):"), 0, 0)
@@ -377,6 +393,7 @@ class CrystalViewerSuite(QWidget):
         scroll.setWidget(body)
         outer.addWidget(scroll)
         self.tabs.addTab(tab, "Stack")
+        self._sync_stack_builder_ui()
 
     # ================= TAB 4: BRILLOUIN ZONE =================
     def init_tab_bz(self):
@@ -504,14 +521,10 @@ class CrystalViewerSuite(QWidget):
             return
 
         layers = [row.get_layer_dict() for row in self.stack_layer_rows]
-        # Row twists decide the path. Bernevig spin is NOT consulted unless the user opted in
-        # (AB stacking or a nonzero row twist); the 7.34 default must not force a twist Push.
+        builder = self.combo_stack_builder.currentData() or "plain"
         kind = CrystalEngine.classify_stack_for_dft(layers)
-        if (
-            kind == "aligned"
-            and len(layers) == 2
-            and self.combo_bernevig_stacking.currentText() == "AB"
-        ):
+        # Bernevig only when user selected that builder — never via AB / default θ.
+        if builder == "bernevig" and len(layers) == 2:
             kind = "twist"
 
         if kind == "empty":
@@ -523,31 +536,24 @@ class CrystalViewerSuite(QWidget):
                 self,
                 "Multi-twist stacks — coming later",
                 "DFT cell rebuild for more than two twisted layers is not available yet.\n\n"
-                "This week: N layers with all twists = 0°, or exactly 2 layers with twist "
-                "(e.g. graphene/hBN). Render/view still works.",
+                "Plain builder: N layers with all twists = 0° and matching lattices, "
+                "or switch to Bernevig for a 2-layer homobilayer twist.",
             )
             return
 
         vacuum = float(self.spin_stack_vacuum.value())
         suggested, strains = CrystalEngine.suggest_reference_layer(layers)
         ref_idx = suggested
-        need_dialog = False
-        dialog_status = ""
+        apply_strain = False
 
-        if kind == "aligned":
-            need_dialog = CrystalEngine.aligned_needs_strain_dialog(layers, suggested)
-            dialog_status = "lattice mismatch"
-
-        if need_dialog:
+        if kind == "aligned" and CrystalEngine.aligned_needs_strain_dialog(layers, suggested):
             names = [
                 row.lbl_name.text().replace("<b>", "").replace("</b>", "")
                 for row in self.stack_layer_rows
             ]
             dlg = QDialog(self)
-            dlg.setWindowTitle("Forced strain for DFT")
+            dlg.setWindowTitle("Lattices do not match — no auto-strain")
             lay = QVBoxLayout(dlg)
-            sug_name = names[suggested]
-            sug_pct = strains[suggested]
             a_ref = float(layers[suggested]["struct"].lattice.a)
             iso_lines = []
             for i, (name_i, layer) in enumerate(zip(names, layers)):
@@ -555,41 +561,55 @@ class CrystalViewerSuite(QWidget):
                     continue
                 a_native = float(layer["struct"].lattice.a)
                 iso = CrystalEngine.isotropic_match_strain_percent(a_native, a_ref)
-                iso_lines.append(f"Isotropic lattice strain on {name_i}: {iso:+.2f}%")
-            suggest_line = (
-                f"Suggested reference (smallest total strain): {sug_name} (~{sug_pct:.2f}%)."
+                iso_lines.append(f"Would strain {name_i} by {iso:+.2f}% to match {names[suggested]}")
+            lay.addWidget(
+                QLabel(
+                    "In-plane lattices differ. TensorSpec will not force strain just to "
+                    "make a DFT cell.\n\n"
+                    + "\n".join(iso_lines)
+                    + "\n\nOptions:\n"
+                    "• Switch DFT cell builder → Bernevig (only for true unstrained homobilayers)\n"
+                    "• Or explicitly accept isotropic strain (bands will reflect that strain)"
+                )
             )
-            dialog_text = (
-                f"Status: {dialog_status}.\n\n"
-                "To run DFT, non-reference layer(s) will be stretched/compressed to match the "
-                "reference layer's in-plane cell. Band structures will reflect that forced strain.\n\n"
-                + "\n".join(iso_lines)
-                + ("\n\n" if iso_lines else "\n")
-                + suggest_line
-                + "\n\nRun QE Relax ions + vdW after Push for better interlayer geometry."
-            )
-            lay.addWidget(QLabel(dialog_text))
-            lay.addWidget(QLabel("Reference layer:"))
+            lay.addWidget(QLabel("Reference layer (if applying strain):"))
             combo = QComboBox()
             for i, name_i in enumerate(names):
-                label = name_i + ("  ← suggested (min strain)" if i == suggested else "")
+                label = name_i + ("  ← suggested" if i == suggested else "")
                 combo.addItem(label)
             combo.setCurrentIndex(suggested)
             lay.addWidget(combo)
-            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-            buttons.button(QDialogButtonBox.Ok).setText("Push anyway")
-            buttons.accepted.connect(dlg.accept)
+            buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+            btn_strain = buttons.addButton(
+                "Apply isotropic strain (advanced)", QDialogButtonBox.AcceptRole
+            )
             buttons.rejected.connect(dlg.reject)
+            buttons.accepted.connect(dlg.accept)
             lay.addWidget(buttons)
             if dlg.exec() != QDialog.Accepted:
                 return
+            apply_strain = True
             ref_idx = combo.currentIndex()
 
         try:
             if kind == "aligned":
+                if (
+                    not apply_strain
+                    and CrystalEngine.aligned_needs_strain_dialog(layers, ref_idx)
+                ):
+                    return
                 dft_struct = CrystalEngine.build_dft_aligned_stack(layers, vacuum, ref_idx)
-                info_note = "aligned"
+                info_note = "aligned+strain" if apply_strain else "aligned"
             else:
+                if builder != "bernevig":
+                    QMessageBox.information(
+                        self,
+                        "Twist needs Bernevig builder",
+                        "Row twists are set, but DFT cell builder is Plain.\n"
+                        "Switch to “Bernevig (homobilayer twist)” for commensurate "
+                        "homobilayers, or clear row twists for an aligned Push.",
+                    )
+                    return
                 theta = float(self.spin_bernevig_theta.value())
                 layers[0]["twist"] = -theta / 2.0
                 layers[1]["twist"] = theta / 2.0
@@ -806,13 +826,15 @@ class CrystalViewerSuite(QWidget):
         row_widget.deleteLater()
         self.stack_layer_rows.remove(row_widget)
 
+    def _sync_stack_builder_ui(self, *_args):
+        bernevig = (self.combo_stack_builder.currentData() or "plain") == "bernevig"
+        self.bernevig_group.setEnabled(bernevig)
+
     def _bernevig_opted_in(self) -> bool:
-        """True when a two-layer stack should use the Bernevig builder (not the 7.34 default alone)."""
-        if len(self.stack_layer_rows) != 2:
+        """True only when user selected Bernevig builder (never AB / default θ alone)."""
+        if (self.combo_stack_builder.currentData() or "plain") != "bernevig":
             return False
-        if self.combo_bernevig_stacking.currentText() == "AB":
-            return True
-        return any(abs(float(row.spin_twist.value())) > 1e-6 for row in self.stack_layer_rows)
+        return len(self.stack_layer_rows) == 2
 
     def handle_draw_stack(self):
         if not self.stack_layer_rows: return
@@ -821,6 +843,12 @@ class CrystalViewerSuite(QWidget):
             if ok:
                 return
             self.lbl_moire.setText(f"Bernevig build failed ({err}); drew plain stack.")
+            QMessageBox.warning(
+                self,
+                "Bernevig requires a homobilayer",
+                f"{err}\n\nSwitch DFT cell builder to Plain (native lattices), "
+                "or use two identical unstrained layers.",
+            )
 
         layers_data = [row.get_layer_dict() for row in self.stack_layer_rows]
         

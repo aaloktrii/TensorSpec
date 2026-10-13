@@ -3,8 +3,16 @@ import re
 import shutil
 from pymatgen.core import Structure
 
+from tensorspec.core.dft.magnetic_spec import MagneticSpec
+
 IF_POS_FREE = (1, 1, 1)
 IF_POS_FIXED = (0, 0, 0)
+
+
+def _resolve_magnetic(magnetic: MagneticSpec | None, use_soc: bool) -> MagneticSpec:
+    if magnetic is not None:
+        return magnetic
+    return MagneticSpec.from_use_soc(use_soc)
 
 
 def build_if_pos_mask(
@@ -51,54 +59,58 @@ class QEInputGenerator:
         """Replace the working structure (e.g. after ionic relaxation)."""
         self.structure = structure
 
-    def _generate_atomic_species(self, out_dir: str, use_soc: bool = False) -> str:
-        """Extracts unique elements, finds their UPF files based on SOC toggle, and copies them to the run directory."""
-        species = []
+    def _pick_pseudo(self, base_symbol: str, *, use_fr: bool) -> str:
+        pattern = re.compile(rf"^{base_symbol}[._].*\.upf$", re.IGNORECASE)
+        element_files = [f for f in os.listdir(self.app_pseudo_dir) if pattern.match(f)]
+        if not element_files:
+            raise FileNotFoundError(
+                f"Missing pseudopotential for {base_symbol}! "
+                f"Please place a {base_symbol} UPF file in '{self.app_pseudo_dir}'."
+            )
+        if use_fr:
+            for f in element_files:
+                if "FR" in f.upper() or "REL" in f.upper():
+                    return f
+            raise ValueError(
+                f"SOC is enabled, but no FR or REL pseudopotential found for {base_symbol}!"
+            )
+        for f in element_files:
+            if "FR" not in f.upper() and "REL" not in f.upper():
+                return f
+        return element_files[0]
+
+    def _generate_atomic_species(
+        self,
+        out_dir: str,
+        use_soc: bool = False,
+        magnetic: MagneticSpec | None = None,
+    ) -> str:
+        """Unique QE types → UPF. AFM may emit Fe_up / Fe_dn sharing one Fe UPF."""
+        mag = _resolve_magnetic(magnetic, use_soc)
+        species_lines = []
         os.makedirs(self.app_pseudo_dir, exist_ok=True)
-        
         run_pseudo_dir = os.path.join(out_dir, "pseudo")
         os.makedirs(run_pseudo_dir, exist_ok=True)
-        
-        for el in self.structure.composition.elements:
-            mass = el.atomic_mass
-            symbol = el.symbol
-            
-            pseudo_name = None
-            pattern = re.compile(rf"^{symbol}[._].*\.upf$", re.IGNORECASE)
-            
-            # 1. Find all matching elements first
-            element_files = [f for f in os.listdir(self.app_pseudo_dir) if pattern.match(f)]
-            
-            if not element_files:
-                raise FileNotFoundError(
-                    f"Missing pseudopotential for {symbol}! "
-                    f"Please place a {symbol} UPF file in '{self.app_pseudo_dir}'."
-                )
-                
-            # 2. Filter based on SOC Physics
-            if use_soc:
-                for f in element_files:
-                    if "FR" in f.upper() or "REL" in f.upper():
-                        pseudo_name = f
-                        break
-                if pseudo_name is None:
-                    raise ValueError(f"SOC is enabled, but no FR or REL pseudopotential found for {symbol}!")
-            else:
-                for f in element_files:
-                    if "FR" not in f.upper() and "REL" not in f.upper():
-                        pseudo_name = f
-                        break
-                if pseudo_name is None:
-                    pseudo_name = element_files[0] # Fallback if only one exists
-            
+
+        type_labels = mag.unique_types(self.structure)
+
+        mass_by_sym = {el.symbol: float(el.atomic_mass) for el in self.structure.composition.elements}
+        for label in type_labels:
+            base = mag.base_symbol(label)
+            mass = mass_by_sym.get(base)
+            if mass is None:
+                # rare: label base not in composition (should not happen)
+                from pymatgen.core import Element
+
+                mass = float(Element(base).atomic_mass)
+            pseudo_name = self._pick_pseudo(base, use_fr=mag.uses_fr_pseudos)
             src = os.path.join(self.app_pseudo_dir, pseudo_name)
             dst = os.path.join(run_pseudo_dir, pseudo_name)
             if os.path.abspath(src) != os.path.abspath(dst):
                 shutil.copy2(src, dst)
-                
-            species.append(f" {symbol}  {float(mass):.4f}  {pseudo_name}")
-            
-        return "\n".join(species)
+            species_lines.append(f" {label}  {mass:.4f}  {pseudo_name}")
+
+        return "\n".join(species_lines)
 
     def _generate_explicit_kpoints(self, kmesh: tuple) -> list:
         """Generates the full unreduced k-point grid to 10 decimal places."""
@@ -113,20 +125,29 @@ class QEInputGenerator:
         """Optional DFT-D3 correction for layered vdW systems."""
         return "\n  vdw_corr = 'dft-d3'" if vdw_dft_d3 else ""
 
-    def write_scf_input(self, out_dir: str, ecutwfc: float = 60.0, ecutrho: float = 240.0, kmesh: tuple = (6, 6, 6), use_soc: bool = False, use_gpu: bool = False, vdw_dft_d3: bool = False):
+    def write_scf_input(
+        self,
+        out_dir: str,
+        ecutwfc: float = 60.0,
+        ecutrho: float = 240.0,
+        kmesh: tuple = (6, 6, 6),
+        use_soc: bool = False,
+        use_gpu: bool = False,
+        vdw_dft_d3: bool = False,
+        magnetic: MagneticSpec | None = None,
+    ):
         """Generates the main self-consistent field (SCF) input file."""
         os.makedirs(out_dir, exist_ok=True)
         scf_path = os.path.join(out_dir, "scf.in")
-        abs_out = os.path.abspath(os.path.join(out_dir, "out")) + "/"
-        
-        ibrav = 0 
-        nat = len(self.structure)
-        ntyp = len(self.structure.composition.elements)
+        mag = _resolve_magnetic(magnetic, use_soc)
 
-        atomic_species_str = self._generate_atomic_species(out_dir, use_soc)
-        
-        # Use the UI toggle to inject SOC / optional QE CUDA offload
-        soc_flags = "\n  noncolin = .true.\n  lspinorb = .true." if use_soc else ""
+        ibrav = 0
+        nat = len(self.structure)
+        type_labels = mag.unique_types(self.structure)
+        ntyp = len(type_labels)
+
+        atomic_species_str = self._generate_atomic_species(out_dir, use_soc, magnetic=mag)
+        mag_flags = mag.system_flags(type_labels)
         gpu_flags = "\n  use_gpu = .true." if use_gpu else ""
         vdw_flags = self._vdw_system_flag(vdw_dft_d3)
 
@@ -145,7 +166,7 @@ class QEInputGenerator:
   ecutrho = {ecutrho}
   occupations = 'smearing'
   smearing = 'marzari-vanderbilt'
-  degauss = 0.01{soc_flags}{gpu_flags}{vdw_flags}
+  degauss = 0.01{mag_flags}{gpu_flags}{vdw_flags}
 /
 &ELECTRONS
   conv_thr = 1.0d-8
@@ -156,7 +177,7 @@ ATOMIC_SPECIES
 
 {self._generate_cell_parameters()}
 
-{self._generate_atomic_positions()}
+{self._generate_atomic_positions(magnetic=mag)}
 
 K_POINTS {{automatic}}
   {kmesh[0]} {kmesh[1]} {kmesh[2]}  0 0 0
@@ -177,18 +198,20 @@ K_POINTS {{automatic}}
         vdw_dft_d3: bool = False,
         calculation: str = "relax",
         if_pos=None,
+        magnetic: MagneticSpec | None = None,
     ) -> str:
         """Generates ionic or variable-cell relaxation input (relax.in)."""
         os.makedirs(out_dir, exist_ok=True)
         relax_path = os.path.join(out_dir, "relax.in")
+        mag = _resolve_magnetic(magnetic, use_soc)
 
         ibrav = 0
         nat = len(self.structure)
-        ntyp = len(self.structure.composition.elements)
+        type_labels = mag.unique_types(self.structure)
+        ntyp = len(type_labels)
 
-        atomic_species_str = self._generate_atomic_species(out_dir, use_soc)
-
-        soc_flags = "\n  noncolin = .true.\n  lspinorb = .true." if use_soc else ""
+        atomic_species_str = self._generate_atomic_species(out_dir, use_soc, magnetic=mag)
+        mag_flags = mag.system_flags(type_labels)
         gpu_flags = "\n  use_gpu = .true." if use_gpu else ""
         vdw_flags = self._vdw_system_flag(vdw_dft_d3)
 
@@ -217,7 +240,7 @@ K_POINTS {{automatic}}
   ecutrho = {ecutrho}
   occupations = 'smearing'
   smearing = 'marzari-vanderbilt'
-  degauss = 0.01{soc_flags}{gpu_flags}{vdw_flags}
+  degauss = 0.01{mag_flags}{gpu_flags}{vdw_flags}
 /
 &ELECTRONS
   conv_thr = 1.0d-8
@@ -231,7 +254,7 @@ K_POINTS {{automatic}}
 
 {self._generate_cell_parameters()}
 
-{self._generate_atomic_positions(if_pos=if_pos)}
+{self._generate_atomic_positions(if_pos=if_pos, magnetic=mag)}
 
 K_POINTS {{automatic}}
   {kmesh[0]} {kmesh[1]} {kmesh[2]}  0 0 0
@@ -240,22 +263,31 @@ K_POINTS {{automatic}}
             f.write(relax_content)
         return relax_path
 
-    def write_nscf_input(self, out_dir: str, ecutwfc: float = 60.0, ecutrho: float = 240.0, kmesh: tuple = (6, 6, 6), nbnd: int = 12, use_soc: bool = False, use_gpu: bool = False, vdw_dft_d3: bool = False):
+    def write_nscf_input(
+        self,
+        out_dir: str,
+        ecutwfc: float = 60.0,
+        ecutrho: float = 240.0,
+        kmesh: tuple = (6, 6, 6),
+        nbnd: int = 12,
+        use_soc: bool = False,
+        use_gpu: bool = False,
+        vdw_dft_d3: bool = False,
+        magnetic: MagneticSpec | None = None,
+    ):
         """Generates the non-self-consistent field (NSCF) input file with explicit k-points."""
         nscf_path = os.path.join(out_dir, "nscf.in")
-        abs_out = os.path.abspath(os.path.join(out_dir, "out")) + "/"
-        
-        ibrav = 0  
+        mag = _resolve_magnetic(magnetic, use_soc)
+
+        ibrav = 0
         nat = len(self.structure)
-        ntyp = len(self.structure.composition.elements)
-        
-        atomic_species_str = self._generate_atomic_species(out_dir, use_soc)
-        
+        type_labels = mag.unique_types(self.structure)
+        ntyp = len(type_labels)
+
+        atomic_species_str = self._generate_atomic_species(out_dir, use_soc, magnetic=mag)
         kpts = self._generate_explicit_kpoints(kmesh)
         kpts_qe = "\n".join([f"{k}  1.0" for k in kpts])
-        
-        # Use the UI toggle to inject SOC / optional QE CUDA offload
-        soc_flags = "\n  noncolin = .true.\n  lspinorb = .true." if use_soc else ""
+        mag_flags = mag.system_flags(type_labels)
         gpu_flags = "\n  use_gpu = .true." if use_gpu else ""
         vdw_flags = self._vdw_system_flag(vdw_dft_d3)
 
@@ -277,7 +309,7 @@ K_POINTS {{automatic}}
   ecutrho = {ecutrho}
   occupations = 'smearing'
   smearing = 'marzari-vanderbilt'
-  degauss = 0.01{soc_flags}{gpu_flags}{vdw_flags}
+  degauss = 0.01{mag_flags}{gpu_flags}{vdw_flags}
 /
 &ELECTRONS
   conv_thr = 1.0d-8
@@ -288,7 +320,7 @@ ATOMIC_SPECIES
 
 {self._generate_cell_parameters()}
 
-{self._generate_atomic_positions()}
+{self._generate_atomic_positions(magnetic=mag)}
 
 K_POINTS {{crystal}}
 {len(kpts)}
@@ -298,16 +330,23 @@ K_POINTS {{crystal}}
             f.write(nscf_content)
         return nscf_path
 
-    def write_wannier90_input(self, out_dir: str, kmesh: tuple = (6, 6, 6), num_wann: int = 12, use_soc: bool = False, mlwf_mode: bool = False):
+    def write_wannier90_input(
+        self,
+        out_dir: str,
+        kmesh: tuple = (6, 6, 6),
+        num_wann: int = 12,
+        use_soc: bool = False,
+        mlwf_mode: bool = False,
+        magnetic: MagneticSpec | None = None,
+    ):
         """Generates a base wannier90.win file for extracting the tight binding Hamiltonian."""
         win_path = os.path.join(out_dir, "wannier90.win")
-        
+        mag = _resolve_magnetic(magnetic, use_soc)
+
         kpts = self._generate_explicit_kpoints(kmesh)
         kpts_win = "\n".join(kpts)
-        
-        # Determine localization iterations based on user choice
         iterations = 100 if mlwf_mode else 0
-        
+
         proj_lines = []
         for el in self.structure.composition.elements:
             if el.is_transition_metal or el.number > 30:
@@ -315,10 +354,13 @@ K_POINTS {{crystal}}
             else:
                 proj_lines.append(f"{el.symbol}:s;p")
         proj_string = "\n".join(proj_lines)
-        
-        # Use the UI toggle to inject SOC
-        spinor_str = "spinors = true\n" if use_soc else ""
-        
+        spinor_str = "spinors = true\n" if mag.spinors_wannier else ""
+        atoms_frac = "\n".join(
+            f" {mag.label_for_site(self.structure, i)}  "
+            f"{site.frac_coords[0]:.6f}  {site.frac_coords[1]:.6f}  {site.frac_coords[2]:.6f}"
+            for i, site in enumerate(self.structure)
+        )
+
         win_content = f"""num_wann = {num_wann}
 num_iter = {iterations}
 num_print_cycles = 10
@@ -338,7 +380,7 @@ begin unit_cell_cart
 end unit_cell_cart
 
 begin atoms_frac
-{chr(10).join([f" {site.specie.symbol}  {site.frac_coords[0]:.6f}  {site.frac_coords[1]:.6f}  {site.frac_coords[2]:.6f}" for site in self.structure])}
+{atoms_frac}
 end atoms_frac
 
 mp_grid = {kmesh[0]} {kmesh[1]} {kmesh[2]}
@@ -399,17 +441,18 @@ end kpoints
             params.append("  " + "  ".join([f"{v:.6f}" for v in row]))
         return "\n".join(params)
 
-    def _generate_atomic_positions(self, if_pos=None) -> str:
+    def _generate_atomic_positions(self, if_pos=None, magnetic: MagneticSpec | None = None) -> str:
         """Converts PyMatgen fractional coordinates to QE format.
 
         When ``if_pos`` is provided, append QE selective-dynamics flags per site
-        (0 = fixed, 1 = free along each axis).
+        (0 = fixed, 1 = free along each axis). AFM may use split type labels.
         """
+        mag = magnetic or MagneticSpec.off()
         positions = ["ATOMIC_POSITIONS {crystal}"]
         for i, site in enumerate(self.structure):
             coords = "  ".join([f"{c:.6f}" for c in site.frac_coords])
-            # Use pure element symbol (e.g. 'Te') instead of string with oxidation state (e.g. 'Te2-')
-            line = f" {site.specie.symbol}  {coords}"
+            label = mag.label_for_site(self.structure, i)
+            line = f" {label}  {coords}"
             if if_pos is not None:
                 flags = if_pos[i]
                 line += f"  {flags[0]}  {flags[1]}  {flags[2]}"

@@ -6,13 +6,18 @@ import stat as statmod
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (QWidget, QFormLayout, QGroupBox, QComboBox, 
-                               QSpinBox, QHBoxLayout, QLineEdit, QPushButton, 
+                               QSpinBox, QDoubleSpinBox, QHBoxLayout, QLineEdit, QPushButton, 
                                QMessageBox, QPlainTextEdit, QVBoxLayout, QCheckBox, QLabel,
-                               QProgressDialog, QApplication)
+                               QProgressDialog, QApplication, QInputDialog)
 
 from pymatgen.core import Structure
 
 from tensorspec.core.dft.qe_generator import QEInputGenerator, build_if_pos_mask
+from tensorspec.core.dft.magnetic_spec import (
+    MagneticSpec,
+    afm_split_spec,
+    collinear_spec,
+)
 from tensorspec.core.compute import cluster_paths as cp
 from tensorspec.core.workspace import global_workspace
 from tensorspec.gui.services.sshproxy_auth import refresh_sshproxy_login
@@ -262,8 +267,43 @@ class QEGeneratorPanel(QWidget):
         self.spin_ecut.setRange(20, 200); self.spin_ecut.setValue(60)
         qe_form.addRow("Wavefunction Cutoff (Ry):", self.spin_ecut)
         
+        self.combo_magnetic = QComboBox()
+        self.combo_magnetic.addItem("Off (nonmagnetic)", "off")
+        self.combo_magnetic.addItem("Collinear (FM / ferrimag)", "collinear")
+        self.combo_magnetic.addItem("AFM (collinear, type-split)", "afm")
+        self.combo_magnetic.addItem("Noncollinear", "noncolin")
+        self.combo_magnetic.addItem("Noncollinear + SOC", "soc")
+        self.combo_magnetic.setToolTip(
+            "Off: nspin=1.\n"
+            "Collinear: nspin=2 + starting_magnetization per species.\n"
+            "AFM: split magnetic sites into El_up/El_dn (same UPF, ±mag).\n"
+            "Noncollinear / +SOC: noncolin; SOC also needs FR/REL pseudos."
+        )
+        qe_form.addRow("Magnetic / relativistic:", self.combo_magnetic)
+        # Back-compat alias: some code paths still read chk_soc
         self.chk_soc = QCheckBox("Inject Spin-Orbit Coupling Math")
-        qe_form.addRow("Relativistic (SOC):", self.chk_soc)
+        self.chk_soc.setVisible(False)
+
+        self.mag_table_host = QWidget()
+        self.mag_table_layout = QFormLayout(self.mag_table_host)
+        self.mag_table_layout.setContentsMargins(0, 0, 0, 0)
+        self._mag_spins: dict[str, QDoubleSpinBox] = {}
+        qe_form.addRow("Starting mag:", self.mag_table_host)
+
+        afm_row = QHBoxLayout()
+        self.btn_afm_split = QPushButton("AFM: split selected element(s)")
+        self.btn_afm_split.setToolTip(
+            "Duplicate magnetic element as El_up / El_dn with ±starting_magnetization. "
+            "Build magnetic supercell in Crystal first if AFM order needs it."
+        )
+        self.btn_afm_split.clicked.connect(self._afm_split_clicked)
+        afm_row.addWidget(self.btn_afm_split)
+        afm_wrap = QWidget()
+        afm_wrap.setLayout(afm_row)
+        qe_form.addRow("", afm_wrap)
+        self._pending_afm_elements: list[str] = []
+        self.combo_magnetic.currentIndexChanged.connect(self._sync_magnetic_ui)
+        self._sync_magnetic_ui()
         
         self.spin_nbnd = QSpinBox()
         self.spin_nbnd.setRange(1, 500); self.spin_nbnd.setValue(12)
@@ -453,6 +493,81 @@ class QEGeneratorPanel(QWidget):
         self._on_cluster_changed()
         self._sync_selective_dynamics_ui()
         self._update_push_relaxed_button()
+        self._rebuild_mag_table()
+
+    def _magnetic_mode(self) -> str:
+        return self.combo_magnetic.currentData() or "off"
+
+    def _sync_magnetic_ui(self, *_args):
+        mode = self._magnetic_mode()
+        self.chk_soc.setChecked(mode == "soc")
+        show_table = mode in ("collinear", "afm", "noncolin", "soc")
+        self.mag_table_host.setVisible(show_table)
+        self.btn_afm_split.setVisible(mode == "afm")
+        self._rebuild_mag_table()
+
+    def _rebuild_mag_table(self):
+        while self.mag_table_layout.rowCount():
+            self.mag_table_layout.removeRow(0)
+        self._mag_spins.clear()
+        struct = getattr(getattr(self, "engine", None), "crystal_structure", None)
+        if struct is None:
+            return
+        mode = self._magnetic_mode()
+        default = 1.0 if mode in ("collinear", "afm", "noncolin", "soc") else 0.0
+        for el in struct.composition.elements:
+            spin = QDoubleSpinBox()
+            spin.setRange(-10.0, 10.0)
+            spin.setDecimals(3)
+            spin.setSingleStep(0.1)
+            spin.setValue(default if el.is_transition_metal else 0.0)
+            self._mag_spins[el.symbol] = spin
+            self.mag_table_layout.addRow(f"{el.symbol}:", spin)
+
+    def _afm_split_clicked(self):
+        struct = getattr(getattr(self, "engine", None), "crystal_structure", None)
+        if struct is None:
+            QMessageBox.warning(self, "No structure", "Load a crystal before AFM split.")
+            return
+        symbols = [el.symbol for el in struct.composition.elements]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "AFM split",
+            "Element to split into El_up / El_dn (alternate sites):",
+            symbols,
+            0,
+            False,
+        )
+        if not ok or not choice:
+            return
+        self._pending_afm_elements = [choice]
+        QMessageBox.information(
+            self,
+            "AFM split queued",
+            f"{choice}_up / {choice}_dn will be written on Generate "
+            "(±starting_magnetization, alternate sites). "
+            "Use a magnetic supercell from Crystal if the AFM order needs one.",
+        )
+
+    def _build_magnetic_spec(self) -> MagneticSpec:
+        mode = self._magnetic_mode()
+        struct = self.engine.crystal_structure
+        if mode == "off":
+            self._pending_afm_elements = []
+            return MagneticSpec.off()
+        if mode == "afm":
+            els = getattr(self, "_pending_afm_elements", None) or [
+                el.symbol for el in struct.composition.elements if el.is_transition_metal
+            ]
+            if not els:
+                els = [struct.composition.elements[0].symbol]
+            return afm_split_spec(struct, els)
+        mags = {sym: float(spin.value()) for sym, spin in self._mag_spins.items()}
+        if mode == "collinear":
+            return collinear_spec(struct, mags)
+        # noncolin / soc — scalar table → (0,0,mz)
+        vecs = {sym: (0.0, 0.0, float(m)) for sym, m in mags.items()}
+        return MagneticSpec(mode=mode, starting_magnetization=vecs)
 
     def _on_cluster_changed(self, _index=None):
         self._adapt_script_to_cluster()
@@ -838,13 +953,14 @@ class QEGeneratorPanel(QWidget):
         qe_gen = QEInputGenerator(self.engine.crystal_structure)
 
         try:
-            is_soc_enabled = self.chk_soc.isChecked()
+            magnetic = self._build_magnetic_spec()
+            is_soc_enabled = magnetic.use_soc
             use_gpu, cuda_devices, pw_ranks, wan_ranks, _slurm_ntasks = self._pw_backend_flags()
-            if use_gpu and is_soc_enabled:
+            if use_gpu and magnetic.mode in ("noncolin", "soc"):
                 QMessageBox.warning(
                     self,
-                    "GPU + SOC",
-                    "QE GPU + noncollinear SOC can be slow or unsupported on some builds. "
+                    "GPU + noncollinear",
+                    "QE GPU + noncollinear (±SOC) can be slow or unsupported on some builds. "
                     "Verify on your cluster before long runs.",
                 )
 
@@ -869,6 +985,7 @@ class QEGeneratorPanel(QWidget):
                 use_soc=is_soc_enabled,
                 use_gpu=use_gpu,
                 vdw_dft_d3=vdw_dft_d3,
+                magnetic=magnetic,
             )
             qe_gen.write_nscf_input(
                 out_dir,
@@ -878,6 +995,7 @@ class QEGeneratorPanel(QWidget):
                 use_soc=is_soc_enabled,
                 use_gpu=use_gpu,
                 vdw_dft_d3=vdw_dft_d3,
+                magnetic=magnetic,
             )
 
             if relax_enabled:
@@ -895,10 +1013,16 @@ class QEGeneratorPanel(QWidget):
                     vdw_dft_d3=vdw_dft_d3,
                     calculation=relax_calc,
                     if_pos=if_pos,
+                    magnetic=magnetic,
                 )
 
             qe_gen.write_wannier90_input(
-                out_dir, kmesh=kmesh, num_wann=nbnd, use_soc=is_soc_enabled, mlwf_mode=is_mlwf
+                out_dir,
+                kmesh=kmesh,
+                num_wann=nbnd,
+                use_soc=is_soc_enabled,
+                mlwf_mode=is_mlwf,
+                magnetic=magnetic,
             )
             qe_gen.write_pw2wan_input(out_dir)
 
