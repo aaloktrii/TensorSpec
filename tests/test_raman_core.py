@@ -138,3 +138,18 @@ def test_area_spectrum_sums_pixels_inside_rectangle(tmp_path):
     np.testing.assert_allclose(mean, mf.data[idx].mean(0))
     _, empty, none = roi.area_spectrum(mf, (10, 11, 10, 11))
     assert none.size == 0 and np.isnan(empty).all()
+
+
+def test_window_integral_is_raw_trapezoid(tmp_path):
+    from tensorspec.core.raman import band_maps
+    axis = np.linspace(0.0, 100.0, 101)
+    data = np.vstack([np.full(101, 3.0), axis])                      # constant 3; I = ω
+    v = band_maps.window_integral(axis, data, 20.0, 60.0)
+    np.testing.assert_allclose(v, [3.0 * 40.0, (60.0 ** 2 - 20.0 ** 2) / 2])
+    np.testing.assert_allclose(band_maps.window_integral(axis, data, 60.0, 20.0), v)   # order-free
+    assert np.isnan(band_maps.window_integral(axis, data, 200.0, 300.0)).all()
+    _, mf = raman_loaders.load_raman(str(write_spot_folder(tmp_path / "bm")))
+    g = band_maps.window_integral_map(mf, 2560.0, 2810.0)
+    assert g.shape == mf.shape and np.isfinite(g).all()
+    i = mf.index_map[1, 2]
+    np.testing.assert_allclose(g[1, 2], band_maps.window_integral(mf.axis, mf.data[i:i + 1], 2560, 2810)[0])

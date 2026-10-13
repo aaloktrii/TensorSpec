@@ -10,7 +10,7 @@ display as before; core/raman/products.py turns them into xr.Dataset for /analys
 """
 from __future__ import annotations
 
-from tensorspec.core.raman import (batch, fit_model, multi_lorentz, peak_fit, reference, roi,
+from tensorspec.core.raman import (band_maps, batch, fit_model, multi_lorentz, peak_fit, reference, roi,
                                    strain_doping, tools, voigt_2d)
 
 
@@ -66,6 +66,10 @@ class RamanEngineRouter:
     def area_spectrum(self, mapfile, rect, mode="sum"):
         """Spectra of the map pixels inside a rectangle, summed (or averaged) into one."""
         return roi.area_spectrum(mapfile, rect, mode)
+
+    def window_integral_map(self, mapfile, lo, hi):
+        """Raw counts integrated over [lo, hi] cm⁻¹ at every pixel, on the map grid."""
+        return band_maps.window_integral_map(mapfile, lo, hi)
 
     # -- preprocessing -------------------------------------------------------------------------
     def si_shift(self, wavenumber, intensity, ref=tools.SI_REF):
