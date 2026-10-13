@@ -164,3 +164,26 @@ def test_stacked_frames_view_and_send_to_xas_tab(qapp, xmcd_dataset):
     assert "synth_xmcd_xmcd" in [suite.panel.dataset_combo.itemText(i) for i in range(suite.panel.dataset_combo.count())] \
         if hasattr(suite.panel, "dataset_combo") else True
     suite.close()
+
+
+def test_numbers_can_be_typed_for_line_box_and_rois(qapp, xmcd_dataset):
+    svc, _, _ = xmcd_dataset
+    from PySide6.QtWidgets import QAbstractSpinBox
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    p = PeemXmcdPanel(service=svc)
+    p._name = "synth_xmcd"
+    p._refresh_views(select="raw")
+    p.line_coords.setText("4, 5, 60, 50")
+    p._set_line_coords()
+    assert p._line == ((5.0, 4.0), (50.0, 60.0))
+    p.box_coords.setText("40 40 8 8")  # any order / separator
+    p._set_box_coords()
+    assert p._reg_roi == {"kind": "rect", "x0": 8, "x1": 40, "y0": 8, "y1": 40}
+    p.roi_coords.setText("1, 2, 30, 31")
+    p._set_rect_roi("roi")
+    p.bg_coords.setText("32, 32, 60, 60")
+    p._set_rect_roi("bg")
+    assert p._roi["x1"] == 30 and p._bg_roi["y0"] == 32
+    # number fields hold only numbers (units are in the labels)
+    own = [s for s in p.findChildren(QAbstractSpinBox) if hasattr(s, "prefix") and not p.viewer.isAncestorOf(s)]
+    assert own and all(not s.prefix() and not s.suffix() for s in own)

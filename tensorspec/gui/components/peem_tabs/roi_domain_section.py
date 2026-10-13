@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
-from tensorspec.gui.components.peem_tabs.common import _dspin
+from tensorspec.gui.components.peem_tabs.common import _coords_row, _dspin, _numbers
 
 
 class RoiDomainSection:
@@ -40,6 +40,10 @@ class RoiDomainSection:
         b.clicked.connect(lambda: self._start_polygon("bg"))
         r1.addWidget(b)
         rf.addLayout(r1)
+        for target, label in (("roi", "ROI"), ("bg", "BG ROI")):
+            r, edit = _coords_row(f"{label}: x0, y0, x1, y1 (px)", lambda t=target: self._set_rect_roi(t))
+            setattr(self, f"{target}_coords", edit)
+            rf.addLayout(r)
         r2 = QHBoxLayout()
         b = QPushButton("Auto FOV circle")
         b.clicked.connect(self._auto_fov)
@@ -109,6 +113,22 @@ class RoiDomainSection:
     def _start_polygon(self, target: str):
         self._start_tool("polygon", lambda sh: self._on_polygon(target, sh), "yellow" if target == "roi" else "cyan",
                          f"Click vertices on the image; close the polygon on the first point ({target}).")
+
+    def _set_rect_roi(self, target: str):
+        edit = self.roi_coords if target == "roi" else self.bg_coords
+        try:
+            x0, y0, x1, y1 = _numbers(edit.text(), 4)
+        except ValueError as exc:
+            self._err(str(exc))
+            return
+        roi = {"kind": "rect", "x0": int(min(x0, x1)), "x1": int(max(x0, x1)),
+               "y0": int(min(y0, y1)), "y1": int(max(y0, y1))}
+        if target == "bg":
+            self._bg_roi = roi
+        else:
+            self._roi = roi
+        self._update_roi_label()
+        self._refresh_view()
 
     def _on_polygon(self, target: str, sh: dict):
         roi = {"kind": "polygon", "points": [[float(x), float(y)] for x, y in sh["points"]]}

@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
-from tensorspec.gui.components.peem_tabs.common import _dspin
+from tensorspec.gui.components.peem_tabs.common import _coords_row, _dspin, _numbers
 from tensorspec.plotting import peem_plots
 
 
@@ -63,6 +63,8 @@ class DriftSection:
         b.setToolTip("Drag a rectangle over sharp, non-magnetic features (flake edges, particles)")
         b.clicked.connect(self._start_drift_rect)
         dfm.addRow(b)
+        r, self.box_coords = _coords_row("x0, y0, x1, y1 (px)", self._set_box_coords)
+        dfm.addRow("Box:", r)
         self.drift_filter = QComboBox()
         self.drift_filter.addItem("the images as they are", "none")
         self.drift_filter.addItem("edges, smoothed (best for opposite polarizations)", "smooth_edges")
@@ -81,22 +83,18 @@ class DriftSection:
         self.drift_radius = QSpinBox()
         self.drift_radius.setRange(1, 200)
         self.drift_radius.setValue(20)
-        self.drift_radius.setSuffix(" px")
         self.drift_radius.setToolTip("ROI method: search this far around the previous frame's position")
-        dfm.addRow("Search radius:", self.drift_radius)
+        dfm.addRow("Search radius (px):", self.drift_radius)
         self.drift_max = QSpinBox()
         self.drift_max.setRange(0, 500)
         self.drift_max.setValue(0)
-        self.drift_max.setSpecialValueText("off")
-        self.drift_max.setSuffix(" px")
         self.drift_max.setToolTip("Cross-correlation: ignore peaks farther than this from zero shift")
-        dfm.addRow("Max shift:", self.drift_max)
+        dfm.addRow("Max shift (px, 0 = off):", self.drift_max)
         self.drift_interp = QSpinBox()
         self.drift_interp.setRange(1, 16)
         self.drift_interp.setValue(4)
-        self.drift_interp.setPrefix("× ")
         self.drift_interp.setToolTip("Igor marqueeDriftCorrection: interpolate by this factor (1 = off) -> 1/N px steps")
-        dfm.addRow("Interpolate:", self.drift_interp)
+        dfm.addRow("Interpolate (×, 1 = off):", self.drift_interp)
         self.drift_transform = QComboBox()
         for label, val in (("translation", "translation"), ("+ rotation", "rotation"), ("+ skew", "skew"),
                            ("+ isotropic scaling", "isoscale")):
@@ -118,9 +116,9 @@ class DriftSection:
         r = QHBoxLayout()
         self.man_dy = _dspin(-500, 500, 0.0, 0.25, 2)
         self.man_dx = _dspin(-500, 500, 0.0, 0.25, 2)
-        self.man_dy.setPrefix("dy ")
-        self.man_dx.setPrefix("dx ")
+        r.addWidget(QLabel("dy"))
         r.addWidget(self.man_dy)
+        r.addWidget(QLabel("dx (px)"))
         r.addWidget(self.man_dx)
         b = QPushButton("Shift current frame")
         b.setToolTip("Igor manualDrift: move the shown drift-corrected frame by (dy, dx) px")
@@ -153,6 +151,18 @@ class DriftSection:
         self._start_tool("rect", self._on_drift_rect, "magenta",
                          "Drag a rectangle over sharp, non-magnetic features for the drift correction.")
 
+    def _set_box_coords(self):
+        try:
+            x0, y0, x1, y1 = _numbers(self.box_coords.text(), 4)
+        except ValueError as exc:
+            self._err(str(exc))
+            return
+        if self._current_image() is None:
+            self._err("Load data first.")
+            return
+        self._on_drift_rect({"kind": "rect", "x0": int(min(x0, x1)), "x1": int(max(x0, x1)),
+                             "y0": int(min(y0, y1)), "y1": int(max(y0, y1))})
+
     def _on_drift_rect(self, sh: dict):
         img = self._current_image()
         ny, nx = img.shape[-2:]
@@ -161,6 +171,7 @@ class DriftSection:
             self._err("Box is too small (needs at least 16 x 16 px).")
             return
         self._reg_roi = {"kind": "rect", "x0": int(x0), "x1": int(x1), "y0": int(y0), "y1": int(y1)}
+        self.box_coords.setText(f"{int(x0)}, {int(y0)}, {int(x1)}, {int(y1)}")
         if self.drift_method.currentData() == "central":
             self.drift_method.setCurrentIndex(self.drift_method.findData("marquee"))
         self._log(f"Box: x {x0}-{x1}, y {y0}-{y1} px. Click 'Run drift correction'.")

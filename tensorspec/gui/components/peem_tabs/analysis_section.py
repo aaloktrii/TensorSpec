@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
-from tensorspec.gui.components.peem_tabs.common import _dspin
+from tensorspec.gui.components.peem_tabs.common import _coords_row, _dspin, _numbers
 from tensorspec.plotting import peem_plots
 
 
@@ -44,13 +44,14 @@ class AnalysisSection:
         self.line_hw = QSpinBox()
         self.line_hw.setRange(0, 100)
         self.line_hw.setValue(3)
-        self.line_hw.setPrefix("half-width ")
-        self.line_hw.setSuffix(" px")
         self.line_hw.setToolTip("Profile averaged over 2 x half-width + 1 parallel lines (Igor ImageLineProfile width)")
+        r.addWidget(QLabel("half-width (px)"))
         r.addWidget(self.line_hw)
         af.addRow(r)
         self.line_label = QLabel("Line: none")
         af.addRow(self.line_label)
+        r, self.line_coords = _coords_row("x1, y1, x2, y2 (px)", self._set_line_coords)
+        af.addRow("Line A→B:", r)
         r = QHBoxLayout()
         for label, fn, tip in (("Profile", self._an_profile, "Igor LineProfile"),
                                ("Gauss fit", lambda: self._an_fit(False), "Igor getGaussProfile: width (FWHM) of a peak/stripe"),
@@ -75,9 +76,9 @@ class AnalysisSection:
         r = QHBoxLayout()
         self.hist_min = _dspin(-1e9, 1e9, -0.1, 0.01, 4)
         self.hist_max = _dspin(-1e9, 1e9, 0.1, 0.01, 4)
-        self.hist_min.setPrefix("min ")
-        self.hist_max.setPrefix("max ")
+        r.addWidget(QLabel("min"))
         r.addWidget(self.hist_min)
+        r.addWidget(QLabel("max"))
         r.addWidget(self.hist_max)
         af.addRow("Custom range:", r)
         r = QHBoxLayout()
@@ -94,7 +95,7 @@ class AnalysisSection:
         self.fft_cut = QSpinBox()
         self.fft_cut.setRange(1, 4096)
         self.fft_cut.setValue(40)
-        self.fft_cut.setPrefix("cutoff ")
+        r.addWidget(QLabel("cutoff"))
         r.addWidget(self.fft_cut)
         self.fft_mode = QComboBox()
         self.fft_mode.addItem("along x (Igor)", "x")
@@ -119,16 +120,16 @@ class AnalysisSection:
         self.bg_order = QSpinBox()
         self.bg_order.setRange(0, 6)
         self.bg_order.setValue(2)
-        self.bg_order.setPrefix("order ")
         self.bg_cell = QSpinBox()
         self.bg_cell.setRange(1, 200)
         self.bg_cell.setValue(5)
-        self.bg_cell.setPrefix("cell ")
         b = QPushButton("Background (rows/cols)")
         b.setToolTip("Igor backgroundremoval: polynomial of every row and column (map -> 'bg_removed'; frames -> whole stack)")
         b.clicked.connect(self._an_bg_poly)
         r.addWidget(b)
+        r.addWidget(QLabel("order"))
         r.addWidget(self.bg_order)
+        r.addWidget(QLabel("cell (px)"))
         r.addWidget(self.bg_cell)
         af.addRow(r)
         r = QHBoxLayout()
@@ -159,9 +160,18 @@ class AnalysisSection:
     def _start_line(self):
         self._start_tool("line", self._on_line, "orange", "Click point A, then point B on the image.")
 
+    def _set_line_coords(self):
+        try:
+            x1, y1, x2, y2 = _numbers(self.line_coords.text(), 4)
+        except ValueError as exc:
+            self._err(str(exc))
+            return
+        self._on_line({"a": (y1, x1), "b": (y2, x2)})
+
     def _on_line(self, sh: dict):
         self._line = (tuple(sh["a"]), tuple(sh["b"]))
         (y1, x1), (y2, x2) = self._line
+        self.line_coords.setText(f"{x1:.0f}, {y1:.0f}, {x2:.0f}, {y2:.0f}")
         self.line_label.setText(f"Line: A (x {x1:.0f}, y {y1:.0f}) → B (x {x2:.0f}, y {y2:.0f}), "
                                 f"{np.hypot(y2 - y1, x2 - x1):.0f} px")
         self._refresh_view()
