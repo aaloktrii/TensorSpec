@@ -1,4 +1,6 @@
-"""Raman suite panel: the six Raman tabs, File / Analysis / Help menus, status bar and progress.
+"""Raman suite panel: the Raman workflow as three step tabs — 1 · Spectra (Peak fitting, Stacked
+spectra), 2 · Map (Map Explorer, Compare cells), 3 · Analysis (Classification, Layer prediction,
+Strain / doping) — with File / Analysis / Help menus, status bar and progress.
 
 Was ``MainWindow`` of Raman_Classifier ``raman_map_classifier_8 (1).py``, now a QWidget so the
 suite can embed it. The shared state and non-GUI logic live in gui/services/raman_service.py
@@ -23,6 +25,7 @@ from tensorspec.gui.components.raman_tabs.peak_fit_panel import PeakFitTab
 from tensorspec.gui.components.raman_tabs.predict_panel import PredictTab
 from tensorspec.gui.components.raman_tabs.spectra_panel import SpectraTab
 from tensorspec.gui.components.raman_tabs.stack_panel import StackTab
+from tensorspec.gui.components.raman_tabs.strain_doping_panel import StrainDopingTab
 from tensorspec.gui.services.raman_service import RamanService
 
 #: MainWindow attributes that now live on RamanService; the tabs keep reading them as main.<name>.
@@ -59,19 +62,31 @@ class RamanPanel(QtWidgets.QWidget):
         self.service = service or RamanService()
         self.worker: Optional[FitWorker] = None
 
-        self.tabs = QtWidgets.QTabWidget()
+        # The tabs refer to each other while building, so create them all first.
         self.tab_map = MapExplorerTab(self)
         self.tab_class = ClassificationTab(self)
-        self.tabs.addTab(self.tab_map, "1 · Map Explorer")
-        self.tabs.addTab(self.tab_class, "2 · Classification")
         self.tab_spec = SpectraTab(self)
-        self.tabs.addTab(self.tab_spec, "3 · Spectra")
         self.tab_stack = StackTab(self)
-        self.tabs.addTab(self.tab_stack, "4 · Stacked spectra")
         self.tab_pred = PredictTab(self)
-        self.tabs.addTab(self.tab_pred, "5 · Layer prediction")
         self.tab_fit = PeakFitTab(self)
-        self.tabs.addTab(self.tab_fit, "6 · Peak fitting")
+        self.tab_strain = StrainDopingTab(self)
+
+        # Workflow order: 1 · Spectra → 2 · Map → 3 · Analysis, each step with its sub-tabs.
+        self.tabs = QtWidgets.QTabWidget()
+        self.step_tabs = {}
+        for step, subs in (("1 · Spectra", ((self.tab_fit, "Peak fitting"),
+                                            (self.tab_stack, "Stacked spectra"))),
+                           ("2 · Map", ((self.tab_map, "Map Explorer"),
+                                        (self.tab_spec, "Compare cells"))),
+                           ("3 · Analysis", ((self.tab_class, "Classification"),
+                                             (self.tab_pred, "Layer prediction"),
+                                             (self.tab_strain, "Strain / doping")))):
+            inner = QtWidgets.QTabWidget()
+            inner.setDocumentMode(True)
+            for w, name in subs:
+                inner.addTab(w, name)
+                self.step_tabs[w] = inner
+            self.tabs.addTab(inner, step)
 
         self._menu_bar = QtWidgets.QMenuBar(self)
         self._status_bar = QtWidgets.QStatusBar(self)
@@ -124,6 +139,12 @@ class RamanPanel(QtWidgets.QWidget):
             act.setShortcut(shortcut)
         return act
 
+    def show_tab(self, widget: QtWidgets.QWidget):
+        """Bring a sub-tab (e.g. self.tab_stack) to the front, with its step tab."""
+        inner = self.step_tabs[widget]
+        self.tabs.setCurrentWidget(inner)
+        inner.setCurrentWidget(widget)
+
     def status(self, text: str):
         self.statusBar().showMessage(text, 8000)
 
@@ -148,9 +169,9 @@ class RamanPanel(QtWidgets.QWidget):
         # A single spectrum is not a map: it goes to the stack tab instead.
         if not os.path.isdir(path) and is_single_spectrum(path):
             self.tab_stack.add_paths([path])
-            self.tabs.setCurrentWidget(self.tab_stack)
-            self.status("%s is a single spectrum — added to the Stacked "
-                        "spectra tab." % os.path.basename(path))
+            self.show_tab(self.tab_stack)
+            self.status("%s is a single spectrum — added to 1 · Spectra ▸ Stacked "
+                        "spectra." % os.path.basename(path))
             return
         try:
             mf = read_spot_folder(path) if os.path.isdir(path) else parse_map_file(path)

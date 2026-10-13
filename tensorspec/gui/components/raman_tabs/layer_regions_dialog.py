@@ -149,14 +149,14 @@ class LayerRegionsDialog(QtWidgets.QDialog):
 
         if main.optical is None or main.optical_image is None:
             self.lbl_place.setText("No camera image loaded — regions come from optical "
-                                   "contrast, so load one in tab 1 first.")
+                                   "contrast, so load one in 2 · Map ▸ Map Explorer first.")
             self.lbl_place.setStyleSheet("color:#b71c1c; font-size:11px;")
             for w in (self.spn_k, self.spn_cut, self.btn_seg, self.btn_apply):
                 w.setEnabled(False)
             return
         if main.cfg.get("map_transform") is None:
             self.lbl_place.setText("⚠ The map's offset has not been aligned yet — run "
-                                   "Auto-align in tab 1 first, or contrast will be "
+                                   "Auto-align in 2 · Map ▸ Map Explorer first, or contrast will be "
                                    "read from slightly the wrong place.")
             self.lbl_place.setStyleSheet("color:#b71c1c; font-size:11px;")
         else:

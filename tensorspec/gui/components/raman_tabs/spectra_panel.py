@@ -56,7 +56,7 @@ class SpectraTab(QtWidgets.QWidget):
         self.cmb_view.addItems(["FWHM(2D)", "Classification", "Layer map (N)"])
         self.cmb_view.setToolTip(
             "FWHM(2D) — the fitted 2D width, no classification\n"
-            "Classification — the result from tab 2, whichever layer mode "
+            "Classification — the result from 3 · Analysis ▸ Classification, whichever layer mode "
             "produced it (one N, Auto, or layer regions)\n"
             "Layer map (N) — the per-region layer counts from the regions dialog")
         self.cmb_view.currentIndexChanged.connect(self.refresh_mini)

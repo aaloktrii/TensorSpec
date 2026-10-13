@@ -187,7 +187,7 @@ class StackTab(QtWidgets.QWidget):
             "Spectra (*.txt *.dat *.csv *.h5);;All files (*)")
         if paths:
             self.add_paths(paths)
-            self.main.tabs.setCurrentWidget(self)
+            self.main.show_tab(self)
 
     def add_map_pixel(self):
         mf, sel = self.main.mapfile, self.main.tab_map.sel

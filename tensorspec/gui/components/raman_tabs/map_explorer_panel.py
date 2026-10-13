@@ -197,7 +197,7 @@ class MapExplorerTab(QtWidgets.QWidget):
         sbar.addWidget(self.btn_reset_view)
         self.btn_to_spec = QtWidgets.QPushButton("Add to Spectra tab")
         self.btn_to_spec.setToolTip("Add the selected pixel's spectrum to the "
-                                    "comparison in tab 3")
+                                    "comparison in 2 · Map ▸ Compare cells")
         self.btn_to_spec.clicked.connect(self._send_to_spectra)
         sbar.addWidget(self.btn_to_spec)
         sbar.addStretch(1)
