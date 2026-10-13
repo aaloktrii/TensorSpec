@@ -253,7 +253,7 @@ def test_load_list_sets_polarization_of_unnamed_folders(qapp, tmp_path, monkeypa
     p._run = lambda fn, done, *args, **kw: done(fn(*args, **kw))  # synchronous for the test
     p._add_paths([str(a), str(b)])
     assert "? — set the polarization" in p.scan_list.item(0).text()
-    assert "Set the polarization of: first, second" in p.load_status.text()
+    assert "No polarization for 2 item(s): first, second" in p.load_status.text()
     p._load()
     assert errors and "Set the polarization" in errors[-1] and p._name is None
     for row, tag in ((0, "CP"), (1, "CM")):
@@ -461,3 +461,36 @@ def test_panel_switches_saves_and_unloads_datasets(qapp, tmp_path, monkeypatch):
     assert p._name == names[1] and p.dataset_combo.count() == 1
     p._clear_scans()
     assert p._name is None and not p.service.loaded_datasets() and p.dataset_combo.currentData() is None
+
+
+def test_items_without_polarization_do_not_block_loading_the_others(qapp, tmp_path, monkeypatch):
+    """LEEM images next to the XPEEM folders (no polarization): Load selected and Load each pair
+    still work and leave them out; Load all asks for their polarization."""
+    import shutil
+    from PySide6.QtWidgets import QMessageBox
+    from tensorspec.gui.components.peem_xmcd_panel import PeemXmcdPanel
+    errors = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: errors.append(a[2])))
+    acq = [_angle_acq(tmp_path, p, v, a) for p, v in (("CL", 1100), ("CR", 900)) for a in ("-15", "0")]
+    leem = []
+    for i in range(4):
+        f = tmp_path / f"20260602_LEEM_mirror_{i}.dat"
+        shutil.copy(next(acq[0].glob("*.dat")), f)
+        leem.append(str(f))
+    p = PeemXmcdPanel()
+    for leftover in p.service.loaded_datasets():
+        p.service.unload(leftover)
+    p._run = lambda fn, done, *a, **k: done(fn(*a, **k))
+    p._add_paths(leem + [str(x) for x in acq])
+    assert p.dataset_combo.currentText() == "(none loaded)"
+    assert "No polarization for 4 item(s)" in p.load_status.text() and "and 1 more" in p.load_status.text()
+    p._load()  # all: refused, the LEEM images have no polarization
+    assert errors and p._name is None
+    p.scan_list.item(4).setSelected(True)  # CL -15
+    p.scan_list.item(6).setSelected(True)  # CR -15
+    p._load(selected=True)
+    assert p._name and p.service.get_meta(p._name)["n_frames"] == 6
+    p.scan_list.clearSelection()
+    p._load_pairs()
+    assert p.dataset_combo.count() == 2 and "Left out (no polarization)" in p.load_status.text()
+    p._clear_scans()

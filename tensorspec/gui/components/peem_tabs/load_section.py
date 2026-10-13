@@ -141,6 +141,7 @@ class LoadSection:
         b_unload = QPushButton("Unload")
         b_unload.setToolTip("Remove this dataset from memory (save its results first)")
         b_unload.clicked.connect(self._unload_current)
+        self.dataset_combo.addItem("(none loaded)", None)
         row.addWidget(self.dataset_combo, 1)
         row.addWidget(b_save)
         row.addWidget(b_unload)
@@ -244,8 +245,9 @@ class LoadSection:
             self._item_text(r)
         self._update_load_status()
 
-    def _unset_pol(self) -> list[str]:
-        return [os.path.basename(p) for p in self._scan_paths
+    def _unset_pol(self, paths: list[str] | None = None) -> list[str]:
+        """Basenames of the items (of ``paths``, default all) whose polarization is unknown."""
+        return [os.path.basename(p) for p in (self._scan_paths if paths is None else paths)
                 if p not in self._scan_pol and not self._scan_detected.get(p, (None,))[0]]
 
     def _update_load_status(self):
@@ -255,8 +257,10 @@ class LoadSection:
             return
         unset = self._unset_pol()
         if unset:
-            self.load_status.setText(f"Set the polarization of: {', '.join(unset)} (select it, then choose "
-                                     "Polarization). The data do not record it.")
+            names = ", ".join(unset[:3]) + (f" and {len(unset) - 3} more" if len(unset) > 3 else "")
+            self.load_status.setText(
+                f"No polarization for {len(unset)} item(s): {names}. Set it (select, then Polarization), or "
+                "Load selected / Load each pair, which leave them out.")
             return
         missing = [os.path.basename(str(q)) for q in map(peem_beamline_loaders.partner_folder, self._scan_paths)
                    if q is not None and os.path.normpath(str(q)) not in self._scan_paths]
@@ -430,11 +434,11 @@ class LoadSection:
         if not self._scan_paths:
             self._err("Add files or folders first.")
             return
-        if not self._ready_to_load():
-            return
         paths = self._selected_paths() if selected else list(self._scan_paths)
         if not paths:
             self._err("Select the item(s) to load in the list first.")
+            return
+        if not self._ready_to_load(paths):
             return
         self.load_status.setText(f"Loading {len(paths)} item(s)… (online-only Dropbox files download first)")
         self._log("Loading: " + "; ".join(paths))
@@ -458,30 +462,41 @@ class LoadSection:
         if not self._scan_paths:
             self._err("Add files or folders first.")
             return
-        if not self._ready_to_load():
+        # items without a polarization (e.g. LEEM images next to the XPEEM folders) are left out
+        skipped = self._unset_pol()
+        paths = [p for p in self._scan_paths if os.path.basename(p) not in set(skipped)]
+        if not paths:
+            self._err("No item has a polarization yet: select an item and choose Polarization.")
             return
-        self.load_status.setText(f"Loading {len(self._scan_paths)} item(s), one dataset per pair…")
-        self._log("Loading pairs: " + "; ".join(self._scan_paths))
-        self._run(self.service.load_pairs, self._on_loaded_pairs, list(self._scan_paths),
-                  pol=dict(self._scan_pol) or None, **self._load_kw())
+        if not self._ready_to_load(paths):
+            return
+        self._skipped_pairs = skipped
+        self.load_status.setText(f"Loading {len(paths)} item(s), one dataset per pair…")
+        self._log("Loading pairs: " + "; ".join(paths) + (f" (left out, no polarization: {', '.join(skipped)})"
+                                                         if skipped else ""))
+        self._run(self.service.load_pairs, self._on_loaded_pairs, paths,
+                  pol={p: t for p, t in self._scan_pol.items() if p in paths} or None, **self._load_kw())
 
     def _on_loaded_pairs(self, results: list[dict]):
         for res in results[1:]:
             self._log(f"Loaded '{res['name']}': {res['shape'][0]} frames")
         self._on_loaded(results[0])
         names = ", ".join(r["name"] for r in results)
+        skipped = getattr(self, "_skipped_pairs", [])
         self.load_status.setText(f"Loaded {len(results)} datasets: {names}. Pick one under Dataset; "
-                                 "Save results, then Unload it before the next.")
+                                 "Save results, then Unload it before the next."
+                                 + (f" Left out (no polarization): {', '.join(skipped)}." if skipped else ""))
 
-    def _ready_to_load(self) -> bool:
+    def _ready_to_load(self, paths: list[str]) -> bool:
         try:
             self.service.set_detector_maps(self.dead_edit.text().strip() or None,
                                            self.norm_edit.text().strip() or None)
         except ValueError as exc:
             self._err(str(exc))
             return False
-        unset = self._unset_pol()
+        unset = self._unset_pol(paths)
         if unset:
+            unset = unset[:3] + ([f"and {len(unset) - 3} more"] if len(unset) > 3 else [])
             self._err(f"Set the polarization of {', '.join(unset)} first: select it in the list and choose "
                       "Polarization (its files do not record it).")
             return False
