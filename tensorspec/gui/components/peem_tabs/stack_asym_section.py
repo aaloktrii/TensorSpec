@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 
 _DIVERGING = {"pcd", "pld", "pmld", "pmnld"}
 
+from tensorspec.core.peem import dichroism
 from tensorspec.gui.components.peem_tabs.common import _dspin
 
 
@@ -46,10 +48,10 @@ class StackAsymSection:
         # ---------------------------------------------------------------- 4. Asymmetry
         dich = QGroupBox("5. Asymmetry")
         dl = QFormLayout(dich)
-        self.conv_combo = QComboBox()
-        self.conv_combo.addItem("UE49: (CM−CP)/(CM+CP)", "ue49")
-        self.conv_combo.addItem("(CP−CM)/(CP+CM) = BNL (CL−CR) · ALS (+0.9 − −0.9)", "cp_minus_cm")
-        dl.addRow("XMCD sign:", self.conv_combo)
+        sign = QLabel("XMCD = (CL−CR)/(CL+CR)   ·   XLD = (LV−LH)/(LV+LH)\n"
+                      "same for every beamline (CL = BNL CL · UE49 pos · ALS +0.9)")
+        sign.setToolTip("Universal asymmetry; PMLD / PMNLD use the same XLD sign")
+        dl.addRow(sign)
         b = QPushButton("Subtract + asymmetry")
         b.setToolTip("From the stacked images A (CL) and B (CR): difference A-B and asymmetry (A-B)/(A+B)")
         b.clicked.connect(self._asym_step)
@@ -102,7 +104,7 @@ class StackAsymSection:
         name = self._require()
         if name:
             self._run(self.service.compute_pcd, lambda r: self._show_result(r, "pcd"), name,
-                      node=self.node_combo.currentData(), convention=self.conv_combo.currentData(),
+                      node=self.node_combo.currentData(), convention=dichroism.UNIVERSAL_CONVENTION,
                       register=self.chk_register.isChecked(), reg_roi=self._drift_roi(), crop_roi=self._crop())
 
     def _stack_step(self):
@@ -163,7 +165,7 @@ class StackAsymSection:
             pair = self.pair_combo.currentData()
             self._run(self.service.asymmetry,
                       lambda r: (self._show_result(r, "pcd" if pair == "xmcd" else "pld"), self._show_asym_output()),
-                      name, convention=self.conv_combo.currentData(), crop_roi=self._crop())
+                      name, convention=dichroism.UNIVERSAL_CONVENTION, crop_roi=self._crop())
 
     def _pld(self):
         name = self._require()

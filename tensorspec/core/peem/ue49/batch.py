@@ -384,7 +384,7 @@ def _summary(a: np.ndarray) -> dict[str, float]:
 class Settings:
     dead_map: str | None
     norm_image: str | None
-    convention: str = "ue49"
+    convention: str = "cp_minus_cm"  # universal: (CL-CR)/(CL+CR) = (pos-neg)/(pos+neg)
     fov_shrink: float = 0.9
     domain_threshold: float = 0.15
     domain_smooth: float = 1.5
@@ -424,13 +424,22 @@ def _channel_frames(td, unit: Unit) -> tuple[np.ndarray, np.ndarray, dict]:
     return td.value[a], td.value[b], info
 
 
+def _sign_label(kind: str, st: Settings) -> str:
+    if kind == "XMCD":
+        return st.convention
+    return dichroism.XLD_FORMULA if kind == "XLD_pol" else "(A-B)/(A+B)"  # XLD_L2: energies A / B
+
+
 def _dichroism_map(frames_a: np.ndarray, frames_b: np.ndarray, kind: str, st: Settings) -> dict[str, Any]:
     j = dichroism.joint_means(frames_a, frames_b, register=True)
     if kind == "XMCD":
         sign = dichroism.CONVENTIONS[st.convention]
         amap = sign * dichroism.asymmetry(j["mean_a"], j["mean_b"])
         name = "pcd"
-    else:
+    elif kind == "XLD_pol":  # A = LH, B = LV -> universal (LV-LH)/(LV+LH)
+        amap = dichroism.xld_asymmetry(j["mean_a"], j["mean_b"])
+        name = "pld"
+    else:  # XLD_L2: one polarization, energies A / B
         amap = dichroism.asymmetry(j["mean_a"], j["mean_b"])
         name = "pld"
     mask = _fov_mask(j["mean_a"], st.fov_shrink)
@@ -535,7 +544,7 @@ def process_cluster(cl: Cluster, root: Path, st: Settings, preview=None) -> dict
         t = float(np.nanmean([s.temperature for s in u.scans]))
         attrs = {"unit": u.uid, "kind": u.kind, "channels": info["tags"], "n_a": info["n_a"], "n_b": info["n_b"],
                  "energy_a_eV": info["energy_a"], "energy_b_eV": info["energy_b"], "T_K": t,
-                 "convention": st.convention if u.kind == "XMCD" else "(A-B)/(A+B)",
+                 "convention": _sign_label(u.kind, st),
                  "refine_shift": list(res["refine_shift"]), "cluster": cl.cid, "sample": cl.sample,
                  "domain_map_note": ("no background ROI: offset not removed; segmentation is only meaningful "
                                      "where the logbook reports magnetic contrast" if dom else ""),
@@ -565,7 +574,7 @@ def process_cluster(cl: Cluster, root: Path, st: Settings, preview=None) -> dict
         mdom = _domain(merged, st, upp)
         attrs = {"cluster": cl.cid, "kind": kind, "channels": info["tags"], "units": [u.uid for u in cl.units],
                  "n_a": int(sum(len(x) for x in fa)), "n_b": int(sum(len(x) for x in fb)),
-                 "convention": st.convention if kind == "XMCD" else "(A-B)/(A+B)", "sample": cl.sample}
+                 "convention": _sign_label(kind, st), "sample": cl.sample}
         _write_maps(out / "merged", merged, mdom, attrs, upp)
         if preview:
             preview(out / "merged" / "preview.png", merged, mdom,
@@ -713,8 +722,8 @@ def process_spectra(job: SpectraJob, root: Path, st: Settings, sessions: dict, p
         lh = np.interp(grid, *specs[0]) if job.scans[0].pol == "LH" else np.interp(grid, *specs[1])
         lv = np.interp(grid, *specs[1]) if job.scans[0].pol == "LH" else np.interp(grid, *specs[0])
         nlh, nlv = normalize_xas(grid, lh, pre), normalize_xas(grid, lv, pre)
-        _write_csv(out / "xld_spectrum.csv", {"energy_eV": grid, "LH_norm": nlh, "LV_norm": nlv, "xld_LH_minus_LV": nlh - nlv})
-        lines = {"LH": (grid, nlh), "LV": (grid, nlv), "XLD LH-LV": (grid, nlh - nlv)}
+        _write_csv(out / "xld_spectrum.csv", {"energy_eV": grid, "LH_norm": nlh, "LV_norm": nlv, "xld_LV_minus_LH": nlv - nlh})
+        lines = {"LH": (grid, nlh), "LV": (grid, nlv), "XLD LV-LH": (grid, nlv - nlh)}
         ea, eb = _num(sess.get("xld_e_a_eV")), _num(sess.get("xld_e_b_eV"))
         if np.isfinite(ea) and np.isfinite(eb) and edge == "Cr":
             _ld_maps(tds, job, ea, eb, st, out, summary, preview)
@@ -773,7 +782,7 @@ def _ld_maps(tds, job, ea, eb, st, out, summary, preview) -> None:
     (out / "ld_maps").mkdir(parents=True, exist_ok=True)
     ds = xr.Dataset({k: (("y", "x"), v.astype(np.float32)) for k, v in maps.items()},
                     attrs={"e_a_eV": ea, "e_b_eV": eb, "half_width_eV": 0.15,
-                           "pld": "(LH-LV)/(LH+LV)", "pmld": "[pld(E_A)-pld(E_B)]/2",
+                           "pld": dichroism.XLD_FORMULA, "pmld": "[pld(E_A)-pld(E_B)]/2",
                            "pmnld": "[pld(E_A)+pld(E_B)]/2"})
     ds.to_netcdf(out / "ld_maps" / "maps.nc", encoding={k: {"zlib": True} for k in maps})
     for k, v in maps.items():

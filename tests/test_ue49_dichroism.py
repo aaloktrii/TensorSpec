@@ -80,8 +80,9 @@ def test_pmld_pmnld_decomposition():
         return np.stack(frames)
 
     res = dichroism.pmld_pmnld_maps(stack(+1), stack(-1), energy, energy, 584.4, 585.4, register=False)
-    assert np.allclose(res["pmld"], mag, atol=1e-3)
-    assert np.allclose(res["pmnld"], nat, atol=1e-3)
+    # LH = stack(+1), LV = stack(-1); universal XLD (LV-LH)/(LV+LH) = -ld
+    assert np.allclose(res["pmld"], -mag, atol=1e-3)
+    assert np.allclose(res["pmnld"], -nat, atol=1e-3)
 
 
 def test_group_and_coadd_by_key():

@@ -70,8 +70,9 @@ def test_pmld_service(tmp_path):
     try:
         out = svc.compute_pmld("synth_xmld", 584.4, 585.4, register=False)
         assert out["kinds"] == ["pld", "pmld", "pmnld"]
-        assert np.allclose(svc.get_map("synth_xmld", "pmld"), mag, atol=1e-3)
-        assert np.allclose(svc.get_map("synth_xmld", "pmnld"), 0.02, atol=1e-3)
+        # LH = 1000(1 + ld), LV = 1000(1 - ld); universal XLD (LV-LH)/(LV+LH) = -ld
+        assert np.allclose(svc.get_map("synth_xmld", "pmld"), -mag, atol=1e-3)
+        assert np.allclose(svc.get_map("synth_xmld", "pmnld"), -0.02, atol=1e-3)
         with pytest.raises(ValueError, match="no CP frames"):
             svc.compute_pcd("synth_xmld")
     finally:

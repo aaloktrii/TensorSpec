@@ -34,8 +34,8 @@ Each output is a Dataset with `data` on (y, x), extra image variables, and scala
 
 | kind | definition |
 |---|---|
-| `pcd` | Circular dichroism. UE49 sign: `(CM−CP)/(CM+CP)`, with `cp_minus_cm` available. CM is registered onto CP using edge images. |
-| `pld` | `(LH−LV)/(LH+LV)`. The PMLD step stores it at E_A, with `pld_b` at E_B. |
+| `pcd` | Circular dichroism. Universal sign for every beamline: `(CL−CR)/(CL+CR)` = `(CP−CM)/(CP+CM)` (UE49 pos = CL). The UE49 Igor sign `(CM−CP)/(CM+CP)` is still available as `convention="ue49"`. CM is registered onto CP using edge images. |
+| `pld` | Universal `(LV−LH)/(LV+LH)`. The PMLD step stores it at E_A, with `pld_b` at E_B. |
 | `pmld` | Magnetic linear dichroism, the part that reverses between the two L2 multiplet peaks: `[pld(E_A) − pld(E_B)]/2`. |
 | `pmnld` | Non-magnetic (natural or crystal-field) linear dichroism, the part common to both peaks: `[pld(E_A) + pld(E_B)]/2`. |
 | `domain_map` | Three-state map (+1 up, −1 down, 0 neutral), with variables `m` and `roi`. Its attrs hold f_up, f_down, f_neutral, ⟨m_z⟩, domain counts, widths and period (px and µm), and wall density. |

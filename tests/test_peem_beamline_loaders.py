@@ -52,9 +52,9 @@ def test_p3b_stack_pol_and_i0_default_off(tmp_path):
 
 
 @pytest.mark.parametrize("make, expected", [
-    ("ue49", -0.1),   # UE49 sign (CM-CP)/(CM+CP): CP=1100 (pos), CM=900 (neg)
+    ("ue49", 0.1),    # universal (CL-CR)/(CL+CR): UE49 pos = CL (1100), neg = CR (900)
     ("uview", 0.1),   # (CL-CR)/(CL+CR)
-    ("p3b", 0.1),     # (I+0.9 - I-0.9)/sum
+    ("p3b", 0.1),     # +0.9 = CL
 ])
 def test_service_xmcd_uses_beamline_sign(tmp_path, make, expected):
     from tensorspec.gui.services.peem_service import PeemService
@@ -267,3 +267,18 @@ def test_load_list_sets_polarization_of_unnamed_folders(qapp, tmp_path, monkeypa
     finally:
         if p._name:
             global_workspace.remove(p._name)
+
+
+@pytest.mark.parametrize("tags, expected", [(("CL", "CR"), 0.1), (("LH", "LV"), -0.1)])
+def test_universal_asymmetry_step_by_step(tmp_path, tags, expected):
+    """XMCD = (CL-CR)/(CL+CR), XLD = (LV-LH)/(LV+LH) for every beamline (first tag 1100, second 900)."""
+    from tensorspec.gui.services.peem_service import PeemService
+    svc = PeemService()
+    name = f"t_univ_{tags[0]}"
+    svc.load_beamline([uview_acq(tmp_path, tags[0], 1100), uview_acq(tmp_path, tags[1], 900)], name=name)
+    svc.drift_correct(name, method="central")
+    svc.stack(name, pair="xmcd" if tags[0] == "CL" else "xld")
+    out = svc.asymmetry(name)
+    kind = "pcd" if tags[0] == "CL" else "pld"
+    assert out["formula"] == ("(CL-CR)/(CL+CR)" if kind == "pcd" else "(LV-LH)/(LV+LH)")
+    assert np.nanmean(svc.get_map(name, kind)) == pytest.approx(expected, abs=1e-6)

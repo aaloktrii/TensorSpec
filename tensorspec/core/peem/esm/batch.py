@@ -201,7 +201,7 @@ def process_group(g: Group, root: Path, st: Settings, preview=None) -> dict[str,
         tags = PAIRS[g.kind]
         attrs = {"unit": uid, "kind": g.kind, "channels": tags, "n_a": len(la["stack"]), "n_b": len(lb["stack"]),
                  "convention": "(CL-CR)/(CL+CR)" if st.convention == "cp_minus_cm" else "(CR-CL)/(CR+CL)",
-                 "formula": "(LH-LV)/(LH+LV)" if g.kind == "XLD" else None,
+                 "formula": dichroism.XLD_FORMULA if g.kind == "XLD" else None,
                  "refine_shift": list(res["refine_shift"]), "sample": sample, "T_label": t,
                  "energy_eV": e, "azimuth_deg": az, "folders": [Path(a_acq.path).name, Path(b_acq.path).name],
                  "bad_frames": la["bad"] + lb["bad"],

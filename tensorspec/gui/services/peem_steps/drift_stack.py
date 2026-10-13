@@ -42,7 +42,7 @@ class PeemDriftStackSteps:
         convention None = the loaded beamline's default (metadata["default_convention"]).
         """
         if convention is None:
-            convention = (_require_raw(name).metadata or {}).get("default_convention") or "ue49"
+            convention = (_require_raw(name).metadata or {}).get("default_convention") or dichroism.UNIVERSAL_CONVENTION
         cp, _ = _frames_for_pol(name, "CP", "processed/CP" if node == "separated" else node)
         cm, _ = _frames_for_pol(name, "CM", "processed/CM" if node == "separated" else node)
         res = dichroism.pcd_map(cp, cm, convention=convention, register=register, box=_box(reg_roi))
@@ -247,11 +247,11 @@ class PeemDriftStackSteps:
         b = np.asarray(st[f"mean_{tb.lower()}"].values, float)
         if at["pair"] == "xmcd":
             if convention is None:
-                convention = (_require_raw(name).metadata or {}).get("default_convention") or "ue49"
+                convention = (_require_raw(name).metadata or {}).get("default_convention") or dichroism.UNIVERSAL_CONVENTION
             sign = dichroism.CONVENTIONS[convention]
             kind, formula = "pcd", _beamline_formula(name, convention)
         else:
-            sign, kind, formula = 1.0, "pld", "(LH-LV)/(LH+LV)"
+            sign, kind, formula = -1.0, "pld", dichroism.XLD_FORMULA  # A = LH, B = LV -> (LV-LH)/(LV+LH)
         asym = sign * dichroism.asymmetry(a, b)
         diff = np.where(np.isfinite(asym), sign * (a - b), np.nan)
         if crop_roi is not None:
@@ -283,7 +283,7 @@ class PeemDriftStackSteps:
             a = np.where(_mask(a.shape, crop_roi), a, np.nan)
         ds = products.map_dataset(
             "pld", a, extra={"mean_lh": res["mean_lh"], "mean_lv": res["mean_lv"]},
-            attrs={"formula": "(LH-LV)/(LH+LV)", "n_lh": int(lh.shape[0]), "n_lv": int(lv.shape[0]),
+            attrs={"formula": dichroism.XLD_FORMULA, "n_lh": int(lh.shape[0]), "n_lv": int(lv.shape[0]),
                    "registered": bool(register), "source_node": node,
                    **(_drift_attrs(a.shape, reg_roi, res["lh_shifts"], res["lv_shifts"]) if register else {})},
             um_per_px=self._um_per_px(name), long_name="PEEM linear dichroism asymmetry",
@@ -321,7 +321,7 @@ class PeemDriftStackSteps:
         common = {"e_a": float(e_a), "e_b": float(e_b), "half_width": float(half_width),
                   "registered": bool(register), "source_node": node}
         for kind, arr, extra, formula in (
-            ("pld", res["pld_a"], {"pld_b": res["pld_b"]}, "(LH-LV)/(LH+LV) at E_A (pld_b at E_B)"),
+            ("pld", res["pld_a"], {"pld_b": res["pld_b"]}, f"{dichroism.XLD_FORMULA} at E_A (pld_b at E_B)"),
             ("pmld", res["pmld"], {}, "[pld(E_A) - pld(E_B)]/2"),
             ("pmnld", res["pmnld"], {}, "[pld(E_A) + pld(E_B)]/2"),
         ):

@@ -2,10 +2,13 @@
 
 Output kinds (written to ``/analysis/<kind>`` by :mod:`products`):
 
-pcd    circular dichroism asymmetry  A_c = s * (I_CP - I_CM) / (I_CP + I_CM)
-       UE49 Igor default is (neg - pos)/(neg + pos), i.e. s = -1
-       (``convention="ue49"``); ``"cp_minus_cm"`` gives s = +1.
-pld    linear dichroism asymmetry    A_l(E) = (I_LH - I_LV) / (I_LH + I_LV)
+Universal signs (every beamline): XMCD = (CL - CR)/(CL + CR), XLD = (LV - LH)/(LV + LH).
+CL is the internal "CP" channel: BNL CL, UE49 pos and ALS EPU +0.9 all load as CP.
+
+pcd    circular dichroism asymmetry  A_c = s * (I_CP - I_CM) / (I_CP + I_CM), s = +1
+       (``convention="cp_minus_cm"``, universal). ``"ue49"`` / ``"cm_minus_cp"`` (s = -1)
+       reproduce the UE49 Igor sign (neg - pos)/(neg + pos) for comparisons.
+pld    linear dichroism asymmetry    A_l(E) = (I_LV - I_LH) / (I_LV + I_LH)
 pmld   magnetic linear dichroism, the part of A_l that reverses between the
        two L2 multiplet peaks E_A, E_B:  [A_l(E_A) - A_l(E_B)] / 2
 pmnld  non-magnetic (natural / crystal-field) linear dichroism, the part
@@ -27,6 +30,9 @@ import numpy as np
 from tensorspec.core.peem import registration
 
 CONVENTIONS = {"ue49": -1.0, "cm_minus_cp": -1.0, "cp_minus_cm": 1.0}
+UNIVERSAL_CONVENTION = "cp_minus_cm"
+XMCD_FORMULA = "(CL-CR)/(CL+CR)"
+XLD_FORMULA = "(LV-LH)/(LV+LH)"
 
 # Opposite helicities / polarizations show reversed magnetic contrast, so plain
 # cross-correlation between them can lock onto the anti-correlated domain
@@ -54,6 +60,11 @@ def asymmetry(a: np.ndarray, b: np.ndarray, min_sum: float = 0.0,
         out = (a - b) / s
     out[~np.isfinite(out) | (s <= min_sum)] = np.nan
     return out
+
+
+def xld_asymmetry(lh: np.ndarray, lv: np.ndarray, min_sum: float = 0.0) -> np.ndarray:
+    """Universal XLD sign: (LV - LH)/(LV + LH)."""
+    return asymmetry(lv, lh, min_sum=min_sum)
 
 
 def _central_box(shape: tuple[int, ...]) -> tuple[int, int, int, int]:
@@ -168,11 +179,11 @@ def pld_map(
     box: tuple[int, int, int, int] | None = None,
     min_sum: float = 0.0,
 ) -> dict:
-    """Linear dichroism asymmetry (LH - LV)/(LH + LV) at one energy."""
+    """Linear dichroism asymmetry (LV - LH)/(LV + LH) at one energy (universal XLD sign)."""
     j = joint_means(i_lh, i_lv, register, box)
     lh, lv = j["mean_a"], j["mean_b"]
     n_lh = 1 if np.ndim(i_lh) == 2 else len(i_lh)
-    return {"map": asymmetry(lh, lv, min_sum=min_sum), "mean_lh": lh, "mean_lv": lv,
+    return {"map": xld_asymmetry(lh, lv, min_sum=min_sum), "mean_lh": lh, "mean_lv": lv,
             "polarization_shift": j["refine_shift"],
             "lh_shifts": j["frame_shifts"][:n_lh], "lv_shifts": j["frame_shifts"][n_lh:]}
 
@@ -223,8 +234,8 @@ def pmld_pmnld_maps(
             dy, dx = registration.estimate_shift(ref, img, box=box, filt=CROSS_POL_FILTER)
             shifts[key] = (dy, dx)
             imgs[key] = registration.apply_shift(img, dy, dx)
-    ld_a = asymmetry(imgs[("LH", "A")], imgs[("LV", "A")])
-    ld_b = asymmetry(imgs[("LH", "B")], imgs[("LV", "B")])
+    ld_a = xld_asymmetry(imgs[("LH", "A")], imgs[("LV", "A")])
+    ld_b = xld_asymmetry(imgs[("LH", "B")], imgs[("LV", "B")])
     return {
         "pld_a": ld_a,
         "pld_b": ld_b,

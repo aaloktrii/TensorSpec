@@ -266,9 +266,6 @@ class LoadSection:
         self.drift_ref.setRange(0, max(0, res["shape"][0] - 1))
         pc = ", ".join(f"{(res.get('pol_source') or {}).get(k, k)} {v}" for k, v in res["pol_counts"].items())
         self.load_status.setText(f"Loaded '{res['name']}': {res['shape'][0]} frames ({pc}).")
-        conv = res.get("default_convention")  # the beamline's own sign (UE49 CM-CP; BNL CL-CR; ALS +0.9 - -0.9)
-        if conv and self.conv_combo.findData(conv) >= 0:
-            self.conv_combo.setCurrentIndex(self.conv_combo.findData(conv))
         if res.get("energy_range") and self.e_a.value() == 0:
             lo, hi = res["energy_range"]
             self.e_a.setValue(lo)

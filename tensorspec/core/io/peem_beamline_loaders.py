@@ -23,9 +23,9 @@ Beamline-specific corrections run only where they exist: TPX3 cross / dead pixel
 flat field for UE49, I0 for UE49 (on by default) and ALS (off by default; used only
 when it passes ``p3b_loaders.i0_reliable``). UView files carry no I0.
 
-``metadata["default_convention"]`` is the pcd sign each beamline's own pipeline uses
-(UE49: (CM-CP)/(CM+CP); BNL: (CL-CR)/(CL+CR); ALS: (I+0.9 - I-0.9)/sum), so maps
-stay comparable with earlier results.
+``metadata["default_convention"]`` is the universal pcd sign for every beamline,
+(CL-CR)/(CL+CR) = (CP-CM)/(CP+CM) (BNL CL, UE49 pos and ALS +0.9 are CP); XLD is
+(LV-LH)/(LV+LH) (core/peem/dichroism).
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ from tensorspec.core.data_models import TensorData
 from tensorspec.core.io import p3b_loaders, ue49_loaders, uview_loaders
 
 FORMATS = ("ue49", "uview", "p3b")
-DEFAULT_CONVENTION = {"ue49": "ue49", "uview": "cp_minus_cm", "p3b": "cp_minus_cm"}
+DEFAULT_CONVENTION = {"ue49": "cp_minus_cm", "uview": "cp_minus_cm", "p3b": "cp_minus_cm"}  # universal
 
 
 def detect_format(path: str | Path) -> tuple[str, Path]:
