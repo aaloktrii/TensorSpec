@@ -38,7 +38,23 @@ import re
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+#: Shipped default reference (read-only, part of the package).
 DEFAULT_REF = os.path.join(HERE, "data", "graphene_reference.json")
+#: Where references built by the user go, under the TensorSpec workspace folder
+#: (core/workspace.py project_dir, git-ignored user data), with their per-dataset fit outputs.
+USER_REF_SUBDIR = os.path.join("raman", "reference")
+REF_NAME = "graphene_reference.json"
+
+
+def user_reference_path(project_dir):
+    """JSON path of a user-built reference inside ``project_dir`` (the workspace folder)."""
+    return os.path.join(str(project_dir), USER_REF_SUBDIR, REF_NAME)
+
+
+def preferred_reference(project_dir):
+    """The user-built reference if one exists, otherwise the shipped default."""
+    p = user_reference_path(project_dir)
+    return p if os.path.exists(p) else DEFAULT_REF
 
 MATCH = {"1L": (0.0, 35.0), "2L": (42.0, 65.0)}       # fitted 2D FWHM, cm-1
 FEATURES = ["G_pos", "G_fwhm", "G_height", "2D_pos", "2D_fwhm", "2D_height",

@@ -97,3 +97,17 @@ def test_real_map_folder():
     eng = RamanEngineRouter()
     row, _, _ = eng.fit_band("g_2d", mf.axis, mf.data[0].astype(float))
     assert "2D_fwhm" in row
+
+
+def test_reference_build_goes_to_workspace(tmp_path):
+    from tensorspec.core.raman import reference
+    project = tmp_path / "TensorSpec_Workspace"
+    assert reference.preferred_reference(project) == reference.DEFAULT_REF
+    shipped = open(reference.DEFAULT_REF, "rb").read()
+    one = write_spot_folder(tmp_path / "one")
+    two = write_spot_folder(tmp_path / "two")
+    out = reference.user_reference_path(project)
+    data = RamanEngineRouter().build_reference([("1L", str(one)), ("2L", str(two))], out)
+    assert os.path.exists(out) and len(data["datasets"]) == 2
+    assert reference.preferred_reference(project) == out
+    assert open(reference.DEFAULT_REF, "rb").read() == shipped       # shipped default untouched

@@ -23,7 +23,7 @@ import numpy as np
 from tensorspec.core.io.raman_loaders import SPECTRUM_EXT, MapFile, read_spectrum
 from tensorspec.core.raman.classification import g_band_cfg
 from tensorspec.core.raman.peak_fit import QUANTS, analyse_spectrum
-from tensorspec.core.raman.reference import (DEFAULT_REF, MATCH, _with_log, _xy_from_name,
+from tensorspec.core.raman.reference import (MATCH, _with_log, _xy_from_name,
                                              predict_row, stats)
 from tensorspec.core.raman.voigt_2d import _fit_chunk, band_mask, fit_band
 
@@ -83,9 +83,11 @@ def fit_folder(folder, a, figures=None):
     return rows, out, summ, curves
 
 
-def build_reference(refs, out_json=DEFAULT_REF, figures=None):
+def build_reference(refs, out_json, figures=None):
     """refs: list of (label, folder). Fits each folder into
-    <reference dir>/<folder name>/ and writes the JSON reference."""
+    <reference dir>/<folder name>/ and writes the JSON reference to ``out_json``
+    (callers use reference.user_reference_path(workspace folder); the shipped
+    reference.DEFAULT_REF is read-only)."""
     root = os.path.dirname(out_json)
     os.makedirs(root, exist_ok=True)
     args = SimpleNamespace(ng="auto", n2d=1, g_range=(1500, 1680),

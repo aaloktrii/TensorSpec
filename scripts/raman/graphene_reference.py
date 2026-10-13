@@ -6,7 +6,9 @@ Build the reference (fits every spectrum, stores the statistics and plots):
 Predict a new dataset (folder of spectra; writes <folder>/output/predictions.csv and prediction.pdf):
     python scripts/raman/graphene_reference.py predict ~/Downloads/new_dataset
 
-The default reference is tensorspec/core/raman/data/graphene_reference.json.
+'build' writes to TensorSpec_Workspace/raman/reference/ (the workspace folder of the current
+directory, git-ignored user data). 'predict' uses that reference when it exists, otherwise the
+shipped read-only default tensorspec/core/raman/data/graphene_reference.json.
 CLI of Raman_Classifier ``graphene_reference.py``; the method is described in core/raman/reference.py.
 """
 from __future__ import annotations
@@ -19,9 +21,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from tensorspec.core.io.raman_loaders import SPECTRUM_EXT  # noqa: E402
-from tensorspec.core.raman.reference import DEFAULT_REF  # noqa: E402
+from tensorspec.core.raman.reference import preferred_reference, user_reference_path  # noqa: E402
 from tensorspec.core.raman_engine import RamanEngineRouter  # noqa: E402
 from tensorspec.plotting.backends import raman_matplotlib_engine  # noqa: E402
+
+#: same folder as core/workspace.py's project_dir, without starting the workspace manager
+WORKSPACE = Path.cwd() / "TensorSpec_Workspace"
 
 
 def main():
@@ -30,10 +35,10 @@ def main():
     b = sub.add_parser("build")
     b.add_argument("--ref", nargs=2, action="append", metavar=("LABEL", "FOLDER"),
                    required=True, help="LABEL is 1L or 2L")
-    b.add_argument("--json", default=DEFAULT_REF)
+    b.add_argument("--json", default=user_reference_path(WORKSPACE))
     p = sub.add_parser("predict")
     p.add_argument("folders", nargs="+")
-    p.add_argument("--json", default=DEFAULT_REF)
+    p.add_argument("--json", default=preferred_reference(WORKSPACE))
     a = ap.parse_args()
     engine = RamanEngineRouter()
     if a.cmd == "build":

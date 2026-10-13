@@ -15,7 +15,6 @@ from PySide6 import QtCore, QtWidgets
 
 from tensorspec.core.io.raman_loaders import short_label
 from tensorspec.core.raman.constants import APP_NAME
-from tensorspec.core.raman.reference import DEFAULT_REF
 from tensorspec.plotting.backends import raman_matplotlib_engine
 from tensorspec.plotting.backends.raman_matplotlib_engine import REF_COLORS, draw_reference, orient_axes
 from tensorspec.plotting.viewers.raman_canvas import Canvas
@@ -46,8 +45,9 @@ class PredictTab(QtWidgets.QWidget):
         self.preds: Optional[List[dict]] = None
         self.pred_title = ""
         self._build()
-        if HAVE_GREF and os.path.exists(DEFAULT_REF):
-            self._set_ref(self.main.engine.load_reference(DEFAULT_REF), DEFAULT_REF)
+        ref_path = self.main.service.preferred_reference()
+        if HAVE_GREF and os.path.exists(ref_path):
+            self._set_ref(self.main.engine.load_reference(ref_path), ref_path)
 
     def _build(self):
         root = QtWidgets.QHBoxLayout(self)
@@ -136,19 +136,21 @@ class PredictTab(QtWidgets.QWidget):
             return
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
         try:
-            ref = self.main.engine.build_reference([("1L", f1), ("2L", f2)], DEFAULT_REF,
+            out_json = self.main.service.user_reference_path()
+            ref = self.main.engine.build_reference([("1L", f1), ("2L", f2)], out_json,
                                                  figures=raman_matplotlib_engine)
         except Exception as exc:
             QtWidgets.QApplication.restoreOverrideCursor()
             QtWidgets.QMessageBox.critical(self, APP_NAME, "Could not build:\n\n%s" % exc)
             return
         QtWidgets.QApplication.restoreOverrideCursor()
-        self._set_ref(ref, DEFAULT_REF)
-        self.main.status("Reference saved to %s" % os.path.dirname(DEFAULT_REF))
+        self._set_ref(ref, out_json)
+        self.main.status("Reference saved to %s" % os.path.dirname(out_json))
 
     def load_ref(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load reference", os.path.dirname(DEFAULT_REF), "JSON (*.json)")
+            self, "Load reference", os.path.dirname(self.main.service.preferred_reference()),
+            "JSON (*.json)")
         if path:
             self._set_ref(self.main.engine.load_reference(path), path)
 

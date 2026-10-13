@@ -17,7 +17,7 @@ import numpy as np
 
 from tensorspec.core.io import raman_loaders
 from tensorspec.core.io.raman_loaders import MapFile
-from tensorspec.core.raman import products
+from tensorspec.core.raman import products, reference
 from tensorspec.core.raman.classification import pixel_ratio, ratio_applicable
 from tensorspec.core.raman.constants import default_config
 from tensorspec.core.raman.map_geometry import apply_map_transform, default_transform
@@ -62,6 +62,17 @@ class RamanService:
             return "map" + suffix
         base = os.path.splitext(self.mapfile.path)[0]
         return base + suffix
+
+    # -- 1L / 2L reference files --------------------------------------------------------------
+    @staticmethod
+    def user_reference_path() -> str:
+        """Where 'Build reference' writes: <workspace folder>/raman/reference/graphene_reference.json."""
+        return reference.user_reference_path(global_workspace.project_dir)
+
+    @staticmethod
+    def preferred_reference() -> str:
+        """The user-built reference if there is one, otherwise the shipped default."""
+        return reference.preferred_reference(global_workspace.project_dir)
 
     # -- loading -------------------------------------------------------------------------------
     def set_map(self, mf: MapFile) -> Optional[float]:
