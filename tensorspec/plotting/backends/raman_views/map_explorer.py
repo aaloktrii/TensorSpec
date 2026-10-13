@@ -140,17 +140,46 @@ def draw_area(ax, rect):
                                     edgecolor="#ff1744", lw=1.6, ls="--", zorder=5))
 
 
-def make_area_selector(ax, on_select):
-    """Drag-a-rectangle selector on a map axes; on_select(x0, x1, y0, y1) in data units.
-    Keep the returned object referenced, or it stops responding."""
+def make_area_selector(ax, on_select, rect=None, min_span=0.0):
+    """Interactive rectangle on a map axes: drag to draw one, drag inside it to move it, drag its
+    corner / edge handles to resize it. on_select(x0, x1, y0, y1) (data units) after each change.
+    ``rect`` shows an existing area; a plain click (smaller than ``min_span``) leaves it as it was.
+    Keep the returned object referenced, or it stops responding; remove it with
+    remove_area_selector()."""
     from matplotlib.widgets import RectangleSelector
+    state = {"rect": tuple(rect) if rect is not None else None}
 
     def done(press, release):
-        if None in (press.xdata, press.ydata, release.xdata, release.ydata):
-            return
-        on_select(press.xdata, release.xdata, press.ydata, release.ydata)
-    return RectangleSelector(ax, done, useblit=False, button=[1], interactive=False,
-                             props=dict(edgecolor="#ff1744", fill=False, ls="--", lw=1.4))
+        x0, x1, y0, y1 = (float(v) for v in sel.extents)
+        state["rect"] = (x0, x1, y0, y1)
+        on_select(x0, x1, y0, y1)
+
+    sel = RectangleSelector(ax, done, useblit=False, button=[1], interactive=True,
+                            drag_from_anywhere=True, minspanx=min_span, minspany=min_span,
+                            spancoords="data",
+                            props=dict(edgecolor="#ff1744", fill=False, ls="--", lw=1.4),
+                            handle_props=dict(markersize=6, markeredgecolor="#ff1744",
+                                              markerfacecolor="white"))
+    if rect is not None:
+        sel.extents = tuple(rect)
+        sel.set_visible(True)
+
+    def restore(event):
+        # a click too small to be a rectangle hides the selector; show the current area again
+        if state["rect"] is not None and not sel._selection_artist.get_visible():
+            sel.extents = state["rect"]
+            sel.set_visible(True)
+            ax.figure.canvas.draw_idle()
+    sel._restore_cid = ax.figure.canvas.mpl_connect("button_release_event", restore)
+    return sel
+
+
+def remove_area_selector(sel):
+    """Disconnect a selector made by make_area_selector."""
+    if sel is None:
+        return
+    sel.disconnect_events()
+    sel.canvas.mpl_disconnect(sel._restore_cid)
 
 
 def draw_area_spectrum(ax, wn, spec, n_pixels: int, band, mode: str = "sum"):

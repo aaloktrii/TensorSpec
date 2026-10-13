@@ -49,8 +49,9 @@ class MapExplorerTab(QtWidgets.QWidget):
         self.chk_optical = QtWidgets.QCheckBox("Overlay optical")
         self.chk_optical.toggled.connect(self.refresh_map)
         self.chk_area = QtWidgets.QCheckBox("Select area")
-        self.chk_area.setToolTip("Drag a rectangle on the map: the spectra inside are summed and "
-                                 "fitted with the 1 · Spectra model (2 · Map ▸ Area spectrum).")
+        self.chk_area.setToolTip("Drag a rectangle on the map: the spectra of the pixels inside are "
+                                 "summed (2 · Map ▸ Area spectrum). Drag inside it to move it, drag "
+                                 "its corners or edges to resize it.")
         self.chk_area.toggled.connect(self.refresh_map)
         self._area_selector = None
         self.sld_alpha = QtWidgets.QSlider(QtCore.Qt.Horizontal)
@@ -539,13 +540,22 @@ class MapExplorerTab(QtWidgets.QWidget):
             title = "%s integral, %g–%g cm$^{-1}$ (raw counts)" % (name, lo, hi)
         else:
             data = self.main.fwhm_map if fwhm else self.height_grid(quantity)
+        area_mode = self.chk_area.isChecked()
+        area = self.main.service.area_rect
         views.draw_quantity_map(cv.figure, cv.ax, mf, data, quantity, self.main.fit_tally,
                                 self.main.cfg, self.main.optical, self.main.optical_image,
                                 self.chk_optical.isChecked(), self.chk_grid.isChecked(),
-                                self.sel, self.main.service.area_rect, cbar_label, title)
-        # the selector belongs to the axes just drawn; a new one after every redraw
-        self._area_selector = (views.make_area_selector(cv.ax, self._area_selected)
-                               if self.chk_area.isChecked() else None)
+                                self.sel, None if area_mode else area, cbar_label, title)
+        # the selector belongs to the axes just drawn; a new one after every redraw. In area
+        # mode it shows the current area itself (with handles to move / resize it).
+        views.remove_area_selector(self._area_selector)
+        self._area_selector = None
+        if area_mode:
+            ny, nx = mf.shape
+            l, r, b, t = mf.extent
+            step = min((r - l) / nx, (t - b) / ny)
+            self._area_selector = views.make_area_selector(cv.ax, self._area_selected, area,
+                                                           min_span=0.3 * step)
         cv.draw()
 
     def _area_selected(self, x0, x1, y0, y1):
