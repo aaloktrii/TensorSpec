@@ -78,6 +78,16 @@ Grand App
 	- [x] background subtraction (shared BG core) applied across stack / channels
 	- [x] XMCD sum-rule analysis for CP/CM (and related pairs)
 	- [x] Layout: left forms-only; right tabs Frame | BG | Sum Rule (previews no longer crowd left scroll)
+- [ ] PEEM Suite, XPEEM map tab (added next to the PEEM tab; `gui/components/peem_xmcd_panel.py` + `peem_tabs/`, steps = mixins of `PeemService` in `gui/services/peem_steps/`, `core/peem/` (drift, registration, igor_drift, stack_edits, dichroism, image_analysis, ...), `core/peem/ue49/`, `core/peem/esm/`); viewer = `data_viewer_panel.py`
+	- [x] One beamline loader `core/io/peem_beamline_loaders.py` (`load_beamline`): UE49 scan tables / UView `.dat` / ALS `.P3B`, format from the file contents; polarization from the data or set per item (UView files do not record it)
+	- [x] UE49 TPX3 512→514 cross correction, dead pixel, flat field, I0, bad-frame flags (ports of `speem_eval_20230427_TPX3.ipf`)
+	- [x] Stack clean-up (exclude / include / normalize / subtract frames), drift (one entry `core/peem/drift.py` over sub-pixel, ROI tracking, NCC ROI and SPEEM Igor methods; warnings when a run did not track the sample)
+	- [x] Stack + asymmetry: `/analysis/stack`, `/analysis/pcd`, `/analysis/pld`, `/analysis/pmld`, `/analysis/pmnld`; one sign for all beamlines: XMCD (CM−CP)/(CM+CP) (UE49 convention), XLD (LV−LH)/(LV+LH)
+	- [x] Image analysis (profiles + fits, histogram, FFT, flatten, background), ROI statistics, `/analysis/domain_map` (SDA three-state)
+	- [x] Export: float TIFF + colour PNG; options (region, size px / dpi, PNG / PDF / SVG, colour range, colour bar, scale bar)
+	- [x] Send stacked images or drift-corrected frames to the PEEM tab (new dataset, paired + separated) for BG / sum rule
+	- [x] Beamtime batch scripts: `scripts/ue49/`, `scripts/esm/`, `scripts/als/`
+	- [ ] Vector map with 4-point skew correction (`CalcSkew`), SECO fit, MergeScans, hysteresis series
 - [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/Raman/DFT/ARPES/Transport/ML (prevent drag-to-zero)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)

@@ -37,6 +37,13 @@ from tensorspec.core.peem.sumrule import (
     pick_source_kind,
 )
 from tensorspec.core.workspace import global_workspace
+# XPEEM map tab (added): its steps are mixins; the stack / BG / sum-rule methods below are unchanged
+from tensorspec.gui.services.peem_steps.annotations import PeemAnnotationSteps
+from tensorspec.gui.services.peem_steps.cleanup import PeemCleanupSteps
+from tensorspec.gui.services.peem_steps.drift_stack import PeemDriftStackSteps
+from tensorspec.gui.services.peem_steps.image_analysis import PeemImageAnalysisSteps
+from tensorspec.gui.services.peem_steps.load import PeemLoadSteps
+from tensorspec.gui.services.peem_steps.maps_domains import PeemMapsDomainsSteps
 
 MAX_PEEM_BYTES = 512 * 1024 * 1024
 MAX_PEEM_FRAMES = 10_000
@@ -744,8 +751,12 @@ def _load_summary(
     }
 
 
-class PeemService:
-    """Qt-facing PEEM operations via global_workspace."""
+class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImageAnalysisSteps,
+                  PeemMapsDomainsSteps, PeemAnnotationSteps):
+    """Qt-facing PEEM operations via global_workspace.
+
+    The XPEEM map tab's steps (load_beamline, drift_correct, stack, asymmetry, maps, ROIs ...) come
+    from the mixins in gui/services/peem_steps/ (contract: peem_steps/__init__.py)."""
 
     def load_path(
         self,

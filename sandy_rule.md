@@ -28,6 +28,10 @@ tensorspec/
 │   ├── io/                   # Dedicated file loaders
 │   │   ├── __init__.py
 │   │   ├── peem_loaders.py   # TIF / ZIP / folder PEEM stacks
+│   │   ├── peem_beamline_loaders.py  # XPEEM map: load_beamline() detects UE49 / UView / P3B -> PEEM TensorData
+│   │   ├── ue49_loaders.py   # BESSY II UE49: scan .txt + TIFF folder + PolTable (TPX3/dead/flat/I0 via peem/ue49)
+│   │   ├── uview_loaders.py  # Elmitec UView .dat (BNL ESM): reader + CL/CR/LH/LV acquisition folders
+│   │   ├── p3b_loaders.py    # ALS 11.0.1 PEEM-3 .P3B frames + .dat logs; EPU ±0.9 -> CP/CM
 │   │   ├── xas_loaders.py    # 1D XAS/XMCD CSV/TXT (single or paired channels)
 │   │   ├── raman_loaders.py  # LabRAM/LabSpec maps, single spectra, .h5, spot folders
 │   │   └── loaders/
@@ -50,7 +54,15 @@ tensorspec/
 │   │   ├── engine.py         # Pairing, drift, channel separation orchestration helpers
 │   │   ├── bg.py             # Background models (also used by XAS 1D)
 │   │   ├── roi.py            # ROI helpers for drift / NCC
-│   │   └── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
+│   │   ├── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
+│   │   ├── drift.py          # XPEEM map: align_stack() routes to every drift method (one entry point)
+│   │   ├── registration.py / igor_drift.py  # sub-pixel + ROI-tracking drift; SPEEM Igor drift ports
+│   │   ├── stack_edits.py    # non-destructive stack clean-up before drift
+│   │   ├── dichroism.py      # pcd / pld / pmld / pmnld maps
+│   │   ├── image_analysis.py # profiles + fits, histogram, FFT, flatten, background (Igor ports)
+│   │   ├── roi_stats.py / domains.py / products.py / synthetic.py  # ROI stats, SDA domains, /analysis
+│   │   ├── ue49/             # BESSY II UE49 specifics: detector.py (TPX3, dead pixel, flat, I0), batch.py
+│   │   └── esm/              # NSLS-II ESM (BNL): batch.py (beamtime processing; readers in core/io/)
 │   ├── raman_engine.py       # MAIN ROUTER: voigt / lorentz_n / lorentz_auto / g_2d → core/raman/*
 │   ├── raman/                # Raman science (no Qt, no plotting)
 │   │   ├── tools.py          # Si calibration, backgrounds, peak fits + auto count, shapes
@@ -68,13 +80,18 @@ tensorspec/
 │   │   ├── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
 │   │   ├── raman_matplotlib_engine.py  # Raman figure style + shared map helpers
 │   │   └── raman_views/         # One renderer module per Raman tab
-│   └── viewers/               # Reusable Qt widgets for suites to embed (where present)
+│   ├── viewers/               # Reusable Qt widgets for suites to embed (where present)
+│   ├── peem_plots.py          # XPEEM-map plots (profiles, fits, histogram, FFT, drift), map pictures, PDF export
+│   └── ue49_preview.py        # Matplotlib preview figures for the PEEM beamtime batch scripts
 │       └── raman_canvas.py      # Canvas, compact toolbar, vector export
 └── gui/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon
     ├── services/             # Non-HTTP service layer between panels and core
-    │   ├── peem_service.py
+    │   ├── peem_service.py   # PEEM service: stack / pair / drift / BG / sum rule + the XPEEM-map steps below
+    │   ├── peem_steps/       # XPEEM-map steps, mixins of PeemService: load, cleanup, drift_stack,
+    │   │                     #   image_analysis, maps_domains, annotations (ROIs, profiles), common
+    │   │                     #   Back-end contract (every call, no Qt): peem_steps/__init__.py
     │   ├── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     │   └── raman_service.py  # Qt-free Raman back-end API (all state; one method per action)
     ├── components/           # Reusable, isolated UI panels
@@ -84,14 +101,20 @@ tensorspec/
     │   ├── arpes_panel.py
     │   ├── peem_panel.py / xas_panel.py  # PEEM: left forms; right Frame|BG|Sum Rule tabs
     │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)
-    │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows
+    │   ├── peem_xmcd_panel.py     # PEEM suite, XPEEM map tab: assembly + embedded data_viewer_panel
+    │   ├── peem_tabs/             # XPEEM-map sections (mixins): load, cleanup, drift, stack_asym, analysis,
+    │   │                          #   roi_domain, export_dialog
+    │   ├── stack_player.py        # Play / pause a frame slider (used by data_viewer_panel)
+    │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows (embedding features used by
+    │   │                          #   the XPEEM map, off by default: compact, 2-D layers, tools, overlays, Play,
+    │   │                          #   fixed colour range)
     │   └── ml_tabs/               # Extracted ML suite tabs
     ├── ml/                   # MaestroAI workers, warehouse, session helpers
     └── suites/               # Independent roadmap suites + ML
         ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
         ├── dft_suite.py          # Tabs: Structure | DFT/Wannier | Tight Binding (+ band canvas)
         ├── arpes_suite.py
-        ├── peem_suite.py
+        ├── peem_suite.py         # Tabs: PEEM (peem_panel, unchanged) · XPEEM map (peem_xmcd_panel)
         ├── xas_suite.py
         ├── raman_suite.py        # Tabs: 1 · Spectra | 2 · Map | 3 · Analysis
         ├── transport_suite.py    # Shell until transport_engine ships
