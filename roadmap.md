@@ -72,14 +72,17 @@ Grand App
 - [x] PEEM Suite (`core/peem/`, `gui/services/peem_service.py`, `gui/components/peem_panel.py`, `gui/suites/peem_suite.py`)
 	- [x] loader of tif file stacks (`core/io/peem_loaders.py`, needs `tifffile`)
 	- [x] loader of sequences / ZIP / folder stacks
-	- [x] Beamline loaders (from Aalok #6 slice): `peem_beamline_loaders.load_beamline` + `ue49` / `uview` / `p3b` (core only; GUI still TIF/folder)
+	- [x] Beamline loaders: `peem_beamline_loaders.load_beamline` + `ue49` / `uview` / `p3b`; PEEM panel **Load beamline…** (Pair/Drift/BG/Sum Rule unchanged)
 	- [x] stack / pair CP+CM or LH+LV
 	- [x] drift correction
 	- [x] separate CP/CM or LH/LV into processed children
 	- [x] background subtraction (shared BG core) applied across stack / channels
 	- [x] XMCD sum-rule analysis for CP/CM (and related pairs)
 	- [x] Layout: left forms-only; right tabs Frame | BG | Sum Rule (previews no longer crowd left scroll)
-	- [ ] Optional later from #6: XPEEM map tab (imaging), DataViewer extras, batch scripts, `np.trapz` NumPy≥2.4 fix
+	- [x] `np.trapz` → NumPy≥2.4-safe in `sumrule.py`
+	- [x] DataViewer extras (off by default): cmap / symmetric limits / draw tools / Play (`stack_player`)
+	- [x] Beamtime batch scripts + library: `scripts/{ue49,esm,als}/…`, `core/peem/{dichroism,registration,domains,ue49/batch,esm/batch}`, `plotting/ue49_preview.py`
+	- [ ] Optional later from #6: **XPEEM map tab** (interactive imaging GUI: clean → drift → stack → asymmetry → ROI/domains)
 - [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/Raman/DFT/ARPES/Transport/ML (prevent drag-to-zero)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)

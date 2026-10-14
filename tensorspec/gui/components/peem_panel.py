@@ -33,16 +33,30 @@ from tensorspec.gui.services.peem_service import PeemService
 class PeemLoadThread(QThread):
     finished_signal = Signal(bool, object, str)
 
-    def __init__(self, service: PeemService, path, name=None, csv_path=None):
+    def __init__(
+        self,
+        service: PeemService,
+        path=None,
+        name=None,
+        csv_path=None,
+        *,
+        beamline_paths=None,
+    ):
         super().__init__()
         self.service = service
         self.path = path
         self.name = name
         self.csv_path = csv_path
+        self.beamline_paths = beamline_paths
 
     def run(self):
         try:
-            summary = self.service.load_path(self.path, name=self.name, csv_path=self.csv_path)
+            if self.beamline_paths is not None:
+                summary = self.service.load_beamline(self.beamline_paths, name=self.name)
+            else:
+                summary = self.service.load_path(
+                    self.path, name=self.name, csv_path=self.csv_path
+                )
             self.finished_signal.emit(True, summary, "Loaded")
         except Exception as exc:
             self.finished_signal.emit(False, None, str(exc))
@@ -80,6 +94,14 @@ class PeemPanel(QWidget):
         btn_row.addWidget(self.btn_load_stack)
         btn_row.addWidget(self.btn_load_folder)
         load_form.addRow(btn_row)
+        self.btn_load_beamline = QPushButton("Load beamline…")
+        self.btn_load_beamline.setToolTip(
+            "UE49 scan .txt, UView .dat, or ALS .P3B (files or folders).\n"
+            "UView CP/CM: pick CL folder, say Yes to add CR (or LH/LV).\n"
+            "Then use Pair / Separate → Drift → BG → Sum Rule as usual."
+        )
+        self.btn_load_beamline.clicked.connect(self._load_beamline)
+        load_form.addRow(self.btn_load_beamline)
         self.btn_attach_csv = QPushButton("Attach CSV")
         self.btn_attach_csv.clicked.connect(self._attach_csv)
         load_form.addRow(self.btn_attach_csv)
@@ -313,6 +335,37 @@ class PeemPanel(QWidget):
         if path:
             self._start_load(path)
 
+    def _load_beamline(self):
+        """Pick UE49/UView/P3B files, or one+ acquisition folders (CL then CR, etc.)."""
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Beamline files (Cancel → pick folders)",
+            "",
+            "Beamline (*.txt *.dat *.P3B *.p3b);;All (*)",
+        )
+        if not paths:
+            paths = []
+            while True:
+                folder = QFileDialog.getExistingDirectory(
+                    self, f"Beamline folder {len(paths) + 1} (Cancel when done)"
+                )
+                if not folder:
+                    break
+                paths.append(folder)
+                more = QMessageBox.question(
+                    self,
+                    "Add another folder?",
+                    "Add another acquisition folder?\n"
+                    "(e.g. CR with CL, or LV with LH)",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes if len(paths) == 1 else QMessageBox.No,
+                )
+                if more != QMessageBox.Yes:
+                    break
+        if not paths:
+            return
+        self._start_beamline_load(paths)
+
     def _start_load(self, path: str):
         name = self.name_edit.text().strip() or None
         if name is None:
@@ -323,15 +376,37 @@ class PeemPanel(QWidget):
             name = self.name_edit.text().strip() or None
 
         self.status_label.setText(f"Loading {path}…")
-        self.btn_load_stack.setEnabled(False)
-        self.btn_load_folder.setEnabled(False)
+        self._set_load_buttons_enabled(False)
         self._load_thread = PeemLoadThread(self.service, path, name=name)
         self._load_thread.finished_signal.connect(self._on_load_finished)
         self._load_thread.start()
 
+    def _start_beamline_load(self, paths: list[str]):
+        name = self.name_edit.text().strip() or None
+        if name is None:
+            base = os.path.basename(paths[0].rstrip(os.sep))
+            base = os.path.splitext(base)[0]
+            self.name_edit.setText(base.replace(" ", "_"))
+            name = self.name_edit.text().strip() or None
+
+        shown = ", ".join(os.path.basename(p.rstrip(os.sep)) for p in paths[:3])
+        if len(paths) > 3:
+            shown += f", … (+{len(paths) - 3})"
+        self.status_label.setText(f"Loading beamline ({len(paths)}): {shown}…")
+        self._set_load_buttons_enabled(False)
+        self._load_thread = PeemLoadThread(
+            self.service, name=name, beamline_paths=paths
+        )
+        self._load_thread.finished_signal.connect(self._on_load_finished)
+        self._load_thread.start()
+
+    def _set_load_buttons_enabled(self, enabled: bool):
+        self.btn_load_stack.setEnabled(enabled)
+        self.btn_load_folder.setEnabled(enabled)
+        self.btn_load_beamline.setEnabled(enabled)
+
     def _on_load_finished(self, ok: bool, summary, message: str):
-        self.btn_load_stack.setEnabled(True)
-        self.btn_load_folder.setEnabled(True)
+        self._set_load_buttons_enabled(True)
         if not ok:
             QMessageBox.critical(self, "Load error", message)
             self.status_label.setText(f"Load failed: {message}")
@@ -344,6 +419,8 @@ class PeemPanel(QWidget):
             f"{summary['n_frames']} frames",
             str(summary.get("pol_summary", {})),
         ]
+        if summary.get("format"):
+            parts.append(f"format={summary['format']}")
         if summary.get("csv_prompt"):
             parts.append("Attach CSV if needed.")
         self.status_label.setText(" | ".join(parts))

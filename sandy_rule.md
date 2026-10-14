@@ -56,7 +56,9 @@ tensorspec/
 │   │   ├── roi.py            # ROI helpers for drift / NCC
 │   │   ├── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
 │   │   ├── synthetic.py      # Synthetic stacks for loader / PEEM tests
-│   │   └── ue49/             # UE49 detector maps (TPX3 / dead / flat / I0); batch scripts not wired yet
+│   │   ├── dichroism.py / registration.py / domains.py  # asymmetry + drift math (batch / library)
+│   │   ├── ue49/             # detector.py (TPX3/I0) + batch.py (beamtime scripts)
+│   │   └── esm/              # BNL ESM batch.py (uses uview loaders + ue49.batch helpers)
 │   ├── raman_engine.py       # MAIN ROUTER: voigt / lorentz_n / lorentz_auto / g_2d → core/raman/*
 │   ├── raman/                # Raman science (no Qt, no plotting)
 │   │   ├── tools.py          # Si calibration, backgrounds, peak fits + auto count, shapes
@@ -74,8 +76,9 @@ tensorspec/
 │   │   ├── pyqtgraph_engine.py  # High-speed real-time 2D image rendering (optional)
 │   │   ├── raman_matplotlib_engine.py  # Raman figure style + shared map helpers
 │   │   └── raman_views/         # One renderer module per Raman tab
-│   └── viewers/               # Reusable Qt widgets for suites to embed (where present)
-│       └── raman_canvas.py      # Canvas, compact toolbar, vector export
+│   ├── viewers/               # Reusable Qt widgets for suites to embed (where present)
+│   │   └── raman_canvas.py      # Canvas, compact toolbar, vector export
+│   └── ue49_preview.py        # Matplotlib previews for PEEM beamtime batch scripts
 └── gui/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon
@@ -88,16 +91,18 @@ tensorspec/
     │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
-    │   ├── peem_panel.py / xas_panel.py  # PEEM: left forms; right Frame|BG|Sum Rule tabs
+    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder/beamline + Pair/Drift/BG/Sum Rule
     │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)
     │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows
+    │   │                          #   (+ optional cmap / Sym± / draw tools / compact; off by default)
+    │   ├── stack_player.py        # Play through a stack in DataViewer
     │   └── ml_tabs/               # Extracted ML suite tabs
     ├── ml/                   # MaestroAI workers, warehouse, session helpers
     └── suites/               # Independent roadmap suites + ML
         ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
         ├── dft_suite.py          # Tabs: Structure | DFT/Wannier | Tight Binding (+ band canvas)
         ├── arpes_suite.py
-        ├── peem_suite.py
+        ├── peem_suite.py         # Single PEEM panel (Load beamline… + Pair/Drift/BG/Sum Rule)
         ├── xas_suite.py
         ├── raman_suite.py        # Tabs: 1 · Spectra | 2 · Map | 3 · Analysis
         ├── transport_suite.py    # Shell until transport_engine ships

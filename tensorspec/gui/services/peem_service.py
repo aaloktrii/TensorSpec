@@ -10,6 +10,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from tensorspec.core.data_models import TensorData
+from tensorspec.core.io import peem_beamline_loaders
 from tensorspec.core.io.peem_loaders import (
     find_beamline_csv,
     load_beamline_csv,
@@ -831,6 +832,51 @@ class PeemService:
         if not global_workspace.merge_spectroscopy_raw_attrs(name, attrs):
             raise ValueError(f"PEEM data '{name}' not found.")
         return _load_summary(name, _require_tensor(name))
+
+    def load_beamline(
+        self,
+        paths: list[str | Path],
+        name: str | None = None,
+        *,
+        pol: dict[str, str] | None = None,
+        i0_normalize: bool | None = None,
+        tpx3: bool = True,
+        drop_bad_frames: bool = False,
+        allow_mixed_fov: bool = False,
+    ) -> dict[str, Any]:
+        """UE49 / UView / P3B → workspace via ``peem_beamline_loaders.load_beamline``.
+
+        Returns the same summary shape as ``load_path`` so the PEEM panel load-finished
+        path works unchanged. Pair / drift / BG / sum rule stay manual on your panel.
+        """
+        if not paths:
+            raise ValueError("Select at least one beamline file or folder.")
+        resolved = [Path(p).expanduser().resolve() for p in paths]
+        for p in resolved:
+            if not p.exists():
+                raise ValueError(f"Path not found: {p}")
+            # Size gate for TIF stacks / folders only (.dat / .P3B / .txt skip it).
+            if p.is_dir() or p.suffix.lower() in (".tif", ".tiff"):
+                _enforce_peem_size(p)
+
+        tensor = peem_beamline_loaders.load_beamline(
+            resolved,
+            i0_normalize=i0_normalize,
+            allow_mixed_fov=allow_mixed_fov,
+            tpx3=tpx3,
+            drop_bad_frames=drop_bad_frames,
+            pol=pol,
+        )
+        md = tensor.metadata or {}
+        scans = md.get("scans") or []
+        fallback = "_".join(str(s) for s in scans[:3]) if scans else "beamline"
+        fallback = re.sub(r"[^A-Za-z0-9_.-]+", "_", fallback).strip("_") or "beamline"
+        label = _safe_label(name, fallback) if name else _safe_label(fallback, "beamline")
+        global_workspace.push_spectroscopy_data(label, tensor)
+        summary = _load_summary(label, tensor, csv_prompt=False, csv_candidates=[])
+        summary["format"] = md.get("format")
+        summary["beamline"] = md.get("beamline")
+        return summary
 
     def pair(self, name: str, mode: str) -> dict[str, Any]:
         tensor = _require_tensor(name)
