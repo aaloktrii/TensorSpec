@@ -27,7 +27,11 @@ tensorspec/
 │   ├── kinematics.py         # Angle/energy to momentum space (k_parallel, k_z) conversions & photon momentum
 │   ├── io/                   # Dedicated file loaders
 │   │   ├── __init__.py
-│   │   ├── peem_loaders.py   # TIF / ZIP / folder PEEM stacks
+│   │   ├── peem_loaders.py   # TIF / ZIP / folder PEEM stacks (+ optional beamline pol aliases)
+│   │   ├── peem_beamline_loaders.py  # load_beamline(): detect UE49 / UView / P3B → PEEM TensorData
+│   │   ├── ue49_loaders.py   # BESSY II UE49 scan .txt + TIFF folder (+ TPX3 via peem/ue49/detector)
+│   │   ├── uview_loaders.py  # Elmitec UView .dat (BNL ESM)
+│   │   ├── p3b_loaders.py    # ALS 11.0.1 PEEM-3 .P3B frames
 │   │   ├── xas_loaders.py    # 1D XAS/XMCD CSV/TXT (single or paired channels)
 │   │   ├── raman_loaders.py  # LabRAM/LabSpec maps, single spectra, .h5, spot folders
 │   │   └── loaders/
@@ -50,7 +54,9 @@ tensorspec/
 │   │   ├── engine.py         # Pairing, drift, channel separation orchestration helpers
 │   │   ├── bg.py             # Background models (also used by XAS 1D)
 │   │   ├── roi.py            # ROI helpers for drift / NCC
-│   │   └── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
+│   │   ├── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
+│   │   ├── synthetic.py      # Synthetic stacks for loader / PEEM tests
+│   │   └── ue49/             # UE49 detector maps (TPX3 / dead / flat / I0); batch scripts not wired yet
 │   ├── raman_engine.py       # MAIN ROUTER: voigt / lorentz_n / lorentz_auto / g_2d → core/raman/*
 │   ├── raman/                # Raman science (no Qt, no plotting)
 │   │   ├── tools.py          # Si calibration, backgrounds, peak fits + auto count, shapes
