@@ -37,13 +37,30 @@ class PeemImageAnalysisSteps:
         return peem_plots.display_hint(kind, var, img)
 
     @staticmethod
-    def layer_name(kind: str, var: str = "data") -> str:
-        """Viewer layer name of a map variable: 'pcd', 'pcd · difference', ..."""
-        return kind if var in ("", "data") else f"{kind} · {var}"
+    def layer_name(kind: str, var: str = "data", channels: tuple[str, str] | None = None) -> str:
+        """Viewer layer name of a map variable: 'pcd', 'pcd · difference', ...; the stack's own image
+        (the two stacked images added) is 'stack · cp+cm' (channels from its data)."""
+        if var in ("", "data"):
+            return f"{kind} · {channels[0].lower()}+{channels[1].lower()}" if channels else kind
+        return f"{kind} · {var}"
 
     @staticmethod
     def parse_layer(layer: str) -> tuple[str, str]:
-        return tuple(layer.split(" · ", 1)) if " · " in layer else (layer, "data")
+        if " · " not in layer:
+            return layer, "data"
+        kind, var = layer.split(" · ", 1)
+        return kind, "data" if "+" in var else var  # 'stack · cp+cm' is the stack's data
+
+    def _channels(self, name: str, kind: str) -> tuple[str, str] | None:
+        """(A, B) channel tags a sum map records (the stack), else None."""
+        if kind != "stack":
+            return None
+        at = self.get_product_attrs(name, kind)
+        return (str(at["channel_a"]), str(at["channel_b"])) if "channel_a" in at and "channel_b" in at else None
+
+    def layer_for(self, name: str, kind: str, var: str = "data") -> str:
+        """layer_name of a map of dataset ``name`` (the stack's sum named after its channels)."""
+        return self.layer_name(kind, var, self._channels(name, kind))
 
     def map_layers(self, name: str) -> dict[str, np.ndarray]:
         """Every 2-D map variable of every product, keyed by viewer layer name."""
@@ -53,7 +70,7 @@ class PeemImageAnalysisSteps:
             for var in ds.data_vars:
                 a = np.asarray(ds[var].values)
                 if a.ndim == 2:
-                    out[self.layer_name(kind, var)] = a.astype(float)
+                    out[self.layer_for(name, kind, var)] = a.astype(float)
         return out
 
     def map_variables(self, name: str, kind: str) -> list[str]:

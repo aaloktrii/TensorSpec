@@ -391,7 +391,7 @@ class PeemXmcdPanel(LoadSection, CleanupSection, DriftSection, StackAsymSection,
         if select in self._FRAME_KINDS:
             layer = "Intensity"
         elif select:
-            layer = self.service.layer_name(select, var)
+            layer = self.service.layer_for(self._name, select, var)
         else:
             layer = layer_before
         self.viewer.set_layers(self.service.map_layers(self._name), select=layer)

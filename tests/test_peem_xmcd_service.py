@@ -385,3 +385,23 @@ def test_export_map_with_options_crop_size_formats_and_limits(tmp_path):
         s.export_map(n, "pcd", tmp_path / "x", crop=(5, 5, 0, 10))
     with pytest.raises(ValueError, match="maximum must be above"):
         s.export_map(n, "pcd", tmp_path / "x", vmin=0.1, vmax=-0.1)
+
+
+def test_stack_sum_layer_is_named_after_its_channels(tmp_path):
+    """The stack's own image (CP + CM) shows as 'stack · cp+cm' in the viewer, from the stack's data."""
+    from tensorspec.core.peem import synthetic
+    from tensorspec.gui.services.peem_service import PeemService
+
+    mz = synthetic.stripe_domains(32, 32, period_px=8)
+    cp, cm = synthetic.helicity_stacks(mz, a0=0.05, n_cp=2, n_cm=2, noise=0.0)
+    pos = synthetic.write_ue49_scan(tmp_path, "X_0002", cp, ["Cr_pos_0000", "Cr_pos_0001"])
+    neg = synthetic.write_ue49_scan(tmp_path, "X_0003", cm, ["Cr_neg_0000", "Cr_neg_0001"])
+    s = PeemService()
+    n = s.load_beamline([pos, neg], "layers", tpx3=False)["name"]
+    s.drift_correct(n, method="central"); s.stack(n); s.asymmetry(n)
+    layers = s.map_layers(n)
+    assert "stack · cp+cm" in layers and "stack" not in layers and "pcd" in layers
+    assert np.array_equal(layers["stack · cp+cm"], s.get_map(n, "stack", "data"))
+    assert s.layer_for(n, "stack") == "stack · cp+cm" and s.parse_layer("stack · cp+cm") == ("stack", "data")
+    assert s.layer_for(n, "stack", "sum_cp") == "stack · sum_cp" and s.layer_for(n, "pcd") == "pcd"
+    s.unload(n)
