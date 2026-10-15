@@ -49,8 +49,8 @@ The Workspace Browser ribbon opens independent suites (Crystal, DFT, ARPES, PEEM
 | Crystal Viewer | Live | Tabs View (Structure/Camera/Export) · CDW · Stack · BZ; CIF, supercells, twist/Bernevig |
 | DFT | Live | Tabs Structure · DFT/Wannier · Tight Binding; Chinook/W90 TB matches Wannier90 `use_ws_distance` (MDRS / `wsvec.dat`); 2D Auto-Detect keeps one Γ…Γ loop; Push bands → workspace for ARPES |
 | ARPES | Live (sim) | Kinematics + three-step / Chinook B1 / SPR-KKR B3; MAESTRO loaders partial |
-| PEEM | Live | TIF/ZIP load, pair CP/CM·LH/LV, drift, BG, XMCD sum rule |
-| XAS / XMCD | Live | 1D spectra; shared PEEM BG + sum-rule core |
+| PEEM | Live | Load (TIF/ZIP/folder, UE49 · UView · P3B), pair CP/CM·LH/LV, drift; asymmetry map, line profiles, histogram, FFT, domain width, ROI statistics, domain map, export; corrected CP/CM → Sum Rule window |
+| XAS / XMCD (Sum Rule) | Live | From PEEM: spectra of a region of the corrected CP/CM, background, XMCD sum rule · XAS spectra (.txt): 1D spectra, BG, sum rule (shared PEEM BG + sum-rule core) |
 | Transport | Shell | Demo R(H)/Hall/R(T) UI; `transport_engine` not built |
 | Machine Learning | Live | SSL / clustering / AL; domain maps → shared DataViewer |
 | Data Viewer | Live | N-D slicing + ML `domains_*` overlay layers |

@@ -57,6 +57,8 @@ tensorspec/
 │   │   ├── sumrule.py        # XMCD sum-rule integrals (also used by XAS 1D)
 │   │   ├── synthetic.py      # Synthetic stacks for loader / PEEM tests
 │   │   ├── dichroism.py / registration.py / domains.py  # asymmetry + drift math (batch / library)
+│   │   ├── drift.py / igor_drift.py / stack_edits.py      # drift router, SPEEM Igor ports, stack clean-up
+│   │   ├── image_analysis.py / roi_stats.py / products.py # profiles, histogram, FFT; ROI stats; /analysis maps
 │   │   ├── ue49/             # detector.py (TPX3/I0) + batch.py (beamtime scripts)
 │   │   └── esm/              # BNL ESM batch.py (uses uview loaders + ue49.batch helpers)
 │   ├── raman_engine.py       # MAIN ROUTER: voigt / lorentz_n / lorentz_auto / g_2d → core/raman/*
@@ -78,12 +80,16 @@ tensorspec/
 │   │   └── raman_views/         # One renderer module per Raman tab
 │   ├── viewers/               # Reusable Qt widgets for suites to embed (where present)
 │   │   └── raman_canvas.py      # Canvas, compact toolbar, vector export
-│   └── ue49_preview.py        # Matplotlib previews for PEEM beamtime batch scripts
+│   ├── ue49_preview.py        # Matplotlib previews for PEEM beamtime batch scripts
+│   └── peem_plots.py          # PEEM map plots (profiles, histogram, FFT), map pictures, PDF export
 └── gui/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon
     ├── services/             # Non-HTTP service layer between panels and core
-    │   ├── peem_service.py
+    │   ├── peem_service.py   # PEEM service: load / pair / drift / BG / sum rule + steps in peem_steps/
+    │   ├── peem_steps/       # service mixins: channels (maps + Sum Rule hand-over from the panel's pairs),
+    │   │                     #   drift_stack, image_analysis, maps_domains, annotations, load, cleanup
+    │   │                     #   Back-end contract (every call, no Qt): peem_steps/__init__.py
     │   ├── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     │   └── raman_service.py  # Qt-free Raman back-end API (all state; one method per action)
     ├── components/           # Reusable, isolated UI panels
@@ -91,7 +97,10 @@ tensorspec/
     │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
-    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load/Pair/Drift/BG/Map(PCD·PLD)/Sum Rule; Frame=DataViewer
+    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder/beamline + Pair/Drift + Make PCD/PLD (4) + map tools (5–7); Frame=DataViewer
+    │   ├── peem_map_tools.py      # PEEM panel add-on: asymmetry map, image analysis, ROIs / domains, → Sum Rule
+    │   ├── peem_sumrule_panel.py  # Sum Rule window, From PEEM: region spectra, BG, sum rule
+    │   ├── peem_export_dialog.py / peem_map_common.py  # map export options; small widget helpers
     │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)
     │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows
     │   │                          #   (+ optional cmap / Sym± / draw tools / compact; off by default)
@@ -102,8 +111,8 @@ tensorspec/
         ├── crystal_suite.py      # Tabs: View | CDW | Stack | BZ (+ 3D viewer splitter)
         ├── dft_suite.py          # Tabs: Structure | DFT/Wannier | Tight Binding (+ band canvas)
         ├── arpes_suite.py
-        ├── peem_suite.py         # Single PEEM panel (Load beamline… + Pair/Drift/BG/Sum Rule)
-        ├── xas_suite.py
+        ├── peem_suite.py         # Single PEEM panel (load, pair, drift, calculate, analyse)
+        ├── xas_suite.py          # Sum Rule window: From PEEM | XAS spectra (.txt)
         ├── raman_suite.py        # Tabs: 1 · Spectra | 2 · Map | 3 · Analysis
         ├── transport_suite.py    # Shell until transport_engine ships
         └── ml_suite.py

@@ -1,4 +1,4 @@
-"""UView folder loader (core/io/uview_loaders) on synthetic UView files."""
+"""UView folder loader + PeemService.load_uview / compute_pcd on synthetic UView files."""
 import struct
 
 import numpy as np
@@ -52,3 +52,14 @@ def test_mixed_fov_refused(tmp_path):
     _write_uview(d / "x.dat", np.full((32, 32), 1000, np.uint16), fov_um=30.0)
     with pytest.raises(ValueError, match="different fields of view"):
         esm_loaders.load_uview_folders([a, d])
+
+
+def test_service_pcd_bnl_sign(tmp_path):
+    from tensorspec.gui.services.peem_service import PeemService
+    svc = PeemService()
+    cl, cr = _acq(tmp_path, "CL", 1100), _acq(tmp_path, "CR", 900)
+    res = svc.load_uview([cl, cr], name="bnl_test")
+    assert res["pol_counts"] == {"CM": 3, "CP": 3}
+    svc.compute_pcd("bnl_test", convention="cp_minus_cm", register=False)
+    pcd = svc.get_map("bnl_test", "pcd")
+    assert np.nanmean(pcd) == pytest.approx(0.1, abs=1e-6)  # (1100-900)/(1100+900)
