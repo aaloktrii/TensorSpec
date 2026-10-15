@@ -147,44 +147,7 @@ class PeemPanel(QWidget):
         drift_form.addRow(self.btn_drift)
         control_layout.addWidget(drift_group)
 
-        bg_group = QGroupBox("4. Background")
-        bg_form = QFormLayout(bg_group)
-        self.bg_node = QComboBox()
-        self.bg_node.addItem("Raw", "raw")
-        self.bg_node.addItem("Processed", "processed")
-        bg_form.addRow("Source node:", self.bg_node)
-        self.bg_method = QComboBox()
-        self.bg_method.addItem("Linear pre-edge", "linear")
-        self.bg_method.addItem("Two-step pre/post", "two_step")
-        self.bg_method.currentIndexChanged.connect(self._sync_bg_method_ui)
-        bg_form.addRow("Method:", self.bg_method)
-        self.bg_e0 = QDoubleSpinBox()
-        self.bg_e1 = QDoubleSpinBox()
-        self.bg_post_e0 = QDoubleSpinBox()
-        self.bg_post_e1 = QDoubleSpinBox()
-        for spin in (self.bg_e0, self.bg_e1, self.bg_post_e0, self.bg_post_e1):
-            spin.setRange(-1e4, 1e4)
-            spin.setDecimals(3)
-        self.bg_e0.setValue(0.0)
-        self.bg_e1.setValue(2.0)
-        self.bg_post_e0.setValue(3.0)
-        self.bg_post_e1.setValue(4.0)
-        bg_form.addRow("Pre e0 / e1:", self._pair_row(self.bg_e0, self.bg_e1))
-        self.bg_post_row_label = QLabel("Post e0 / e1:")
-        self.bg_post_row = self._pair_row(self.bg_post_e0, self.bg_post_e1)
-        bg_form.addRow(self.bg_post_row_label, self.bg_post_row)
-        bg_btns = QHBoxLayout()
-        self.btn_bg_preview = QPushButton("Preview BG")
-        self.btn_bg_preview.clicked.connect(self._bg_preview)
-        self.btn_bg_apply = QPushButton("Apply BG")
-        self.btn_bg_apply.clicked.connect(self._bg_apply)
-        bg_btns.addWidget(self.btn_bg_preview)
-        bg_btns.addWidget(self.btn_bg_apply)
-        bg_form.addRow(bg_btns)
-        control_layout.addWidget(bg_group)
-        self._sync_bg_method_ui()
-
-        map_group = QGroupBox("5. Dichroism map (Frame viewer)")
+        map_group = QGroupBox("4. Dichroism map (Frame viewer)")
         map_form = QFormLayout(map_group)
         self.map_register = QComboBox()
         self.map_register.addItem("Register helicities (recommended)", True)
@@ -206,50 +169,13 @@ class PeemPanel(QWidget):
         map_form.addRow(self.btn_export_map)
         control_layout.addWidget(map_group)
 
-        sum_group = QGroupBox("6. XMCD Sum Rule")
-        sum_form = QFormLayout(sum_group)
-        self.sum_nh = QDoubleSpinBox()
-        self.sum_nh.setRange(0.0, 20.0)
-        self.sum_nh.setValue(1.0)
-        self.sum_nh.setDecimals(2)
-        sum_form.addRow("n_h:", self.sum_nh)
-        self.sum_l3_lo = QDoubleSpinBox()
-        self.sum_l3_hi = QDoubleSpinBox()
-        self.sum_l2_lo = QDoubleSpinBox()
-        self.sum_l2_hi = QDoubleSpinBox()
-        self.sum_r_lo = QDoubleSpinBox()
-        self.sum_r_hi = QDoubleSpinBox()
-        for spin in (
-            self.sum_l3_lo,
-            self.sum_l3_hi,
-            self.sum_l2_lo,
-            self.sum_l2_hi,
-            self.sum_r_lo,
-            self.sum_r_hi,
-        ):
-            spin.setRange(-1e4, 1e4)
-            spin.setDecimals(3)
-        self.sum_l3_lo.setValue(0.0)
-        self.sum_l3_hi.setValue(1.0)
-        self.sum_l2_lo.setValue(2.0)
-        self.sum_l2_hi.setValue(3.0)
-        self.sum_r_lo.setValue(0.0)
-        self.sum_r_hi.setValue(4.0)
-        sum_form.addRow("L3 lo/hi:", self._pair_row(self.sum_l3_lo, self.sum_l3_hi))
-        sum_form.addRow("L2 lo/hi:", self._pair_row(self.sum_l2_lo, self.sum_l2_hi))
-        sum_form.addRow("R lo/hi:", self._pair_row(self.sum_r_lo, self.sum_r_hi))
-        sum_btns = QHBoxLayout()
-        self.btn_sum_preview = QPushButton("Preview Sum Rule")
-        self.btn_sum_preview.clicked.connect(self._sumrule_preview)
-        self.btn_sum_apply = QPushButton("Apply Sum Rule")
-        self.btn_sum_apply.clicked.connect(self._sumrule_apply)
-        sum_btns.addWidget(self.btn_sum_preview)
-        sum_btns.addWidget(self.btn_sum_apply)
-        sum_form.addRow(sum_btns)
-        self.sum_results = QLabel("(no sum-rule result yet)")
-        self.sum_results.setWordWrap(True)
-        sum_form.addRow(self.sum_results)
-        control_layout.addWidget(sum_group)
+
+        # 5-8: calculate + analyse (asymmetry map, image analysis, ROIs / domains); background and
+        # sum rule are in the Sum Rule window (XAS suite), reached with "→ Sum Rule"
+        from tensorspec.gui.components.peem_map_tools import PeemMapTools
+        self.map_tools = PeemMapTools(self.service, lambda: self._dataset_name, self,
+                                      send_to_sum_rule=self._to_sum_rule)
+        control_layout.addWidget(self.map_tools.controls)
 
         control_layout.addStretch()
         scroll = QScrollArea()
@@ -258,7 +184,7 @@ class PeemPanel(QWidget):
         scroll.setMinimumWidth(360)
         splitter.addWidget(scroll)
 
-        # --- RIGHT: Frame (DataViewer) | BG | Sum Rule ---
+        # --- RIGHT: Frame (DataViewer) | Map | Analysis ---
         self.view_tabs = QTabWidget()
         self.view_tabs.setDocumentMode(True)
 
@@ -278,23 +204,8 @@ class PeemPanel(QWidget):
         view_layout.addWidget(self.frame_viewer, stretch=1)
         self.view_tabs.addTab(view_panel, "Frame")
 
-        bg_page = QWidget()
-        bg_page_layout = QVBoxLayout(bg_page)
-        bg_page_layout.setContentsMargins(4, 4, 4, 4)
-        self.bg_figure = Figure(figsize=(6, 4), dpi=100, layout="tight")
-        self.bg_canvas = FigureCanvas(self.bg_figure)
-        self.bg_ax = self.bg_figure.add_subplot(111)
-        bg_page_layout.addWidget(self.bg_canvas, stretch=1)
-        self.view_tabs.addTab(bg_page, "BG")
-
-        sum_page = QWidget()
-        sum_page_layout = QVBoxLayout(sum_page)
-        sum_page_layout.setContentsMargins(4, 4, 4, 4)
-        self.sum_figure = Figure(figsize=(6, 4), dpi=100, layout="tight")
-        self.sum_canvas = FigureCanvas(self.sum_figure)
-        self.sum_ax = self.sum_figure.add_subplot(111)
-        sum_page_layout.addWidget(self.sum_canvas, stretch=1)
-        self.view_tabs.addTab(sum_page, "Sum Rule")
+        self.view_tabs.addTab(self.map_tools.map_view, "Map")
+        self.view_tabs.addTab(self.map_tools.plot_view, "Analysis")
 
         splitter.addWidget(self.view_tabs)
         splitter.setStretchFactor(0, 0)
@@ -309,11 +220,6 @@ class PeemPanel(QWidget):
         wrap = QWidget()
         wrap.setLayout(row)
         return wrap
-
-    def _sync_bg_method_ui(self):
-        two_step = self.bg_method.currentData() == "two_step"
-        self.bg_post_row_label.setVisible(two_step)
-        self.bg_post_row.setVisible(two_step)
 
     def _require_dataset(self) -> str | None:
         if not self._dataset_name:
@@ -489,114 +395,14 @@ class PeemPanel(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Drift error", str(exc))
 
-    def _bg_kwargs(self) -> dict:
-        method = self.bg_method.currentData()
-        kwargs = {
-            "node": self.bg_node.currentData(),
-            "method": method,
-            "e0": self.bg_e0.value(),
-            "e1": self.bg_e1.value(),
-        }
-        if method == "two_step":
-            kwargs["post_e0"] = self.bg_post_e0.value()
-            kwargs["post_e1"] = self.bg_post_e1.value()
-        return kwargs
-
-    def _bg_preview(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            result = self.service.bg_preview(name, **self._bg_kwargs())
-            self._plot_bg(result)
-        except Exception as exc:
-            QMessageBox.critical(self, "BG preview error", str(exc))
-
-    def _bg_apply(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            self.service.bg_apply(name, **self._bg_kwargs())
-            self._refresh_meta()
-            self.status_label.setText("Background subtracted and stored.")
-        except Exception as exc:
-            QMessageBox.critical(self, "BG apply error", str(exc))
-
-    def _sumrule_kwargs(self) -> dict:
-        return {
-            "nh": self.sum_nh.value(),
-            "l3_lo": self.sum_l3_lo.value(),
-            "l3_hi": self.sum_l3_hi.value(),
-            "l2_lo": self.sum_l2_lo.value(),
-            "l2_hi": self.sum_l2_hi.value(),
-            "r_lo": self.sum_r_lo.value(),
-            "r_hi": self.sum_r_hi.value(),
-        }
-
-    def _sumrule_preview(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            result = self.service.sumrule_preview(name, **self._sumrule_kwargs())
-            self._plot_sumrule(result)
-            self._show_sumrule_text(result)
-        except Exception as exc:
-            QMessageBox.critical(self, "Sum rule preview error", str(exc))
-
-    def _sumrule_apply(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            result = self.service.sumrule_apply(name, **self._sumrule_kwargs())
-            stored = self.service.sumrule_preview(name, **self._sumrule_kwargs())
-            self._plot_sumrule(stored)
-            self._show_sumrule_text(stored)
-            self._refresh_meta()
-            self.status_label.setText(
-                f"Sum rule stored ({result['tag_plus']}/{result['tag_minus']}, "
-                f"source={result['source_kind']})"
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "Sum rule apply error", str(exc))
-
-    def _show_sumrule_text(self, result: dict):
-        self.sum_results.setText(
-            f"p={result['p']:.4g}±{result['p_std']:.4g}  "
-            f"q={result['q']:.4g}±{result['q_std']:.4g}  "
-            f"r={result['r']:.4g}±{result['r_std']:.4g}\n"
-            f"m_orb={result['m_orb']:.4g}±{result['m_orb_std']:.4g}  "
-            f"m_spin+dipole={result['m_spin_plus_dipole']:.4g}±"
-            f"{result['m_spin_plus_dipole_std']:.4g}"
-        )
-
-    def _plot_bg(self, result: dict):
-        self.bg_ax.clear()
-        energy = result["energy"]
-        self.bg_ax.plot(energy, result["spectrum"], label="spectrum", color="#60a5fa")
-        self.bg_ax.plot(energy, result["bg"], label="bg", color="#f97316")
-        self.bg_ax.plot(energy, result["subtracted"], label="subtracted", color="#34d399")
-        self.bg_ax.set_xlabel("Energy")
-        self.bg_ax.set_ylabel("Intensity")
-        self.bg_ax.legend(fontsize=7)
-        self.bg_ax.set_title(f"BG preview ({result['method']})")
-        self.bg_canvas.draw()
-        self.view_tabs.setCurrentIndex(1)
-
-    def _plot_sumrule(self, result: dict):
-        self.sum_ax.clear()
-        energy = result["energy"]
-        self.sum_ax.plot(energy, result["mu_plus"], label=result["tag_plus"], color="#60a5fa")
-        self.sum_ax.plot(energy, result["mu_minus"], label=result["tag_minus"], color="#f87171")
-        self.sum_ax.plot(energy, result["dichroism"], label="dichroism", color="#a78bfa")
-        self.sum_ax.set_xlabel("Energy")
-        self.sum_ax.set_ylabel("μ")
-        self.sum_ax.legend(fontsize=7)
-        self.sum_ax.set_title("XMCD sum rule")
-        self.sum_canvas.draw()
-        self.view_tabs.setCurrentIndex(2)
+    def _to_sum_rule(self, name: str):
+        """Corrected CP / CM pairs -> the Sum Rule window (XAS suite), as a new dataset
+        <name>_sumrule with an energy per pair (PeemService.to_sum_rule)."""
+        res = self.service.to_sum_rule(name)
+        from tensorspec.gui.suites.xas_suite import open_sum_rule
+        open_sum_rule(res["name"], self.service)
+        note = f" ({res['note']})" if res.get("note") else ""
+        self.status_label.setText(f"Sent to the Sum Rule window as '{res['name']}'{note}.")
 
     def _refresh_meta(self):
         name = self._dataset_name
@@ -611,6 +417,7 @@ class PeemPanel(QWidget):
         n = int((self._meta or {}).get("n_frames", 1) or 1)
         self.drift_ref.setMaximum(max(0, n - 1))
         self._refresh_frame_view()
+        self.map_tools.refresh()
 
     def _populate_node_combo(self):
         prev = self.node_combo.currentData()
@@ -631,15 +438,6 @@ class PeemPanel(QWidget):
                 self.node_combo.setCurrentIndex(idx)
         self.node_combo.blockSignals(False)
 
-        self.bg_node.blockSignals(True)
-        self.bg_node.clear()
-        self.bg_node.addItem("Raw", "raw")
-        if meta.get("has_processed"):
-            self.bg_node.addItem("Processed", "processed")
-        for child in meta.get("processed_children", []):
-            if not str(child).endswith("_bg"):
-                self.bg_node.addItem(f"Processed / {child}", f"processed/{child}")
-        self.bg_node.blockSignals(False)
 
     def _on_node_changed(self):
         self._refresh_frame_view()

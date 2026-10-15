@@ -31,6 +31,17 @@ def xas_suite(qapp):
     from tensorspec.gui.suites.xas_suite import XASSuite
 
     w = XASSuite()
+    w.tabs.setCurrentWidget(w.panel)  # the XAS spectra (.txt) tab; "From PEEM" is the first tab
+    _show_and_pump(qapp, w)
+    yield w
+    w.close()
+
+
+@pytest.fixture
+def sumrule_window(qapp):
+    from tensorspec.gui.suites.xas_suite import XASSuite
+
+    w = XASSuite()  # opens on "From PEEM": background + sum rule moved here from the PEEM panel
     _show_and_pump(qapp, w)
     yield w
     w.close()
@@ -83,7 +94,7 @@ def test_peem_view_tabs_and_canvases(peem_suite, qapp):
     p = peem_suite.panel
     tabs = p.view_tabs
     assert tabs.count() == 3
-    assert [tabs.tabText(i) for i in range(3)] == ["Frame", "BG", "Sum Rule"]
+    assert [tabs.tabText(i) for i in range(3)] == ["Frame", "Map", "Analysis"]
     thin = []
     for i in range(tabs.count()):
         tabs.setCurrentIndex(i)
@@ -102,8 +113,8 @@ def test_peem_splitter_left_column_not_collapsed(peem_suite):
     assert sizes[0] >= MIN_LEFT_WIDTH, sizes
 
 
-def test_peem_bg_two_step_toggles_post_edge(peem_suite, qapp):
-    p = peem_suite.panel
+def test_sumrule_bg_two_step_toggles_post_edge(sumrule_window, qapp):
+    p = sumrule_window.peem_panel
     p.bg_method.setCurrentIndex(p.bg_method.findData("linear"))
     qapp.processEvents()
     assert not p.bg_post_row.isVisible()

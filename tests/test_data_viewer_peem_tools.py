@@ -1,4 +1,4 @@
-"""Generic DataViewerPanel features (cmap / Sym± / draw / Play; off by default for ARPES / ML)."""
+"""Generic DataViewerPanel features used by the PEEM XMCD tab (off by default for ARPES / ML)."""
 import os
 
 import numpy as np
@@ -94,4 +94,3 @@ def test_tools_and_overlays(app):
     assert len(v._overlay_artists) == 2
 
 
-# XPEEM-map colour-range export test lives with PR #6 (needs peem_xmcd_panel).
