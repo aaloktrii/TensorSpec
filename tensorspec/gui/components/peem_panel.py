@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSlider,
     QSpinBox,
     QSplitter,
     QTabWidget,
@@ -27,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.gui.services.peem_service import PeemService
 
 
@@ -98,7 +98,7 @@ class PeemPanel(QWidget):
         self.btn_load_beamline.setToolTip(
             "UE49 scan .txt, UView .dat, or ALS .P3B (files or folders).\n"
             "UView CP/CM: pick CL folder, say Yes to add CR (or LH/LV).\n"
-            "Then use Pair / Separate → Drift → BG → Sum Rule as usual."
+            "Then Pair / Separate → Drift → Make PCD/PLD (Frame) → BG → Sum Rule."
         )
         self.btn_load_beamline.clicked.connect(self._load_beamline)
         load_form.addRow(self.btn_load_beamline)
@@ -184,7 +184,29 @@ class PeemPanel(QWidget):
         control_layout.addWidget(bg_group)
         self._sync_bg_method_ui()
 
-        sum_group = QGroupBox("5. XMCD Sum Rule")
+        map_group = QGroupBox("5. Dichroism map (Frame viewer)")
+        map_form = QFormLayout(map_group)
+        self.map_register = QComboBox()
+        self.map_register.addItem("Register helicities (recommended)", True)
+        self.map_register.addItem("No extra registration", False)
+        map_form.addRow("Align:", self.map_register)
+        map_btns = QHBoxLayout()
+        self.btn_make_pcd = QPushButton("Make PCD (XMCD)")
+        self.btn_make_pcd.setToolTip(
+            "CP/CM → /analysis/pcd. Prefer Separate first, or beamline load with pol tags."
+        )
+        self.btn_make_pcd.clicked.connect(self._make_pcd)
+        self.btn_make_pld = QPushButton("Make PLD (XLD)")
+        self.btn_make_pld.clicked.connect(self._make_pld)
+        map_btns.addWidget(self.btn_make_pcd)
+        map_btns.addWidget(self.btn_make_pld)
+        map_form.addRow(map_btns)
+        self.btn_export_map = QPushButton("Export current map…")
+        self.btn_export_map.clicked.connect(self._export_map)
+        map_form.addRow(self.btn_export_map)
+        control_layout.addWidget(map_group)
+
+        sum_group = QGroupBox("6. XMCD Sum Rule")
         sum_form = QFormLayout(sum_group)
         self.sum_nh = QDoubleSpinBox()
         self.sum_nh.setRange(0.0, 20.0)
@@ -236,48 +258,24 @@ class PeemPanel(QWidget):
         scroll.setMinimumWidth(360)
         splitter.addWidget(scroll)
 
-        # --- RIGHT: Frame | BG | Sum Rule tabs (plots leave left column) ---
+        # --- RIGHT: Frame (DataViewer) | BG | Sum Rule ---
         self.view_tabs = QTabWidget()
         self.view_tabs.setDocumentMode(True)
 
         view_panel = QWidget()
         view_layout = QVBoxLayout(view_panel)
         view_layout.setContentsMargins(4, 4, 4, 4)
-        self.view_figure = Figure(figsize=(6, 5), dpi=100, layout="tight")
-        self.view_canvas = FigureCanvas(self.view_figure)
-        self.view_ax = self.view_figure.add_subplot(111)
-        view_layout.addWidget(self.view_canvas, stretch=1)
-
         nav = QHBoxLayout()
         self.node_combo = QComboBox()
         self.node_combo.currentIndexChanged.connect(self._on_node_changed)
-        nav.addWidget(QLabel("Node:"))
-        nav.addWidget(self.node_combo)
-
-        self.channel_combo = QComboBox()
-        self.channel_combo.currentIndexChanged.connect(self._refresh_frame_view)
-        nav.addWidget(QLabel("Channel:"))
-        nav.addWidget(self.channel_combo)
-
-        self.frame_slider = QSlider(Qt.Horizontal)
-        self.frame_slider.setEnabled(False)
-        self.frame_slider.valueChanged.connect(self._refresh_frame_view)
-        nav.addWidget(QLabel("Frame:"))
-        nav.addWidget(self.frame_slider)
+        nav.addWidget(QLabel("Show:"))
+        nav.addWidget(self.node_combo, stretch=1)
+        self.btn_refresh_view = QPushButton("Reload")
+        self.btn_refresh_view.clicked.connect(self._refresh_frame_view)
+        nav.addWidget(self.btn_refresh_view)
         view_layout.addLayout(nav)
-
-        contrast = QHBoxLayout()
-        self.vmin_spin = QDoubleSpinBox()
-        self.vmax_spin = QDoubleSpinBox()
-        for spin in (self.vmin_spin, self.vmax_spin):
-            spin.setRange(-1e12, 1e12)
-            spin.setDecimals(4)
-            spin.valueChanged.connect(self._refresh_frame_view)
-        contrast.addWidget(QLabel("vmin:"))
-        contrast.addWidget(self.vmin_spin)
-        contrast.addWidget(QLabel("vmax:"))
-        contrast.addWidget(self.vmax_spin)
-        view_layout.addLayout(contrast)
+        self.frame_viewer = DataViewerPanel(compact=True)
+        view_layout.addWidget(self.frame_viewer, stretch=1)
         self.view_tabs.addTab(view_panel, "Frame")
 
         bg_page = QWidget()
@@ -610,10 +608,12 @@ class PeemPanel(QWidget):
             QMessageBox.critical(self, "Meta error", str(exc))
             return
         self._populate_node_combo()
-        self._configure_frame_slider()
+        n = int((self._meta or {}).get("n_frames", 1) or 1)
+        self.drift_ref.setMaximum(max(0, n - 1))
         self._refresh_frame_view()
 
     def _populate_node_combo(self):
+        prev = self.node_combo.currentData()
         self.node_combo.blockSignals(True)
         self.node_combo.clear()
         meta = self._meta or {}
@@ -622,6 +622,13 @@ class PeemPanel(QWidget):
             self.node_combo.addItem("Processed", "processed")
         for child in meta.get("processed_children", []):
             self.node_combo.addItem(f"Processed / {child}", f"processed/{child}")
+        for kind in meta.get("analysis_maps") or []:
+            self.node_combo.addItem(f"Map / {kind.upper()}", f"analysis/{kind}")
+        # restore prior selection if still present
+        if prev is not None:
+            idx = self.node_combo.findData(prev)
+            if idx >= 0:
+                self.node_combo.setCurrentIndex(idx)
         self.node_combo.blockSignals(False)
 
         self.bg_node.blockSignals(True)
@@ -634,88 +641,93 @@ class PeemPanel(QWidget):
                 self.bg_node.addItem(f"Processed / {child}", f"processed/{child}")
         self.bg_node.blockSignals(False)
 
-        self.channel_combo.blockSignals(True)
-        self.channel_combo.clear()
-        tags = meta.get("channel_tags") or []
-        if tags and meta.get("processed_is_paired"):
-            for idx, tag in enumerate(tags):
-                self.channel_combo.addItem(str(tag), idx)
-        else:
-            self.channel_combo.addItem("0", 0)
-        self.channel_combo.blockSignals(False)
-
     def _on_node_changed(self):
-        self._configure_frame_slider()
         self._refresh_frame_view()
-
-    def _configure_frame_slider(self):
-        meta = self._meta or {}
-        name = self._dataset_name
-        node = self.node_combo.currentData() or "raw"
-        n = meta.get("n_frames", 1)
-        if node == "processed" and meta.get("processed_is_paired"):
-            n = meta.get("n_pairs") or n
-        elif node == "processed" and meta.get("n_processed_frames") is not None:
-            n = meta.get("n_processed_frames") or n
-        elif node.startswith("processed/") and name:
-            from tensorspec.core.workspace import global_workspace
-            child = global_workspace.pull_tensor_data(name, node)
-            if child is not None:
-                n = int(child.value.shape[0])
-            else:
-                n = meta.get("n_pairs") or meta.get("n_frames", 1)
-        self.frame_slider.blockSignals(True)
-        self.frame_slider.setEnabled(n > 1)
-        self.frame_slider.setRange(0, max(0, n - 1))
-        if self.frame_slider.value() > max(0, n - 1):
-            self.frame_slider.setValue(0)
-        self.drift_ref.setMaximum(max(0, n - 1))
-        self.frame_slider.blockSignals(False)
 
     def _refresh_frame_view(self):
         name = self._dataset_name
         if not name:
             return
         node = self.node_combo.currentData() or "raw"
-        channel = self.channel_combo.currentData()
-        if channel is None:
-            channel = 0
-        frame_index = self.frame_slider.value()
         try:
-            frame = self.service.get_view_tensor(
-                name, node=node, frame_index=frame_index, channel=channel
-            )
-        except Exception:
+            td = self.service.get_display_tensor(name, node)
+            self.frame_viewer.load_data(td)
+            view = self.frame_viewer.primary_view()
+            if view is not None and td.ndim >= 2:
+                # Prefer spatial axes last two dims when stack-like
+                if td.ndim >= 3 and "y" in td.labels and "x" in td.labels:
+                    view.combo_y.setCurrentIndex(td.labels.index("y"))
+                    view.combo_x.setCurrentIndex(td.labels.index("x"))
+                if node.startswith("analysis/"):
+                    # dichroism maps: diverging cmap if available
+                    if hasattr(view, "combo_cmap"):
+                        idx = view.combo_cmap.findText("bwr")
+                        if idx >= 0:
+                            view.combo_cmap.setCurrentIndex(idx)
+        except Exception as exc:
+            self.status_label.setText(f"View error: {exc}")
+
+    def _make_pcd(self):
+        name = self._require_dataset()
+        if not name:
             return
+        try:
+            result = self.service.make_pcd_map(
+                name, register=bool(self.map_register.currentData())
+            )
+            self._refresh_meta()
+            idx = self.node_combo.findData(result["display_node"])
+            if idx >= 0:
+                self.node_combo.setCurrentIndex(idx)
+            self.view_tabs.setCurrentIndex(0)
+            self.status_label.setText(
+                f"PCD map ({result['formula']}, source={result['source']}, "
+                f"mean={result['mean']:.4g})"
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "PCD map error", str(exc))
 
-        finite = frame[np.isfinite(frame)]
-        if finite.size:
-            p1, p99 = np.percentile(finite, [1, 99])
-            if p1 == p99:
-                p1, p99 = float(finite.min()), float(finite.max())
+    def _make_pld(self):
+        name = self._require_dataset()
+        if not name:
+            return
+        try:
+            result = self.service.make_pld_map(
+                name, register=bool(self.map_register.currentData())
+            )
+            self._refresh_meta()
+            idx = self.node_combo.findData(result["display_node"])
+            if idx >= 0:
+                self.node_combo.setCurrentIndex(idx)
+            self.view_tabs.setCurrentIndex(0)
+            self.status_label.setText(
+                f"PLD map ({result['formula']}, source={result['source']}, "
+                f"mean={result['mean']:.4g})"
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "PLD map error", str(exc))
+
+    def _export_map(self):
+        name = self._require_dataset()
+        if not name:
+            return
+        node = self.node_combo.currentData() or ""
+        kind = None
+        if isinstance(node, str) and node.startswith("analysis/"):
+            kind = node.split("/", 1)[1]
         else:
-            p1 = p99 = 0.0
-
-        if not self.vmin_spin.hasFocus() and not self.vmax_spin.hasFocus():
-            self.vmin_spin.blockSignals(True)
-            self.vmax_spin.blockSignals(True)
-            self.vmin_spin.setValue(float(p1))
-            self.vmax_spin.setValue(float(p99))
-            self.vmin_spin.blockSignals(False)
-            self.vmax_spin.blockSignals(False)
-
-        self.view_ax.clear()
-        self.view_ax.imshow(
-            frame,
-            cmap="gray",
-            vmin=self.vmin_spin.value(),
-            vmax=self.vmax_spin.value(),
-            origin="upper",
+            maps = (self._meta or {}).get("analysis_maps") or []
+            if not maps:
+                QMessageBox.warning(self, "No map", "Make a PCD/PLD map first.")
+                return
+            kind = maps[-1]
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export map TIFF", f"{name}_{kind}.tif", "TIFF (*.tif)"
         )
-        title_bits = [name, node, f"frame {frame_index}"]
-        if node == "processed" and self._meta and self._meta.get("processed_is_paired"):
-            tag = self.channel_combo.currentText()
-            title_bits.append(f"ch={tag}")
-        self.view_ax.set_title(" | ".join(title_bits))
-        self.view_ax.axis("off")
-        self.view_canvas.draw()
+        if not path:
+            return
+        try:
+            out = self.service.export_analysis_map(name, kind, path, png=True)
+            self.status_label.setText(f"Exported {out} (+ .png)")
+        except Exception as exc:
+            QMessageBox.critical(self, "Export error", str(exc))

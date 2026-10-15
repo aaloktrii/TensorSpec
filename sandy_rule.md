@@ -91,7 +91,7 @@ tensorspec/
     │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
-    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder/beamline + Pair/Drift/BG/Sum Rule
+    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load/Pair/Drift/BG/Map(PCD·PLD)/Sum Rule; Frame=DataViewer
     │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)
     │   ├── data_viewer_panel.py   # N-D viewer; chrome = axes + display + Δ rows
     │   │                          #   (+ optional cmap / Sym± / draw tools / compact; off by default)

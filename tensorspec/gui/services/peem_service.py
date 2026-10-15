@@ -27,6 +27,7 @@ from tensorspec.core.peem.bg import (
     is_bg_output_node,
     resolve_energy,
 )
+from tensorspec.core.peem import dichroism, products
 from tensorspec.core.peem.engine import drift_correct, pair_stack, separate_pairs
 from tensorspec.core.peem.roi import roi_to_mask
 from tensorspec.core.peem.sumrule import (
@@ -1192,6 +1193,222 @@ class PeemService:
             "has_sumrule": True,
         }
 
+    @staticmethod
+    def _um_per_px(name: str) -> float | None:
+        md = (_require_tensor(name).metadata or {})
+        return md.get("um_per_px")
+
+    @staticmethod
+    def _pol_stacks(
+        name: str,
+        tags: tuple[str, str],
+        source: str = "auto",
+    ) -> tuple[np.ndarray, np.ndarray, str]:
+        """Return (stack_a, stack_b, source_used) for XMCD/XLD map making.
+
+        source: ``separated`` (/processed/CP|CM), ``raw`` (pol tags on frames),
+        ``processed`` (drift-corrected cube with pol tags), or ``auto``.
+        """
+        ta, tb = tags
+        children = set(global_workspace.list_processed_children(name))
+        if source == "auto":
+            if ta in children and tb in children:
+                source = "separated"
+            else:
+                raw = _require_tensor(name)
+                if any(str(p) in (ta, tb) for p in (raw.metadata or {}).get("pol", [])):
+                    source = "raw"
+                else:
+                    proc = _processed_tensor(name)
+                    pmd = (proc.metadata or {}) if proc is not None else {}
+                    if proc is not None and any(
+                        str(p) in (ta, tb) for p in pmd.get("pol", [])
+                    ):
+                        source = "processed"
+                    else:
+                        raise ValueError(
+                            f"Need {ta}/{tb}: run Separate, or load beamline data "
+                            "with polarization tags."
+                        )
+
+        if source == "separated":
+            a, _ = _separated_tensor(name, f"processed/{ta}")
+            b, _ = _separated_tensor(name, f"processed/{tb}")
+            return np.asarray(a.value, float), np.asarray(b.value, float), source
+
+        if source in ("raw", "processed"):
+            tensor = (
+                _require_tensor(name)
+                if source == "raw"
+                else _processed_tensor(name)
+            )
+            if tensor is None:
+                raise ValueError(f"No {source} data for '{name}'.")
+            if tensor.value.ndim != 3:
+                raise ValueError(
+                    f"{source} must be a frame stack (n,y,x) with pol tags; "
+                    "for paired 4-D cubes run Separate first."
+                )
+            pol = [str(p) for p in (tensor.metadata or {}).get("pol", [])]
+            if len(pol) != tensor.value.shape[0]:
+                raise ValueError(f"{source} has no per-frame pol tags.")
+            ia = [i for i, p in enumerate(pol) if p == ta]
+            ib = [i for i, p in enumerate(pol) if p == tb]
+            if not ia or not ib:
+                raise ValueError(f"{source} missing frames tagged {ta} and/or {tb}.")
+            v = np.asarray(tensor.value, float)
+            return v[ia], v[ib], source
+
+        raise ValueError("source must be auto, separated, raw, or processed.")
+
+    def make_pcd_map(
+        self,
+        name: str,
+        *,
+        source: str = "auto",
+        register: bool = True,
+        convention: str | None = None,
+    ) -> dict[str, Any]:
+        """Build /analysis/pcd from CP/CM stacks and return a short summary."""
+        if convention is None:
+            convention = (
+                (_require_tensor(name).metadata or {}).get("default_convention")
+                or dichroism.UNIVERSAL_CONVENTION
+            )
+        cp, cm, used = self._pol_stacks(name, ("CP", "CM"), source)
+        res = dichroism.pcd_map(cp, cm, convention=convention, register=register)
+        ds = products.map_dataset(
+            "pcd",
+            res["map"],
+            extra={"mean_cp": res["mean_cp"], "mean_cm": res["mean_cm"]},
+            attrs={
+                "convention": convention,
+                "formula": dichroism.XMCD_FORMULA,
+                "n_cp": int(cp.shape[0]),
+                "n_cm": int(cm.shape[0]),
+                "registered": bool(register),
+                "source_node": used,
+            },
+            um_per_px=self._um_per_px(name),
+            long_name="PEEM circular dichroism asymmetry",
+        )
+        if not global_workspace.write_analysis_data(name, "pcd", ds):
+            raise ValueError(f"PEEM data '{name}' not found.")
+        a = res["map"]
+        finite = a[np.isfinite(a)]
+        return {
+            "name": name,
+            "kind": "pcd",
+            "formula": dichroism.XMCD_FORMULA,
+            "convention": convention,
+            "source": used,
+            "registered": bool(register),
+            "shape": [int(s) for s in a.shape],
+            "mean": float(np.nanmean(finite)) if finite.size else float("nan"),
+            "display_node": "analysis/pcd",
+        }
+
+    def make_pld_map(
+        self,
+        name: str,
+        *,
+        source: str = "auto",
+        register: bool = True,
+    ) -> dict[str, Any]:
+        """Build /analysis/pld from LH/LV stacks."""
+        lh, lv, used = self._pol_stacks(name, ("LH", "LV"), source)
+        res = dichroism.pld_map(lh, lv, register=register)
+        ds = products.map_dataset(
+            "pld",
+            res["map"],
+            extra={"mean_lh": res["mean_lh"], "mean_lv": res["mean_lv"]},
+            attrs={
+                "formula": dichroism.XLD_FORMULA,
+                "n_lh": int(lh.shape[0]),
+                "n_lv": int(lv.shape[0]),
+                "registered": bool(register),
+                "source_node": used,
+            },
+            um_per_px=self._um_per_px(name),
+            long_name="PEEM linear dichroism asymmetry",
+        )
+        if not global_workspace.write_analysis_data(name, "pld", ds):
+            raise ValueError(f"PEEM data '{name}' not found.")
+        a = res["map"]
+        finite = a[np.isfinite(a)]
+        return {
+            "name": name,
+            "kind": "pld",
+            "formula": dichroism.XLD_FORMULA,
+            "source": used,
+            "registered": bool(register),
+            "shape": [int(s) for s in a.shape],
+            "mean": float(np.nanmean(finite)) if finite.size else float("nan"),
+            "display_node": "analysis/pld",
+        }
+
+    def export_analysis_map(
+        self, name: str, kind: str, path: str | Path, *, png: bool = True
+    ) -> str:
+        """Write /analysis/<kind> ``data`` as float TIFF (+ optional colour PNG)."""
+        import tifffile
+        from matplotlib import pyplot as plt
+
+        kind = kind.strip().strip("/")
+        if kind.startswith("analysis/"):
+            kind = kind.split("/", 1)[1]
+        ds = global_workspace.pull_analysis_data(name, kind)
+        if ds is None or "data" not in ds:
+            raise ValueError(f"No /analysis/{kind} map on '{name}'.")
+        arr = np.asarray(ds["data"].values, dtype=np.float32)
+        out = Path(path).expanduser().resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tifffile.imwrite(out, arr)
+        if png:
+            png_path = out.with_suffix(".png")
+            finite = arr[np.isfinite(arr)]
+            vmax = float(np.nanpercentile(np.abs(finite), 99)) if finite.size else 1.0
+            if vmax <= 0:
+                vmax = 1.0
+            fig, ax = plt.subplots(figsize=(4, 4), dpi=120)
+            im = ax.imshow(arr, cmap="bwr", vmin=-vmax, vmax=vmax, origin="upper")
+            ax.set_title(f"{name} / {kind}")
+            ax.axis("off")
+            fig.colorbar(im, ax=ax, fraction=0.046)
+            fig.savefig(png_path, bbox_inches="tight")
+            plt.close(fig)
+        return str(out)
+
+    def get_display_tensor(self, name: str, node: str = "raw") -> TensorData:
+        """TensorData for DataViewer: raw / processed / processed/<tag> / analysis/<kind>."""
+        node = (node or "raw").strip("/")
+        if node in products.ANALYSIS_KINDS:
+            node = f"analysis/{node}"
+        if node.startswith("analysis/"):
+            td = global_workspace.pull_tensor_data(name, node)
+            if td is None:
+                raise ValueError(f"No {node} on '{name}'.")
+            return td
+        if node == "raw":
+            return _require_tensor(name)
+        if node == "processed":
+            td = _processed_tensor(name)
+            if td is None:
+                raise ValueError(f"PEEM data '{name}' has no processed data.")
+            return td
+        if node.startswith("processed/"):
+            td, _ = _separated_tensor(name, node)
+            return td
+        raise ValueError(f"Unknown display node {node!r}.")
+
+    def list_analysis_maps(self, name: str) -> list[str]:
+        _require_tensor(name)
+        return [
+            k
+            for k in products.ANALYSIS_KINDS
+            if global_workspace.pull_analysis_data(name, k) is not None
+        ]
+
     def get_view_tensor(
         self,
         name: str,
@@ -1278,6 +1495,7 @@ class PeemService:
             "has_sumrule": sumrule_meta["has_sumrule"],
             "sumrule_i0_applied": sumrule_meta["sumrule_i0_applied"],
             "sumrule_tags": sumrule_meta["sumrule_tags"],
+            "analysis_maps": self.list_analysis_maps(name),
         }
 
     @staticmethod

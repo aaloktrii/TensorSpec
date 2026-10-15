@@ -82,7 +82,8 @@ Grand App
 	- [x] `np.trapz` → NumPy≥2.4-safe in `sumrule.py`
 	- [x] DataViewer extras (off by default): cmap / symmetric limits / draw tools / Play (`stack_player`)
 	- [x] Beamtime batch scripts + library: `scripts/{ue49,esm,als}/…`, `core/peem/{dichroism,registration,domains,ue49/batch,esm/batch}`, `plotting/ue49_preview.py`
-	- [ ] Optional later from #6: **XPEEM map tab** (interactive imaging GUI: clean → drift → stack → asymmetry → ROI/domains)
+	- [x] Frame tab uses DataViewer; **Make PCD/PLD** + export on same PEEM panel (no second suite tab)
+	- [ ] Optional later from #6: stack clean-up / multi-method drift / ROI domains controls (still no separate XPEEM tab)
 - [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/Raman/DFT/ARPES/Transport/ML (prevent drag-to-zero)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)
