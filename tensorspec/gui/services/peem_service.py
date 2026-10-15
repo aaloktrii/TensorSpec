@@ -87,6 +87,14 @@ def _tif_paths(source_path: Path) -> list[Path]:
     raise ValueError("Path must be a TIF file or directory.")
 
 
+def _is_beamline_folder(path: Path) -> bool:
+    try:
+        peem_beamline_loaders.detect_format(path)
+        return True
+    except ValueError:
+        return False
+
+
 def _float64_bytes_for_shape(shape: tuple[int, ...] | list[int]) -> int:
     dims = [int(size) for size in shape]
     if any(size < 0 for size in dims):
@@ -869,8 +877,9 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
         for p in resolved:
             if not p.exists():
                 raise ValueError(f"Path not found: {p}")
-            # Size gate for TIF stacks / folders only (.dat / .P3B / .txt skip it).
-            if p.is_dir() or p.suffix.lower() in (".tif", ".tiff"):
+            # Size gate for TIF stacks / folders only (.dat / .P3B / .txt skip it); a folder that is
+            # a UE49 scan, UView or P3B acquisition is beamline data (loaded as float32), not a TIF stack
+            if p.suffix.lower() in (".tif", ".tiff") or (p.is_dir() and not _is_beamline_folder(p)):
                 _enforce_peem_size(p)
 
         # one loader for both PEEM tabs (peem_steps/load.py): UE49 detector maps, /history, automatic name

@@ -41,6 +41,7 @@ class PeemLoadThread(QThread):
         csv_path=None,
         *,
         beamline_paths=None,
+        images_path=None,
     ):
         super().__init__()
         self.service = service
@@ -48,11 +49,14 @@ class PeemLoadThread(QThread):
         self.name = name
         self.csv_path = csv_path
         self.beamline_paths = beamline_paths
+        self.images_path = images_path
 
     def run(self):
         try:
             if self.beamline_paths is not None:
                 summary = self.service.load_beamline(self.beamline_paths, name=self.name)
+            elif self.images_path is not None:
+                summary = self.service.load_images(self.images_path, name=self.name)
             else:
                 summary = self.service.load_path(
                     self.path, name=self.name, csv_path=self.csv_path
@@ -90,6 +94,9 @@ class PeemPanel(QWidget):
         self.btn_load_stack = QPushButton("Load TIF Stack")
         self.btn_load_stack.clicked.connect(self._load_tif_stack)
         self.btn_load_folder = QPushButton("Load Folder")
+        self.btn_load_folder.setToolTip("Any PEEM folder in one step: TIF / TIFF, PNG / JPEG, UE49 scan,\n"
+                                        "UView .dat, ALS .P3B, or a folder of acquisitions (pick which).\n"
+                                        "Other files (.rtf, .ipf, notes ...) are skipped.")
         self.btn_load_folder.clicked.connect(self._load_folder)
         btn_row.addWidget(self.btn_load_stack)
         btn_row.addWidget(self.btn_load_folder)
@@ -236,9 +243,74 @@ class PeemPanel(QWidget):
             self._start_load(path)
 
     def _load_folder(self):
-        path = QFileDialog.getExistingDirectory(self, "Load TIF folder")
-        if path:
+        """Any PEEM folder in one step (service.inspect_folder): TIF / TIFF, PNG / JPEG, UE49 scan,
+        UView .dat, ALS .P3B, or a folder of acquisitions (pick which). Other files are skipped."""
+        path = QFileDialog.getExistingDirectory(
+            self, "Load folder (TIF, PNG / JPG, UE49 scan, UView .dat, ALS .P3B, or a folder of these)")
+        if not path:
+            return
+        try:
+            info = self.service.inspect_folder(path)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Load folder", str(exc))
+            return
+        skipped = ", ".join(f"{n} {ext}" for ext, n in info.get("ignored", {}).items())
+        self._skipped_note = f" | skipped: {skipped}" if skipped else ""
+        kind = info["kind"]
+        if kind == "tif":
             self._start_load(path)
+        elif kind == "images":
+            self._start_images_load(path)
+        elif kind == "beamline":
+            self._start_beamline_load([path])
+        else:
+            chosen = self._choose_acquisitions(path, info)
+            if chosen:
+                if not self.name_edit.text().strip():  # one dataset: named after the chosen folder
+                    self.name_edit.setText(os.path.basename(path.rstrip(os.sep)).replace(" ", "_"))
+                self._start_beamline_load(chosen)
+
+    def _choose_acquisitions(self, root: str, info: dict) -> list[str]:
+        """A folder of acquisitions: all listed and selected; click / shift / cmd to choose, then load
+        the selected ones as one dataset (e.g. the CL and CR folders)."""
+        from PySide6.QtWidgets import QAbstractItemView, QDialog, QDialogButtonBox, QListWidget
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Load from {os.path.basename(root)}")
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(QLabel(f"{len(info['paths'])} acquisition(s) found, all selected. "
+                             "Click / shift-click / cmd-click to choose; they load as one dataset."))
+        lst = QListWidget()
+        lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        for fmt, p in zip(info.get("formats", []), info["paths"]):
+            lst.addItem(f"[{fmt}] {os.path.relpath(p, root)}")
+            lst.item(lst.count() - 1).setData(Qt.UserRole, p)
+        lst.selectAll()
+        lst.setMinimumSize(560, 320)
+        lay.addWidget(lst)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        ok = bb.button(QDialogButtonBox.Ok)
+        bb.accepted.connect(dlg.accept)
+        bb.rejected.connect(dlg.reject)
+        lst.itemSelectionChanged.connect(lambda: (ok.setText(f"Load selected ({len(lst.selectedItems())})"),
+                                                  ok.setEnabled(bool(lst.selectedItems()))))
+        ok.setText(f"Load selected ({lst.count()})")
+        lay.addWidget(bb)
+        if self._exec_dialog(dlg) != QDialog.Accepted:
+            return []
+        return [lst.item(i).data(Qt.UserRole) for i in range(lst.count()) if lst.item(i).isSelected()]
+
+    def _exec_dialog(self, dlg) -> int:
+        return dlg.exec()
+
+    def _start_images_load(self, path: str):
+        name = self.name_edit.text().strip() or os.path.basename(path.rstrip(os.sep)).replace(" ", "_")
+        self.name_edit.setText(name)
+        self.status_label.setText(f"Loading images {path}…")
+        self._set_load_buttons_enabled(False)
+        self._load_thread = PeemLoadThread(self.service, name=name, images_path=path)
+        self._load_thread.finished_signal.connect(self._on_load_finished)
+        self._load_thread.start()
 
     def _load_beamline(self):
         """Pick UE49/UView/P3B files, or one+ acquisition folders (CL then CR, etc.)."""
@@ -328,7 +400,8 @@ class PeemPanel(QWidget):
             parts.append(f"format={summary['format']}")
         if summary.get("csv_prompt"):
             parts.append("Attach CSV if needed.")
-        self.status_label.setText(" | ".join(parts))
+        self.status_label.setText(" | ".join(parts) + getattr(self, "_skipped_note", ""))
+        self._skipped_note = ""
 
     def _attach_csv(self):
         name = self._require_dataset()
