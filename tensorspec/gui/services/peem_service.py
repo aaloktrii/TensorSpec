@@ -38,6 +38,15 @@ from tensorspec.core.peem.sumrule import (
     pick_source_kind,
 )
 from tensorspec.core.workspace import global_workspace
+# XPEEM map tab: its steps are mixins (gui/services/peem_steps/); the stack / BG / sum-rule methods
+# below are unchanged
+from tensorspec.gui.services.peem_steps.annotations import PeemAnnotationSteps
+from tensorspec.gui.services.peem_steps.cleanup import PeemCleanupSteps
+from tensorspec.gui.services.peem_steps.drift_stack import PeemDriftStackSteps
+from tensorspec.gui.services.peem_steps.image_analysis import PeemImageAnalysisSteps
+from tensorspec.gui.services.peem_steps.load import PeemLoadSteps
+from tensorspec.gui.services.peem_steps.maps_domains import PeemMapsDomainsSteps
+from tensorspec.gui.services.peem_steps.channels import PeemChannelSteps
 
 MAX_PEEM_BYTES = 512 * 1024 * 1024
 MAX_PEEM_FRAMES = 10_000
@@ -745,8 +754,13 @@ def _load_summary(
     }
 
 
-class PeemService:
-    """Qt-facing PEEM operations via global_workspace."""
+class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImageAnalysisSteps,
+                  PeemMapsDomainsSteps, PeemAnnotationSteps, PeemChannelSteps):
+    """Qt-facing PEEM operations via global_workspace.
+
+    The XPEEM map tab's steps (drift_correct, stack, asymmetry, maps, ROIs ...) and the Sum Rule
+    window's ROI spectra come from the mixins in gui/services/peem_steps/ (contract:
+    peem_steps/__init__.py)."""
 
     def load_path(
         self,
@@ -859,23 +873,13 @@ class PeemService:
             if p.is_dir() or p.suffix.lower() in (".tif", ".tiff"):
                 _enforce_peem_size(p)
 
-        tensor = peem_beamline_loaders.load_beamline(
-            resolved,
-            i0_normalize=i0_normalize,
-            allow_mixed_fov=allow_mixed_fov,
-            tpx3=tpx3,
-            drop_bad_frames=drop_bad_frames,
-            pol=pol,
-        )
-        md = tensor.metadata or {}
-        scans = md.get("scans") or []
-        fallback = "_".join(str(s) for s in scans[:3]) if scans else "beamline"
-        fallback = re.sub(r"[^A-Za-z0-9_.-]+", "_", fallback).strip("_") or "beamline"
-        label = _safe_label(name, fallback) if name else _safe_label(fallback, "beamline")
-        global_workspace.push_spectroscopy_data(label, tensor)
-        summary = _load_summary(label, tensor, csv_prompt=False, csv_candidates=[])
-        summary["format"] = md.get("format")
-        summary["beamline"] = md.get("beamline")
+        # one loader for both PEEM tabs (peem_steps/load.py): UE49 detector maps, /history, automatic name
+        loaded = PeemLoadSteps.load_beamline(
+            self, resolved, name, pol=pol, i0_normalize=i0_normalize, tpx3=tpx3,
+            drop_bad_frames=drop_bad_frames, allow_mixed_fov=allow_mixed_fov)
+        tensor = _require_tensor(loaded["name"])
+        summary = _load_summary(loaded["name"], tensor, csv_prompt=False, csv_candidates=[])
+        summary.update(loaded)  # + format, beamline, pol_counts, fov_um, um_per_px, energy_range ...
         return summary
 
     def pair(self, name: str, mode: str) -> dict[str, Any]:

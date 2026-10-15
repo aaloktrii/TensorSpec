@@ -78,15 +78,18 @@ Grand App
 	- [x] separate CP/CM or LH/LV into processed children
 	- [x] background subtraction (shared BG core) applied across stack / channels
 	- [x] XMCD sum-rule analysis for CP/CM (and related pairs)
-	- [x] Layout: left forms-only; right tabs Frame | BG | Sum Rule (previews no longer crowd left scroll)
+	- [x] Layout: left forms-only; right tabs Frame | Map | Analysis (BG / Sum Rule moved to the Sum Rule window)
 	- [x] `np.trapz` → NumPy≥2.4-safe in `sumrule.py`
 	- [x] DataViewer extras (off by default): cmap / symmetric limits / draw tools / Play (`stack_player`)
 	- [x] Beamtime batch scripts + library: `scripts/{ue49,esm,als}/…`, `core/peem/{dichroism,registration,domains,ue49/batch,esm/batch}`, `plotting/ue49_preview.py`
-	- [ ] Optional later from #6: **XPEEM map tab** (interactive imaging GUI: clean → drift → stack → asymmetry → ROI/domains)
+	- [x] Calculate + analyse in the PEEM panel (`gui/components/peem_map_tools.py`, service steps `gui/services/peem_steps/`): CP/CM pairs after Stack Pairs + Drift → asymmetry map ((CM−CP)/(CM+CP), (LV−LH)/(LV+LH)), line profiles (PDF), histogram, FFT, domain width, ROI statistics, SDA domain map, export (TIFF + colour PNG, options)
+	- [x] **→ Sum Rule**: corrected CP/CM pairs → new dataset with an energy per pair → Sum Rule window (XAS suite, From PEEM)
+	- [ ] More drift methods (sub-pixel, SPEEM Igor ports) and stack clean-up in the panel (back end present: `core/peem/drift.py`, `peem_steps/drift_stack.py`, `cleanup.py`)
 - [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/Raman/DFT/ARPES/Transport/ML (prevent drag-to-zero)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
 	- [x] 1D CSV/TXT load (single spectrum or paired CP/CM·LH/LV)
 	- [x] background subtraction + XMCD sum rule via **shared PEEM BG / sum-rule core** (no separate `xas_engine.py` yet)
+	- [x] Sum Rule window: tab **From PEEM** (`gui/components/peem_sumrule_panel.py`: region of the corrected CP/CM → spectra → BG → sum rule; the PEEM panel's BG / Sum Rule sections moved here) next to **XAS spectra (.txt)**
 - [x] Raman Suite (`core/raman_engine.py`, `core/io/raman_loaders.py`, `core/raman/`, `plotting/backends/raman_matplotlib_engine.py` + `raman_views/`, `plotting/viewers/raman_canvas.py`, `gui/services/raman_service.py`, `gui/components/raman_panel.py` + `raman_tabs/`, `gui/suites/raman_suite.py`)
 	- [x] 1 · Spectra: overlay, typed ranges, auto / N / manual peaks, Lorentzian / Gaussian / pseudo-Voigt, Si calibration, backgrounds; stacked figure
 	- [x] 2 · Map: total intensity, band integrals, movable area + fit, fit every pixel → peak maps, compare cells
