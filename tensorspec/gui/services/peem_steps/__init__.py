@@ -19,6 +19,8 @@ checks every public call is listed here and runs the workflow without Qt):
                                           do not record it). load_ue49 / load_uview: one format.
     find_ue49_scans, set_detector_maps    UE49 helpers (TPX3 dead-pixel / flat-field maps)
     load_path, attach_csv  [peem_service] TIF stack / folder for the PEEM tab, beamline CSV
+    inspect_folder, load_images           "Load Folder": what a folder holds (UE49 / UView / P3B / TIF /
+                                          PNG / JPEG / a folder of acquisitions); PNG / JPEG frames
     unload                                remove a dataset
     get_meta, xmcd_meta                   dataset summary (frames, polarizations, FOV, products ...)
 

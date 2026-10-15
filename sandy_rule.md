@@ -29,6 +29,7 @@ tensorspec/
 │   │   ├── __init__.py
 │   │   ├── peem_loaders.py   # TIF / ZIP / folder PEEM stacks (+ optional beamline pol aliases)
 │   │   ├── peem_beamline_loaders.py  # load_beamline(): detect UE49 / UView / P3B → PEEM TensorData
+│   │   ├── peem_folder.py    # Load Folder: recognize TIF / PNG / JPEG / UE49 / UView / P3B / folder of acquisitions
 │   │   ├── ue49_loaders.py   # BESSY II UE49 scan .txt + TIFF folder (+ TPX3 via peem/ue49/detector)
 │   │   ├── uview_loaders.py  # Elmitec UView .dat (BNL ESM)
 │   │   ├── p3b_loaders.py    # ALS 11.0.1 PEEM-3 .P3B frames
