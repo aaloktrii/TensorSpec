@@ -141,6 +141,27 @@ class PeemLoadSteps:
         energy, src = resolve_energy(tensor.value.shape[0], tensor.metadata or {})
         return None if src == "index" else [float(np.min(energy)), float(np.max(energy))]
 
+    @staticmethod
+    def inspect_folder(path: str | Path) -> dict[str, Any]:
+        """What a folder holds and how to load it (core/io/peem_folder.inspect_folder): kind beamline /
+        tif / images / container, the paths to load, and the files that are not frames ("ignored")."""
+        from tensorspec.core.io import peem_folder
+
+        return peem_folder.inspect_folder(path)
+
+    def load_images(self, path: str | Path, name: str | None = None) -> dict[str, Any]:
+        """A folder of PNG / JPEG frames -> PEEM dataset (same summary as load_path)."""
+        from tensorspec.core.io import peem_folder
+        from tensorspec.gui.services.peem_service import _load_summary, _safe_label  # imports this module
+
+        tensor = peem_folder.load_image_folder(path)
+        label = _safe_label(re.sub(r"[^A-Za-z0-9_.-]", "_", name or Path(path).name), "images")
+        global_workspace.push_spectroscopy_data(label, tensor)
+        _record(label, "load", {"loader": "image_sequence", "source": str(path), "shape": list(tensor.value.shape)})
+        summary = _load_summary(label, tensor, csv_prompt=False, csv_candidates=[])
+        summary["format"] = "images"
+        return summary
+
     def unload(self, name: str) -> None:
         """Remove a dataset (raw, processed and all maps) from the workspace and free its memory."""
         global_workspace.remove(name)
