@@ -5,7 +5,7 @@
 Each .nc file (batch maps.nc, analysis outputs, any NetCDF with 2-D variables; TIF stacks and PEEM
 folders also work) becomes a dataset in the PEEM panel: the Map view shows its first asymmetry-type
 map, the Show list every map in the file, and the panel's tools work on them (colour range,
-profiles, histogram, FFT, ROIs, ROI statistics, domain map, export, 7. Compare with a reference).
+profiles, histogram, FFT, ROIs, ROI statistics, domain map, export, 8. Compare with a reference).
 Several files: pick one in 1. Load → Dataset, compare them in 7.
 """
 from __future__ import annotations
