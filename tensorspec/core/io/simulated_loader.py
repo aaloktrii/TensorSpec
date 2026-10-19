@@ -43,6 +43,25 @@ def inplane_axes(data, metadata, n0: int, n1: int):
     )
 
 
+def kz_along_hv(data, metadata, n_hv: int):
+    """kz already stored for each photon energy. No conversion.
+
+    Angle stacks keep ``kz_normal``. Momentum stacks keep the same numbers in
+    ``metadata['kz_normal_emission_1perA']``. Length must match ``hv``.
+    """
+    if "kz_normal" in getattr(data, "files", ()):
+        kz = np.asarray(data["kz_normal"], float).ravel()
+        if kz.size == n_hv:
+            return kz
+    raw = (metadata or {}).get("kz_normal_emission_1perA")
+    if raw is None:
+        return None
+    kz = np.asarray(raw, float).ravel()
+    if kz.size == n_hv:
+        return kz
+    return None
+
+
 class SimulatedARPESLoader:
     """Loader for TensorSpec's native .npz simulated ARPES datasets.
 
@@ -67,6 +86,19 @@ class SimulatedARPESLoader:
                     )
                 ax0, ax1, space = inplane_axes(data, metadata, intensity.shape[1], intensity.shape[2])
                 metadata = {**metadata, "stack_axes": space}
+                kz = kz_along_hv(data, metadata, intensity.shape[0])
+                if kz is not None:
+                    metadata = {
+                        **metadata,
+                        "axis_alternates": {
+                            "kz (1/A)": {
+                                "dim": 0,
+                                "values": kz,
+                                "label": "kz",
+                                "unit": "1/A",
+                            }
+                        },
+                    }
                 return tensor_from_stacked_sim(
                     intensity,
                     data["hv"],

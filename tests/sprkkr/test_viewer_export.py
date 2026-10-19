@@ -69,11 +69,15 @@ def test_angle_hv_scan_loads_without_ky(tmp_path):
         theta=np.linspace(-15, 15, 5),
         phi=np.array([0.0]),
         E=np.linspace(-1.0, 0.1, 4),
+        kz_normal=np.array([2.5, 2.7]),
         metadata={"stack_axes": "angle"},
     )
     td = SimulatedARPESLoader.load(str(p))
     assert td.value.shape == (2, 4, 5, 1)
     assert td.labels[0] == "Photon Energy"
+    kz = td.metadata["axis_alternates"]["kz (1/A)"]
+    assert kz["dim"] == 0
+    assert np.allclose(kz["values"], [2.5, 2.7])
     assert td.labels[2].endswith("(Slit)")
     assert td.units[2] == "deg"
 
@@ -87,12 +91,16 @@ def test_momentum_hv_scan_loads_kx(tmp_path):
         kx=np.linspace(-1.0, 1.0, 4),
         ky=np.array([0.0]),
         E=np.linspace(-2.0, 0.1, 5),
-        metadata={"stack_axes": "k"},
+        metadata={
+            "stack_axes": "k",
+            "kz_normal_emission_1perA": [2.1, 3.4, 4.8],
+        },
     )
     td = SimulatedARPESLoader.load(str(p))
     assert td.value.shape == (3, 5, 4, 1)
     assert td.labels[2].startswith("kx")
     assert td.units[2] == "1/A"
+    assert np.allclose(td.metadata["axis_alternates"]["kz (1/A)"]["values"], [2.1, 3.4, 4.8])
 
 
 def test_both_axes_follow_the_flag(tmp_path):

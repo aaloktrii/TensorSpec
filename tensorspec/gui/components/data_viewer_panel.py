@@ -372,6 +372,8 @@ class SliceWidget(QFrame):
         self.combo_y.blockSignals(True)
         self.combo_layer.blockSignals(True)
         
+        self.combo_x.clear()
+        self.combo_y.clear()
         self.combo_layer.clear()
         self.combo_layer.addItem("Intensity")
         layers = self.tensor_data.metadata.get('layers', {}) if hasattr(self.tensor_data, 'metadata') and self.tensor_data.metadata else {}
@@ -382,7 +384,15 @@ class SliceWidget(QFrame):
             display = f"{label} ({unit})" if unit else label
             self.combo_x.addItem(display, userData=idx)
             self.combo_y.addItem(display, userData=idx)
-            
+
+        alts = {}
+        if getattr(self.tensor_data, "metadata", None):
+            alts = self.tensor_data.metadata.get("axis_alternates") or {}
+        for text, spec in alts.items():
+            dim = int(spec["dim"])
+            self.combo_x.addItem(text, userData=dim)
+            self.combo_y.addItem(text, userData=dim)
+
         self.combo_x.setCurrentIndex(self.x_idx)
         self.combo_y.setCurrentIndex(self.y_idx)
         self.combo_x.blockSignals(False)
@@ -667,7 +677,7 @@ class SliceWidget(QFrame):
                 data_source[tuple(slices)], calc_mode
             )
         
-        x_arr, y_arr = self.tensor_data.axes[self.x_idx], self.tensor_data.axes[self.y_idx]
+        x_arr, y_arr = self._axis_values(self.x_idx), self._axis_values(self.y_idx)
         dx_step = (x_arr[-1] - x_arr[0]) / max(1, len(x_arr) - 1) if len(x_arr) > 1 else 0.1
         dy_step = (y_arr[-1] - y_arr[0]) / max(1, len(y_arr) - 1) if len(y_arr) > 1 else 0.1
         extent = (x_arr[0] - dx_step/2, x_arr[-1] + dx_step/2, y_arr[0] - dy_step/2, y_arr[-1] + dy_step/2)
@@ -802,15 +812,28 @@ class SliceWidget(QFrame):
     
 
     # ------------------------------------------------------------- tools / overlays
+    def _axis_values(self, dim: int) -> np.ndarray:
+        """Coordinates drawn for ``dim``. A same-length alternate (kz vs hv) wins when selected."""
+        alts = {}
+        if getattr(self.tensor_data, "metadata", None):
+            alts = self.tensor_data.metadata.get("axis_alternates") or {}
+        for combo, idx in ((self.combo_x, self.x_idx), (self.combo_y, self.y_idx)):
+            if idx != dim:
+                continue
+            spec = alts.get(combo.currentText())
+            if spec and int(spec["dim"]) == dim:
+                return np.asarray(spec["values"], float)
+        return np.asarray(self.tensor_data.axes[dim], float)
+
     def _axis_to_index(self, val: float, dim: int) -> float:
         """Axis value -> fractional index along ``dim`` (axes assumed uniform)."""
-        a = np.asarray(self.tensor_data.axes[dim], float)
+        a = self._axis_values(dim)
         if a.size < 2 or a[-1] == a[0]:
             return 0.0
         return float((val - a[0]) / (a[-1] - a[0]) * (a.size - 1))
 
     def _index_to_axis(self, idx: float, dim: int) -> float:
-        a = np.asarray(self.tensor_data.axes[dim], float)
+        a = self._axis_values(dim)
         if a.size < 2:
             return float(a[0]) if a.size else 0.0
         return float(a[0] + idx * (a[-1] - a[0]) / (a.size - 1))
@@ -926,8 +949,8 @@ class SliceWidget(QFrame):
             return
             
         # 1. Map the raw mouse coordinates to the nearest valid index in the data arrays
-        x_arr = self.tensor_data.axes[self.x_idx]
-        y_arr = self.tensor_data.axes[self.y_idx]
+        x_arr = self._axis_values(self.x_idx)
+        y_arr = self._axis_values(self.y_idx)
         
         new_x_idx = int((np.abs(x_arr - event.xdata)).argmin())
         new_y_idx = int((np.abs(y_arr - event.ydata)).argmin())
@@ -970,8 +993,8 @@ class SliceWidget(QFrame):
         try:
             my_x_label = self.combo_x.currentText()
             my_y_label = self.combo_y.currentText()
-            x_arr = self.tensor_data.axes[self.x_idx]
-            y_arr = self.tensor_data.axes[self.y_idx]
+            x_arr = self._axis_values(self.x_idx)
+            y_arr = self._axis_values(self.y_idx)
 
             if my_x_label == source_x_label:
                 new_x_idx = int((np.abs(x_arr - source_x_val)).argmin())
@@ -1023,7 +1046,7 @@ class SliceWidget(QFrame):
                 self.tensor_data.value[tuple(slices)], calc_mode
             )
                     
-            x_arr, y_arr = self.tensor_data.axes[self.x_idx], self.tensor_data.axes[self.y_idx]
+            x_arr, y_arr = self._axis_values(self.x_idx), self._axis_values(self.y_idx)
             x_cross = self.parent_panel.global_coords[self.x_idx]
             y_cross = self.parent_panel.global_coords[self.y_idx]
             dx_px = int(self.parent_panel.global_halfwidths.get(self.x_idx, 0))
@@ -1050,9 +1073,9 @@ class SliceWidget(QFrame):
             out_y_ax = np.pad(y_arr, (0, max_len - len(y_arr)), constant_values=np.nan)
             out_y_pr = np.pad(prof_y, (0, max_len - len(prof_y)), constant_values=np.nan)
 
-            x_lbl = f"Horizontal_{self.tensor_data.labels[self.x_idx]}"
-            y_lbl = f"Vertical_{self.tensor_data.labels[self.y_idx]}"
-            header = f"{x_lbl}_{self.tensor_data.units[self.x_idx]},{x_lbl}_Intensity,{y_lbl}_{self.tensor_data.units[self.y_idx]},{y_lbl}_Intensity"
+            x_lbl = f"Horizontal_{self.combo_x.currentText()}"
+            y_lbl = f"Vertical_{self.combo_y.currentText()}"
+            header = f"{x_lbl},{x_lbl}_Intensity,{y_lbl},{y_lbl}_Intensity"
 
             data_matrix = np.column_stack((out_x_ax, out_x_pr, out_y_ax, out_y_pr))
             np.savetxt(path, data_matrix, delimiter=',', header=header, comments='', fmt='%g')

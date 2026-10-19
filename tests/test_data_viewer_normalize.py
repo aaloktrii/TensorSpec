@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from tensorspec.core.data_models import TensorData  # noqa: E402
+from tensorspec.core.io.simulated_loader import SimulatedARPESLoader  # noqa: E402
 from tensorspec.gui.components.data_viewer_panel import (  # noqa: E402
     DataViewerPanel,
     iter_norm_axis_choices,
@@ -53,6 +54,32 @@ def test_normalize_over_axes_plane_energy_slit():
     assert np.allclose(out[0], 1.0)
     assert np.allclose(out[1], 1.0)
     assert arr[1, 0, 0] == 10.0
+
+
+def test_kz_is_an_axis_option_and_sets_the_extent(app, tmp_path):
+    p = tmp_path / "hv_k.npz"
+    np.savez(
+        p,
+        intensity=np.ones((3, 4, 1, 5)),
+        hv=np.array([40.0, 84.0, 120.0]),
+        kx=np.linspace(-1.0, 1.0, 4),
+        ky=np.array([0.0]),
+        E=np.linspace(-2.0, 0.1, 5),
+        metadata={"stack_axes": "k", "kz_normal_emission_1perA": [2.0, 4.0, 6.0]},
+    )
+    panel = DataViewerPanel()
+    panel.load_data(SimulatedARPESLoader.load(str(p)))
+    view = panel.primary_view()
+    ik = view.combo_x.findText("kz (1/A)")
+    assert ik >= 0
+    assert view.combo_y.findText("kz (1/A)") == ik
+    view.combo_x.setCurrentIndex(ik)
+    view.combo_y.setCurrentIndex(1)  # Energy
+    app.processEvents()
+    view.redraw()
+    extent = view.im_main.get_extent()
+    assert extent[0] < 2.0 < 6.0 < extent[1]
+    assert view.ax_main.get_xlabel() == "kz (1/A)"
 
 
 def test_norm_combo_per_panel_and_along_energy(app):
