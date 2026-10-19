@@ -65,13 +65,22 @@ def tensor_from_stacked_sim(
 ):
     from tensorspec.core.data_models import TensorData
 
+    # A stack whose in-plane axes are already momenta (metadata["stack_axes"] == "k", e.g. a photon-energy scan computed
+    # with a fixed k_slit range at every hv) is labelled in 1/A; the default is the angle-space stack of the runner.
+    meta = dict(metadata or {})
+    if str(meta.get("stack_axes", "angle")).lower() == "k":
+        labels = ["Photon Energy", "Energy", "kx (Slit)", "ky (Deflect)"]
+        units = ["eV", "eV", "1/A", "1/A"]
+    else:
+        labels = ["Photon Energy", "Energy", "Θ (Slit)", "Φ (Deflect)"]
+        units = ["eV", "eV", "deg", "deg"]
     return TensorData(
         value=np.transpose(stacked, (0, 3, 1, 2)),
         axes=[hv, energy, theta, phi],
-        labels=["Photon Energy", "Energy", "Θ (Slit)", "Φ (Deflect)"],
-        units=["eV", "eV", "deg", "deg"],
+        labels=labels,
+        units=units,
         data_type="Simulated ARPES Matrix Elements",
-        metadata=metadata or {},
+        metadata=meta,
     )
 
 

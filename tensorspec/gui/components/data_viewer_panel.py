@@ -38,6 +38,11 @@ def _default_floor_ref_dir() -> Path:
     ).expanduser()
 
 
+def _mpl_cmap(name: str) -> str:
+    """Menu names with white at low intensity. Matplotlib names pass through."""
+    return {"grey": "gray_r", "blue": "Blues", "terrain": "terrain_r"}.get(name, name)
+
+
 def is_ml_label_layer(layer_name: str) -> bool:
     return (
         layer_name.startswith("domains_")
@@ -71,6 +76,36 @@ def plane_layer(layer_data, shape: tuple, y_idx: int, x_idx: int) -> np.ndarray 
     if arr.shape == (nx, ny) and nx != ny:
         return arr.T
     return None
+
+
+def iter_norm_axis_choices(labels: list[str]) -> list[tuple[str, tuple[int, ...]]]:
+    """Build Off / Along-dim / Plane-dim×dim choices from loaded axis labels."""
+    choices: list[tuple[str, tuple[int, ...]]] = [("Off", ())]
+    n = len(labels)
+    for i, lab in enumerate(labels):
+        choices.append((f"Along {lab}", (i,)))
+    for i in range(n):
+        for j in range(i + 1, n):
+            choices.append((f"Plane: {labels[i]} × {labels[j]}", (i, j)))
+    return choices
+
+
+def normalize_over_axes(arr: np.ndarray, axes: tuple[int, ...]) -> np.ndarray:
+    """Display-only: for each fixed index outside *axes*, divide by max over *axes*.
+
+    Example: axes=(Energy, Slit) → each dispersion picture (one per hv, φ, …) unit-max.
+    Does not mutate *arr*.
+    """
+    out = np.array(arr, dtype=float, copy=True)
+    if not axes or out.size == 0:
+        return out
+    for ax in axes:
+        if ax < 0 or ax >= out.ndim:
+            return out
+    peaks = np.nanmax(np.abs(out), axis=axes, keepdims=True)
+    bad = (peaks == 0) | ~np.isfinite(peaks)
+    peaks = np.where(bad, 1.0, peaks)
+    return out / peaks
 
 
 class MplCanvas(FigureCanvas):
@@ -161,11 +196,22 @@ class SliceWidget(QFrame):
         row_disp.addWidget(QLabel("Colormap:"))
         self.combo_cmap = QComboBox()
         self.combo_cmap.addItems(["magma", "viridis", "plasma", "inferno", "cividis", "hot", "cool", "gray", "twilight",
-                                  "bwr", "RdBu_r"])
-        self.combo_cmap.setToolTip("bwr = RWB (blue -, white centre, red +); use with Sym ±")
+                                  "bwr", "RdBu_r", "grey", "blue", "terrain"])
+        self.combo_cmap.setToolTip(
+            "grey / blue / terrain: white = low intensity, dark end = high "
+            "(MATLAB-style). bwr = RWB; use with Sym ±"
+        )
         self.combo_cmap.setCurrentText("magma")
         self.combo_cmap.currentIndexChanged.connect(self.redraw)
         row_disp.addWidget(self.combo_cmap)
+
+        self.btn_export = QPushButton("Save EPS/PDF")
+        self.btn_export.setToolTip(
+            "PDF or EPS for Illustrator: the map is one image object, "
+            "axis letters stay editable text. Cursor lines are left out."
+        )
+        self.btn_export.clicked.connect(self.export_vector_figure)
+        row_disp.addWidget(self.btn_export)
 
         self.chk_profiles = QCheckBox("XY Profiles")
         self.chk_profiles.stateChanged.connect(self.toggle_profiles)
@@ -198,6 +244,18 @@ class SliceWidget(QFrame):
         self.spin_gamma.setToolTip("Gamma for intensity display (1 = linear).")
         self.spin_gamma.valueChanged.connect(self.redraw)
         row_disp.addWidget(self.spin_gamma)
+
+        row_disp.addWidget(QLabel("Norm:"))
+        self.combo_norm = QComboBox()
+        self.combo_norm.setMinimumWidth(140)
+        self.combo_norm.setToolTip(
+            "Display-only max-normalize over chosen dims before the 2D cut "
+            "(Along Energy = per spectrum; Plane Energy×Slit = per dispersion picture; "
+            "Plane Slit×Deflect = per isoenergy map). Stored data unchanged. "
+            "Each snapped panel has its own Norm."
+        )
+        self.combo_norm.currentIndexChanged.connect(self.redraw)
+        row_disp.addWidget(self.combo_norm)
 
         self.chk_sym = QCheckBox("Sym ±")
         self.chk_sym.setToolTip("Symmetric colour limits c ± L (white = c with bwr); L = contrast % of the 99th percentile of |v - c|")
@@ -279,7 +337,9 @@ class SliceWidget(QFrame):
         self.ax_prof_x = self.canvas.figure.add_subplot(self.gs[1, 0], sharex=self.ax_main)
         self.ax_prof_ortho = self.canvas.figure.add_subplot(self.gs[:, 2])
 
-        self.im_main = self.ax_main.imshow(np.zeros((10, 10)), origin='lower', aspect='auto', cmap='magma')
+        self.im_main = self.ax_main.imshow(
+            np.zeros((10, 10)), origin='lower', aspect='auto', cmap='magma', rasterized=True
+        )
         self.line_x, = self.ax_prof_x.plot([], [], 'b-')
         self.line_y, = self.ax_prof_y.plot([], [], 'r-')
         self.line_ortho, = self.ax_prof_ortho.plot([], [], 'g-', linewidth=1.5)
@@ -328,8 +388,40 @@ class SliceWidget(QFrame):
         self.combo_x.blockSignals(False)
         self.combo_y.blockSignals(False)
         self.combo_layer.blockSignals(False)
+        self._refresh_norm_combo()
         self._update_ortho_combo()
         self._rebuild_sliders()
+
+    def _refresh_norm_combo(self):
+        """Fill Norm choices from current tensor axis labels; keep prior selection if possible."""
+        prev = self.combo_norm.currentData()
+        labels = list(self.tensor_data.labels) if self.tensor_data is not None else []
+        self.combo_norm.blockSignals(True)
+        self.combo_norm.clear()
+        for text, axes in iter_norm_axis_choices(labels):
+            self.combo_norm.addItem(text, userData=axes)
+        restore = 0
+        if prev is not None:
+            for i in range(self.combo_norm.count()):
+                if self.combo_norm.itemData(i) == prev:
+                    restore = i
+                    break
+        self.combo_norm.setCurrentIndex(restore)
+        self.combo_norm.blockSignals(False)
+
+    def _selected_norm_axes(self) -> tuple[int, ...]:
+        data = self.combo_norm.currentData()
+        if not data:
+            return ()
+        return tuple(int(a) for a in data)
+
+    def _apply_norm_nd(self, data: np.ndarray, layer_text: str) -> np.ndarray:
+        axes = self._selected_norm_axes()
+        if not axes or is_ml_label_layer(layer_text):
+            return data
+        if data.ndim != self.tensor_data.ndim:
+            return data
+        return normalize_over_axes(data, axes)
 
     def _update_ortho_combo(self):
         self.combo_ortho.blockSignals(True)
@@ -554,18 +646,25 @@ class SliceWidget(QFrame):
             else:
                 data_source = np.asarray(layer_data)
                 if data_source.ndim == self.tensor_data.ndim:
+                    data_source = self._apply_norm_nd(data_source, layer_text)
                     sliced = self._reduce_hidden_axes(
                         data_source[tuple(slices)], calc_mode
                     )
                 elif spatial is not None:
                     sliced = spatial
                 else:
+                    data_source = self._apply_norm_nd(
+                        np.asarray(self.tensor_data.value), layer_text
+                    )
                     sliced = self._reduce_hidden_axes(
-                        self.tensor_data.value[tuple(slices)], calc_mode
+                        data_source[tuple(slices)], calc_mode
                     )
         else:
+            data_source = self._apply_norm_nd(
+                np.asarray(self.tensor_data.value), layer_text
+            )
             sliced = self._reduce_hidden_axes(
-                self.tensor_data.value[tuple(slices)], calc_mode
+                data_source[tuple(slices)], calc_mode
             )
         
         x_arr, y_arr = self.tensor_data.axes[self.x_idx], self.tensor_data.axes[self.y_idx]
@@ -605,7 +704,7 @@ class SliceWidget(QFrame):
                 vmin, vmax_adj = self.fixed_limits
             self.shown_limits = (float(vmin), float(vmax_adj))
             gamma = float(self.spin_gamma.value())
-            cmap_name = self.combo_cmap.currentText()
+            cmap_name = _mpl_cmap(self.combo_cmap.currentText())
             self.im_main.set_cmap(cmap_name)
             if abs(gamma - 1.0) < 1e-6:
                 self.im_main.set_norm(mcolors.Normalize(vmin=vmin, vmax=vmax_adj))
@@ -962,17 +1061,39 @@ class SliceWidget(QFrame):
             QMessageBox.critical(self, "Export Error", f"Failed to export data:\n{str(e)}")
 
     def export_vector_figure(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export Vector Figure", "arpes_figure.pdf", "PDF Files (*.pdf);;SVG Files (*.svg)")
-        if not path: return
+        path, selected = QFileDialog.getSaveFileName(
+            self, "Save EPS/PDF", "arpes_figure.pdf",
+            "PDF Files (*.pdf);;EPS Files (*.eps);;SVG Files (*.svg)",
+        )
+        if not path:
+            return
+        low = path.lower()
+        if not low.endswith((".pdf", ".eps", ".svg")):
+            if "EPS" in selected:
+                path += ".eps"
+            elif "SVG" in selected:
+                path += ".svg"
+            else:
+                path += ".pdf"
+        hidden = (self.vline, self.hline, self.rect_window)
+        was = [a.get_visible() for a in hidden]
         try:
             import matplotlib as mpl
+            # 42 = real font characters, not outlined paths, so Illustrator can edit the letters
             mpl.rcParams['pdf.fonttype'] = 42
             mpl.rcParams['ps.fonttype'] = 42
             mpl.rcParams['svg.fonttype'] = 'none'
+            self.im_main.set_rasterized(True)
+            for a in hidden:
+                a.set_visible(False)
             self.canvas.figure.savefig(path, transparent=True, bbox_inches='tight', dpi=300)
-            QMessageBox.information(self, "Export Successful", f"Vector figure safely exported to:\n{path}")
+            QMessageBox.information(self, "Export Successful", f"Figure saved to:\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export figure:\n{str(e)}")
+        finally:
+            for a, vis in zip(hidden, was):
+                a.set_visible(vis)
+            self.canvas.draw_idle()
 
     def contextMenuEvent(self, event):
         """Builds a dynamic right-click menu to handle snapping, de-snapping, and reattaching."""
