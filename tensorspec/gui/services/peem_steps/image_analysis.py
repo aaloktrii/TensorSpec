@@ -32,6 +32,11 @@ class PeemImageAnalysisSteps:
     def display_hint(self, name: str, kind: str, var: str = "data", frame: int = 0) -> dict[str, Any]:
         """Colour scale for the image a front end shows: {cmap, symmetric, center}
         (plotting/peem_plots.display_hint)."""
+        if kind == "nc":  # loaded .nc maps: each variable keeps its type (signed / intensity / domain)
+            t = self.map_type(name, kind, var)
+            alias = {"signed": "pld", "domain": "domain_map"}.get(t, "stack")
+            img = self.view_image(name, kind, var, frame) if t == "signed" else None
+            return peem_plots.display_hint(alias, "data", img)
         signed = kind in peem_plots.SIGNED_KINDS and (var or "") in peem_plots.SIGNED_VARS
         img = self.view_image(name, kind, var, frame) if signed else None
         return peem_plots.display_hint(kind, var, img)

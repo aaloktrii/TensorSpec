@@ -8,8 +8,9 @@ from __future__ import annotations
 import numpy as np
 
 
-SIGNED_KINDS = {"pcd", "pld", "pmld", "pmnld", "domain_map"}
-SIGNED_VARS = ("", "data", "difference", "flattened", "bg_removed", "fft_filtered", "data_original")
+SIGNED_KINDS = {"pcd", "pld", "pmld", "pmnld", "domain_map", "compare"}
+SIGNED_VARS = ("", "data", "difference", "flattened", "bg_removed", "fft_filtered", "data_original",
+               "map", "reference")
 
 
 def display_hint(kind: str, var: str, image: np.ndarray | None = None) -> dict:
@@ -135,15 +136,25 @@ def profile_color(i: int) -> str:
     return PROFILE_COLORS[i % len(PROFILE_COLORS)]
 
 
+def profile_label(i: int, pr: dict) -> str:
+    """'<n>: <kind>/<var> (x0,y0)→(x1,y1)' numbered by the current list position."""
+    import re
+
+    return f"{i + 1}: " + re.sub(r"^\d+:\s*", "", str(pr.get("label", "")))
+
+
 def line_profiles(ax, profiles: list[dict], offset: float = 0.0) -> None:
-    """Several profiles in one plot (profile i shifted up by i x ``offset``), coloured like their lines."""
-    for i, pr in enumerate(profiles):
-        ax.plot(pr["distance"], np.asarray(pr["values"], float) + i * offset, "-", lw=1,
-                color=profile_color(i), label=pr.get("label", f"{i + 1}"))
-    if profiles:
-        ax.set_xlabel(f"distance ({profiles[-1]['unit']})")
-    if len(profiles) > 1:
-        ax.legend(frameon=False, fontsize=7, ncol=min(len(profiles), 5))
+    """The visible profiles in one plot (each shifted up by its list position x ``offset``), coloured
+    like their lines on the map; legend in one column to the right of the axes, so the plot keeps
+    its width however many profiles there are."""
+    shown = [(i, pr) for i, pr in enumerate(profiles) if pr.get("visible", True)]
+    for k, (i, pr) in enumerate(shown):
+        ax.plot(pr["distance"], np.asarray(pr["values"], float) + k * offset, "-", lw=1,
+                color=profile_color(i), label=profile_label(i, pr))
+    if shown:
+        ax.set_xlabel(f"distance ({shown[-1][1]['unit']})")
+        ax.legend(frameon=False, fontsize=7, ncol=1, loc="upper left", bbox_to_anchor=(1.01, 1.0),
+                  borderaxespad=0.0)
 
 
 def save_profiles_csv(profiles: list[dict], path) -> None:
@@ -249,3 +260,28 @@ def drift(ax, d: dict) -> None:
         ax2.set_ylim(0, 1.05)
         ax2.set_ylabel("template match (NCC)", color="0.5")
     ax.legend(frameon=False, loc="lower right")
+
+
+def save_three_panel(panels: list[tuple[str, np.ndarray]], path, um_per_px: float | None = None,
+                     scale_bar_um: float = 2.0) -> str:
+    """Three maps side by side on ONE grey scale (each centred on its median: offsets without I0 are
+    not compared), unlabelled scale bar on the last panel; vector PDF with editable text."""
+    import matplotlib
+    from matplotlib.figure import Figure
+
+    matplotlib.rcParams["pdf.fonttype"] = 42
+    imgs = [(t, np.asarray(a, float)) for t, a in panels]
+    lim = max(float(np.nanpercentile(np.abs(a - np.nanmedian(a)), 99.5)) for _, a in imgs) or 1.0
+    fig = Figure(figsize=(3.4 * len(imgs), 3.7), layout="tight")
+    axes = fig.subplots(1, len(imgs))
+    for ax, (t, a) in zip(np.atleast_1d(axes), imgs):
+        ax.imshow(a - np.nanmedian(a), cmap="gray", vmin=-lim, vmax=lim, interpolation="nearest")
+        ax.set_axis_off()
+        ax.set_title(t, fontsize=8)
+    if um_per_px:
+        a = imgs[-1][1]
+        n = scale_bar_um / um_per_px
+        np.atleast_1d(axes)[-1].plot([a.shape[1] * 0.95 - n, a.shape[1] * 0.95], [a.shape[0] * 0.95] * 2,
+                                     color="black", lw=3, solid_capstyle="butt")
+    fig.savefig(str(path))
+    return str(path)
