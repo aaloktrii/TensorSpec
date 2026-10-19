@@ -1,7 +1,7 @@
 """Sum Rule window, "From PEEM" tab: the corrected CP / CM pairs of a PEEM dataset (pushed from the
 PEEM panel) -> spectra of a region -> background -> XMCD sum rule.
 
-The Background and XMCD Sum Rule forms, handlers and plots are the PEEM panel's sections 4 and 5,
+The Background and XMCD Sum Rule forms, handlers and plots are the PEEM panel's former Background and Sum Rule sections,
 moved here unchanged; they call the same ``PeemService.bg_* / sumrule_*`` with the chosen region
 (``use_roi`` / ``roi_dict``). Spectra of the region: ``PeemService.roi_spectra``.
 """
