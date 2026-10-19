@@ -352,6 +352,10 @@ class SliceWidget(QFrame):
         self.ax_prof_y.set_visible(False)
         self.ax_prof_x.set_visible(False)
         self.ax_prof_ortho.set_visible(False)
+        # line profiles drawn by a host panel (set_line_profiles): under / beside the map
+        self._line_profiles: dict[str, list] = {"bottom": [], "side": []}
+        self._line_profile_artists: list = []
+        self.canvas.mpl_connect("draw_event", self._align_docked_profiles)
 
         self.canvas.mpl_connect('button_press_event', self._on_click)
         self.canvas.mpl_connect('motion_notify_event', self._on_drag) # NEW: Listen for mouse movement
@@ -581,11 +585,85 @@ class SliceWidget(QFrame):
         self.row2_widget.setVisible(not is_visible)
         self.sliders_widget.setVisible(not is_visible)
 
+    def set_line_profiles(self, bottom: list[dict], side: list[dict]) -> None:
+        """Profiles along drawn lines, docked to the map: ``bottom`` under it on the map's x axis
+        ({'pos': x coords, 'values', 'color'}), ``side`` beside it on the map's y axis ({'pos': y
+        coords, ...}). The axes are shared with the map, so the profiles follow zoom and pan."""
+        for a in self._line_profile_artists:
+            a.remove()
+        self._line_profile_artists = []
+        self._line_profiles = {"bottom": list(bottom or []), "side": list(side or [])}
+        for pr in self._line_profiles["bottom"]:
+            self._line_profile_artists += self.ax_prof_x.plot(pr["pos"], pr["values"], lw=1,
+                                                              color=pr.get("color", "k"), ls=pr.get("ls", "-"))
+        for pr in self._line_profiles["side"]:
+            self._line_profile_artists += self.ax_prof_y.plot(pr["values"], pr["pos"], lw=1,
+                                                              color=pr.get("color", "k"), ls=pr.get("ls", "-"))
+        for ax, axis in ((self.ax_prof_x, "y"), (self.ax_prof_y, "x")):
+            ax.relim()
+            ax.autoscale(enable=True, axis=axis)
+        # the side panel shares the map's y axis: its own y labels would sit on the map's edge
+        self.ax_prof_y.tick_params(axis="y", labelleft=not self._line_profiles["side"])
+        self.toggle_profiles()
+
+    def _align_docked_profiles(self, _event=None):
+        """With an equal-aspect map the map box is smaller than its grid cell; pin the docked profile
+        axes to the map's drawn edges so each pixel column / row lines up with its profile point."""
+        lp = self._line_profiles
+        if not (lp["bottom"] or lp["side"]) or self.chk_profiles.isChecked():
+            return
+        fig = self.canvas.figure
+        m = self.ax_main.get_position()
+        renderer = getattr(_event, "renderer", None) or self.canvas.get_renderer()
+        tb = self.ax_main.get_tightbbox(renderer).transformed(fig.transFigure.inverted())  # map + its labels
+        moved = False
+        for ax, show in ((self.ax_prof_x, lp["bottom"]), (self.ax_prof_y, lp["side"])):
+            if not show or not ax.get_visible():
+                continue
+            ax.set_in_layout(False)  # placed here, not by the layout engine
+            b = ax.get_position()
+            if ax is self.ax_prof_x:   # same x extent as the map, under its x labels, room for own ticks
+                h = max(0.08, min(0.2, tb.y0 - 0.08))
+                want = [m.x0, max(0.06, tb.y0 - 0.015 - h), m.width, h]
+            else:                      # same y extent as the map, right of it
+                w = max(0.08, min(0.18, 0.97 - tb.x1 - 0.02))
+                want = [tb.x1 + 0.015, m.y0, w, m.height]
+            if max(abs(u - v) for u, v in zip(want, (b.x0, b.y0, b.width, b.height))) > 1e-3:
+                ax.set_position(want)
+                moved = True
+        if moved:
+            self.canvas.draw_idle()
+
     def toggle_profiles(self):
-        """Toggles profile visibility and reclaims space for the main canvas."""
+        """Toggles profile visibility and reclaims space for the main canvas. The under-map / beside-map
+        axes also show when a host panel docked line profiles there (set_line_profiles)."""
         vis_xy = self.chk_profiles.isChecked()
         vis_ortho = self.chk_ortho.isChecked()
-        
+        lp = getattr(self, "_line_profiles", {"bottom": [], "side": []})
+        vis_x = vis_xy or bool(lp["bottom"])
+        vis_y = vis_xy or bool(lp["side"])
+        for ax, docked in ((self.ax_prof_x, lp["bottom"]), (self.ax_prof_y, lp["side"])):
+            if not docked or vis_xy:
+                ax.set_in_layout(True)
+        if (vis_x or vis_y) and not vis_xy and not vis_ortho:
+            self.ax_prof_x.set_visible(vis_x)
+            self.ax_prof_y.set_visible(vis_y)
+            self.ax_prof_ortho.set_visible(False)
+            if vis_x and vis_y:
+                gs = self.canvas.figure.add_gridspec(2, 2, width_ratios=[4, 1], height_ratios=[4, 1])
+                self.ax_prof_x.set_subplotspec(gs[1, 0])
+                self.ax_prof_y.set_subplotspec(gs[0, 1])
+            elif vis_x:
+                gs = self.canvas.figure.add_gridspec(2, 1, height_ratios=[4, 1])
+                self.ax_prof_x.set_subplotspec(gs[1, 0])
+            else:
+                gs = self.canvas.figure.add_gridspec(1, 2, width_ratios=[4, 1])
+                self.ax_prof_y.set_subplotspec(gs[0, 1])
+            self.ax_main.set_subplotspec(gs[0, 0])
+            self.gs = gs
+            self.canvas.draw_idle()
+            return
+
         self.ax_prof_x.set_visible(vis_xy)
         self.ax_prof_y.set_visible(vis_xy)
         self.ax_prof_ortho.set_visible(vis_ortho)
@@ -1773,6 +1851,12 @@ class DataViewerPanel(QWidget):
         if view is None:
             raise ValueError("no data shown")
         view.start_tool(kind, callback, color)
+
+    def set_line_profiles(self, bottom: list[dict], side: list[dict]) -> None:
+        """Line profiles docked to the first view's map (SliceWidget.set_line_profiles)."""
+        view = self.primary_view()
+        if view is not None:
+            view.set_line_profiles(bottom, side)
 
     def set_overlays(self, overlays: list[dict]) -> None:
         """Shapes to draw (pixel-index coords; optional 'dims': (y_idx, x_idx), 'color')."""

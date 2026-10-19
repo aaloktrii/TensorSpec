@@ -1,11 +1,12 @@
 """PEEM panel add-on: calculate (asymmetry map) and analyse (profiles, domain width, histogram, FFT,
-ROI statistics, domain map, export) on the PEEM tab's own corrected CP / CM channels.
+ROI statistics, domain map, export, compare with a reference dataset) on the PEEM tab's own
+corrected CP / CM channels.
 
 Front end only; every step is a ``PeemService`` call (contract: gui/services/peem_steps/__init__.py).
 The PEEM panel plugs it in with a few lines:
 
     tools = PeemMapTools(service, get_name=lambda: panel._dataset_name, send_to_sum_rule=...)
-    left_layout.addWidget(tools.controls)           # sections 4-6
+    left_layout.addWidget(tools.controls)           # sections 4-7
     view_tabs.addTab(tools.map_view, "Map")         # maps with ROI / profile overlays
     view_tabs.addTab(tools.plot_view, "Analysis")   # profiles, histogram, FFT (PDF export)
 """
@@ -17,7 +18,11 @@ from typing import Callable
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -26,6 +31,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
     QSpinBox,
@@ -45,7 +52,7 @@ def _opt_float(text: str) -> float | None:
 
 
 class PeemMapTools:
-    """Sections 4-6 of the PEEM panel and their two views (see the module docstring)."""
+    """Sections 4-7 of the PEEM panel and their two views (see the module docstring)."""
 
     def __init__(self, service, get_name: Callable[[], str | None], parent: QWidget | None = None,
                  send_to_sum_rule: Callable[[str], None] | None = None):
@@ -53,6 +60,7 @@ class PeemMapTools:
         self._send_to_sum_rule = send_to_sum_rule
         self._line: tuple | None = None
         self._loaded_name: str | None = None
+        self._shown_name: str | None = None
         self._build_controls()
         self._build_map_view()
         self._build_plot_view()
@@ -99,6 +107,25 @@ class PeemMapTools:
             b.clicked.connect(fn)
             row.addWidget(b)
         nf.addRow(row)
+        self.prof_list = QListWidget()
+        self.prof_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.prof_list.setMaximumHeight(110)
+        self.prof_list.setToolTip("Tick = shown in the plot and on the map; select and Remove to delete")
+        self.prof_list.itemChanged.connect(self._profile_toggled)
+        nf.addRow("Profiles:", self.prof_list)
+        row = QHBoxLayout()
+        for label, fn in (("Remove selected", self._remove_profiles), ("Show all", lambda: self._show_all_profiles(True)),
+                          ("Hide all", lambda: self._show_all_profiles(False))):
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        nf.addRow(row)
+        self.prof_dock = QCheckBox("Profiles beside the map")
+        self.prof_dock.setChecked(True)
+        self.prof_dock.setToolTip("Each line's profile under the map (mostly horizontal line, on the map's x axis)\n"
+                                  "or beside it (mostly vertical line, on the map's y axis); follows zoom")
+        self.prof_dock.toggled.connect(lambda *_: self._dock_profiles())
+        nf.addRow(self.prof_dock)
         self.prof_offset = _dspin(0, 1e6, 0.0, 0.01, 4)
         self.prof_offset.valueChanged.connect(lambda *_: self._draw_profiles())
         nf.addRow("Offset between profiles:", self.prof_offset)
@@ -144,6 +171,43 @@ class PeemMapTools:
         row.addWidget(b)
         rf.addRow(row)
         lay.addWidget(rd)
+
+        cg = QGroupBox("7. Compare with a reference")
+        cf = QFormLayout(cg)
+        row = QHBoxLayout()
+        self.cmp_ref = QComboBox()
+        self.cmp_ref.setToolTip("Another loaded dataset with an asymmetry map, e.g. the same area above T_c\n"
+                                "(XMLD = XLD(T) − XLD(T > T_c)), another azimuth or another field.")
+        row.addWidget(self.cmp_ref, 1)
+        b = QPushButton("↻")
+        b.setToolTip("Update the list of datasets")
+        b.setFixedWidth(30)
+        b.clicked.connect(self._fill_compare_refs)
+        row.addWidget(b)
+        cf.addRow("Reference:", row)
+        self.cmp_search = QComboBox()
+        for label, key in (("Auto (search if the match is poor)", "auto"), ("Same view (shift + fine rotation)", "none"),
+                           ("Full search (re-imaged field / FOV)", "full")):
+            self.cmp_search.addItem(label, key)
+        cf.addRow("Alignment:", self.cmp_search)
+        self.cmp_rot = _dspin(-360, 360, 0.0, 1.0, 1)
+        self.cmp_rot.setToolTip("Expected rotation of the reference field (deg), e.g. a different azimuth")
+        cf.addRow("Expected rotation (deg):", self.cmp_rot)
+        self.cmp_smooth = _dspin(0, 20, 0.0, 0.5, 1)
+        self.cmp_smooth.setToolTip("Gaussian smoothing of a noisy reference (px)")
+        cf.addRow("Smooth reference (px):", self.cmp_smooth)
+        row = QHBoxLayout()
+        b = QPushButton("Register + subtract")
+        b.setToolTip("Reference map registered onto this one on the intensity images (shift, rotation, scale),\n"
+                     "then this map − reference → Map view 'compare'.")
+        b.clicked.connect(self._compare)
+        row.addWidget(b)
+        b = QPushButton("Figure (3 maps)…")
+        b.setToolTip("Map | registered reference | difference on one grey scale, vector PDF")
+        b.clicked.connect(self._compare_figure)
+        row.addWidget(b)
+        cf.addRow(row)
+        lay.addWidget(cg)
 
         if self._send_to_sum_rule is not None:
             b = QPushButton("→ Sum Rule (corrected CP / CM)")
@@ -223,11 +287,13 @@ class PeemMapTools:
     def refresh(self, select: tuple[str, str] | None = None):
         """Show the dataset's maps (after the asymmetry step); keeps the chosen layer."""
         name = self._get_name()
-        if not name or "stack" not in self.service.list_products(name):
+        prods = self.service.list_products(name) if name else []
+        base = "stack" if "stack" in prods else ("nc" if "nc" in prods else None)  # nc: maps loaded from a .nc file
+        if not name or base is None:
             self.clear()
             return
         if name != self._loaded_name or self.viewer.tensor_data is None:
-            img = self.service.get_map(name, "stack", "data")
+            img = self.service.get_map(name, base, "data")
             ny, nx = img.shape
             td = TensorData(value=np.asarray(img, np.float32)[None], axes=[np.zeros(1), np.arange(ny, dtype=float),
                             np.arange(nx, dtype=float)], labels=["frame", "y", "x"], units=["", "px", "px"],
@@ -240,10 +306,17 @@ class PeemMapTools:
             view.canvas.mpl_connect("draw_event", lambda _e, v=view: (
                 self._sync_range() if getattr(v, "fixed_limits", None) is None else None))
             self._loaded_name = name
-        kind, var = select or self._shown()
+        kind, var = select or (self._shown() if base == "stack" or name == self._shown_name else ("nc", "data"))
+        self._shown_name = name
         self.viewer.set_layers(self.service.map_layers(name), select=self.service.layer_for(name, kind, var))
         self._on_layer_changed()
         self._fill_show(name)
+        i = self.show_combo.findData((kind, var))
+        if i >= 0:
+            self.show_combo.setCurrentIndex(i)
+        self._fill_compare_refs()
+        self._fill_profile_list(self.service.list_profiles(name))
+        self._dock_profiles()
 
     def clear(self):
         """No map for the current dataset (yet): empty the Map view and the Show list."""
@@ -254,12 +327,25 @@ class PeemMapTools:
         self._loaded_name, self._line = None, None
         self.show_combo.clear()
 
+    def _fill_compare_refs(self):
+        name = self._get_name()
+        cur = self.cmp_ref.currentText()
+        self.cmp_ref.clear()
+        if name:
+            self.cmp_ref.addItems(self.service.compare_candidates(name))
+            if cur:
+                self.cmp_ref.setCurrentText(cur)
+
     def _fill_show(self, name: str):
         items = [(f"stack: {label}", ("stack", v)) for label, v in self.service.stack_outputs(name)]
         for kind in ("pcd", "pld"):
             items += [(f"{kind}: {label}", (kind, v)) for label, v in self.service.asymmetry_outputs(name, "xmcd" if kind == "pcd" else "xld")]
         if "domain_map" in self.service.list_products(name):
             items.append(("domain map", ("domain_map", "data")))
+        if "nc" in self.service.list_products(name):
+            items += [(f"file: {label}", ("nc", v)) for label, v in self.service.nc_outputs(name)]
+        if "compare" in self.service.list_products(name):
+            items += [(f"compare: {label}", ("compare", v)) for label, v in self.service.compare_outputs(name)]
         self.show_combo.clear()
         for label, data in items:
             self.show_combo.addItem(label, data)
@@ -279,6 +365,7 @@ class PeemMapTools:
         self.viewer.configure_view(**hint, image_origin=True, aspect_equal=True, limits="auto")
         self._sync_range()
         self._update_overlays()
+        self._dock_profiles()  # the drawn line's profile follows the shown map
 
     def _update_overlays(self):
         name = self._get_name()
@@ -289,7 +376,8 @@ class PeemMapTools:
         if roi:
             ov.append({**roi, "color": "yellow"})
         for i, pr in enumerate(self.service.list_profiles(name)):
-            ov.append({"kind": "line", "a": pr["line"][0], "b": pr["line"][1], "color": peem_plots.profile_color(i)})
+            if pr.get("visible", True):
+                ov.append({"kind": "line", "a": pr["line"][0], "b": pr["line"][1], "color": peem_plots.profile_color(i)})
         if self._line:
             ov.append({"kind": "line", "a": self._line[0], "b": self._line[1], "color": "orange"})
         self.viewer.set_overlays(ov)
@@ -342,12 +430,49 @@ class PeemMapTools:
                             f"{res['formula']}: mean {res.get('mean', float('nan')):+.4f}, std {res.get('std', float('nan')):.4f}")
         self.refresh(select=(res["kind"], "data"))
 
+    # ------------------------------------------------------------------ 7. compare
+    def _compare(self):
+        name = self._name()
+        if not name:
+            return
+        ref = self.cmp_ref.currentText()
+        if not ref:
+            self._err("Load the reference dataset and make its asymmetry map (4.) first, then press ↻.")
+            return
+        self.status.setText(f"Registering {ref} onto {name} …")
+        self.status.repaint()
+        res = self._call(self.service.compare_maps, name, ref, search=self.cmp_search.currentData(),
+                         rotation=self.cmp_rot.value(), smooth_reference=self.cmp_smooth.value())
+        if res is None:
+            self.status.setText("")
+            return
+        self.status.setText(
+            f"{res['formula']}: overlap r {res['overlap_r']:.2f}, rotation {res['rotation_deg']:+.1f}°, "
+            f"scale {res['scale']:.3f}, shift ({res['shift_dy_px']:+.0f}, {res['shift_dx_px']:+.0f}) px; "
+            f"noise ratio {res['noise_ratio']:.2f}" + (f" — {res['warning']}" if res.get("warning") else ""))
+        self.refresh(select=("compare", "data"))
+
+    def _compare_figure(self):
+        name = self._name()
+        if not name:
+            return
+        if "compare" not in self.service.list_products(name):
+            self._err("Run Register + subtract first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self._parent, "Save figure", f"{name}_compare.pdf",
+                                              "PDF (*.pdf);;PNG (*.png);;SVG (*.svg)")
+        if path:
+            out = self._call(self.service.export_compare_figure, name, path)
+            if out:
+                self.status.setText(f"Saved {os.path.basename(out)}")
+
     # ------------------------------------------------------------------ 5. analysis
     def _on_line(self, sh: dict):
         self._line = (tuple(sh["a"]), tuple(sh["b"]))
         (y1, x1), (y2, x2) = self._line
         self.line_edit.setText(f"{x1:.0f}, {y1:.0f}, {x2:.0f}, {y2:.0f}")
         self._update_overlays()
+        self._dock_profiles()
 
     def _set_line(self):
         try:
@@ -378,10 +503,76 @@ class PeemMapTools:
     def _draw_profiles(self):
         name = self._get_name()
         profiles = self.service.list_profiles(name) if name else []
-        ax = self._plot("profiles", f"{len(profiles)} line profile(s)")
+        shown = sum(1 for pr in profiles if pr.get("visible", True))
+        ax = self._plot("profiles", f"{shown} of {len(profiles)} line profile(s) shown")
         if profiles:
             peem_plots.line_profiles(ax, profiles, self.prof_offset.value())
         self.pcanvas.draw_idle()
+        self._fill_profile_list(profiles)
+        self._dock_profiles()
+
+    def _dock_profiles(self):
+        """Profiles of the visible lines (and the line being drawn) under or beside the map, by the
+        line's orientation: |dx| >= |dy| -> under the map against image x, else beside it against y."""
+        if self.viewer.tensor_data is None:
+            return
+        name = self._get_name()
+        bottom, side = [], []
+        if name and self.prof_dock.isChecked():
+            lines = [(pr["line"], np.asarray(pr["values"], float), peem_plots.profile_color(i), "-")
+                     for i, pr in enumerate(self.service.list_profiles(name)) if pr.get("visible", True)]
+            if self._line:
+                kind, var = self._shown()
+                try:
+                    cur = self.service.line_profile(name, kind, var, 0, *self._line, self.line_hw.value())
+                    lines.append((self._line, np.asarray(cur["values"], float), "orange", "--"))
+                except (ValueError, KeyError):
+                    pass
+            for (a, b), vals, color, ls in lines:
+                (y0, x0), (y1, x1) = a, b
+                t = np.linspace(0.0, 1.0, len(vals))
+                if abs(x1 - x0) >= abs(y1 - y0):
+                    bottom.append({"pos": x0 + (x1 - x0) * t, "values": vals, "color": color, "ls": ls})
+                else:
+                    side.append({"pos": y0 + (y1 - y0) * t, "values": vals, "color": color, "ls": ls})
+        self.viewer.set_line_profiles(bottom, side)
+
+    def _fill_profile_list(self, profiles: list[dict]):
+        self.prof_list.blockSignals(True)
+        self.prof_list.clear()
+        for i, pr in enumerate(profiles):
+            it = QListWidgetItem(peem_plots.profile_label(i, pr))
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if pr.get("visible", True) else Qt.Unchecked)
+            it.setForeground(QColor(peem_plots.profile_color(i)))
+            self.prof_list.addItem(it)
+        self.prof_list.blockSignals(False)
+
+    def _profile_toggled(self, item):
+        name = self._get_name()
+        if name:
+            self.service.set_profile_visible(name, self.prof_list.row(item), item.checkState() == Qt.Checked)
+            self._draw_profiles()
+            self._update_overlays()
+
+    def _remove_profiles(self):
+        name = self._name()
+        rows = sorted((self.prof_list.row(it) for it in self.prof_list.selectedItems()), reverse=True)
+        if not name or not rows:
+            self._err("Select the profile(s) to remove in the list first.")
+            return
+        for r in rows:
+            self.service.remove_profile(name, r)
+        self._draw_profiles()
+        self._update_overlays()
+
+    def _show_all_profiles(self, visible: bool):
+        name = self._get_name()
+        if name:
+            for i in range(len(self.service.list_profiles(name))):
+                self.service.set_profile_visible(name, i, visible)
+            self._draw_profiles()
+            self._update_overlays()
 
     def _clear_profiles(self):
         name = self._name()
@@ -516,8 +707,9 @@ class PeemMapTools:
         path = path if path.lower().endswith(".pdf") else path + ".pdf"
         peem_plots.save_pdf(self.pfig, path)
         name = self._get_name()
-        if self._plot_kind == "profiles" and name and self.service.list_profiles(name):
-            peem_plots.save_profiles_csv(self.service.list_profiles(name), path[:-4] + ".csv")
+        shown = [pr for pr in (self.service.list_profiles(name) if name else []) if pr.get("visible", True)]
+        if self._plot_kind == "profiles" and shown:
+            peem_plots.save_profiles_csv(shown, path[:-4] + ".csv")  # the profiles in the PDF
         self.status.setText(f"Saved {os.path.basename(path)}")
 
     # ------------------------------------------------------------------ to the Sum Rule window

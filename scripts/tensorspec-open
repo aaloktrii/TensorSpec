@@ -1,0 +1,8 @@
+#!/bin/sh
+# Open map files (.nc, TIF stacks, PEEM folders) in the TensorSpec PEEM window:
+#   scripts/tensorspec-open FILE.nc [MORE.nc ...]
+# Uses the repository's venv (venv_tensorspec) when present, else python3 on PATH.
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+PY="$REPO/venv_tensorspec/bin/python"
+[ -x "$PY" ] || PY=python3
+PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m tensorspec.open_maps "$@"

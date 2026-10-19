@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import numpy as np
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
@@ -112,6 +113,10 @@ class PeemPanel(QWidget):
         self.btn_attach_csv = QPushButton("Attach CSV")
         self.btn_attach_csv.clicked.connect(self._attach_csv)
         load_form.addRow(self.btn_attach_csv)
+        self.dataset_combo = QComboBox()
+        self.dataset_combo.setToolTip("Loaded datasets (e.g. several .nc map files); pick one to work on")
+        self.dataset_combo.activated.connect(lambda *_: self.select_dataset(self.dataset_combo.currentText()))
+        load_form.addRow("Dataset:", self.dataset_combo)
         self.status_label = QLabel("No PEEM data loaded")
         self.status_label.setWordWrap(True)
         load_form.addRow(self.status_label)
@@ -390,6 +395,7 @@ class PeemPanel(QWidget):
         self._dataset_name = summary["name"]
         self.name_edit.setText(summary["name"])
         self._refresh_meta()
+        self._fill_dataset_combo()
         parts = [
             f"Loaded '{summary['name']}'",
             f"{summary['n_frames']} frames",
@@ -401,6 +407,48 @@ class PeemPanel(QWidget):
             parts.append("Attach CSV if needed.")
         self.status_label.setText(" | ".join(parts) + getattr(self, "_skipped_note", ""))
         self._skipped_note = ""
+
+    def _fill_dataset_combo(self):
+        names = self.service.list_datasets()
+        self.dataset_combo.blockSignals(True)
+        self.dataset_combo.clear()
+        self.dataset_combo.addItems(names)
+        if self._dataset_name in names:
+            self.dataset_combo.setCurrentText(self._dataset_name)
+        self.dataset_combo.blockSignals(False)
+
+    def select_dataset(self, name: str):
+        """Work on another loaded dataset (frames, maps and tools follow)."""
+        if not name or name == self._dataset_name:
+            return
+        self._dataset_name = name
+        self.name_edit.setText(name)
+        self._refresh_meta()
+        self.status_label.setText(f"Dataset '{name}'")
+
+    def open_files(self, paths: list[str]) -> list[str]:
+        """Load .nc map files (and TIF stacks / PEEM folders) given on the command line; the first
+        becomes the current dataset. Returns the dataset names."""
+        names, errors = [], []
+        for p in paths:
+            try:
+                if str(p).lower().endswith((".nc", ".nc4", ".netcdf")):
+                    summary = self.service.load_maps_nc(p)
+                else:
+                    summary = self.service.load_path(Path(p))
+                names.append(summary["name"])
+            except Exception as exc:  # report every file, keep the others
+                errors.append(f"{Path(p).name}: {exc}")
+        if names:
+            self._dataset_name = None
+            self.select_dataset(names[0])
+            self._fill_dataset_combo()
+            self.view_tabs.setCurrentWidget(self.map_tools.map_view)
+            self.status_label.setText(f"Opened {len(names)} file(s): {', '.join(names)}"
+                                      + (f" | failed: {'; '.join(errors)}" if errors else ""))
+        elif errors:
+            QMessageBox.critical(self, "Open", "\n".join(errors))
+        return names
 
     def _attach_csv(self):
         name = self._require_dataset()
