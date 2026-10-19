@@ -59,9 +59,12 @@ class PeemAnnotationSteps:
         (y1, x1), (y2, x2) = a, b
         data = self._annotations(name)
         n = len(data["profiles"]) + 1
+        shown_var = var or "data"
+        if kind == "nc" and shown_var == "data":  # a loaded .nc map: name it by its variable (e.g. xmld)
+            shown_var = str(self.get_product_attrs(name, "nc").get("primary") or "data")
         entry = {"line": [[float(y1), float(x1)], [float(y2), float(x2)]], "halfwidth": int(halfwidth),
                  "kind": kind, "var": var or "data", "frame": int(frame),
-                 "label": f"{n}: {kind}/{var or 'data'} ({x1:.0f},{y1:.0f})→({x2:.0f},{y2:.0f})",
+                 "label": f"{n}: {kind}/{shown_var} ({x1:.0f},{y1:.0f})→({x2:.0f},{y2:.0f})",
                  "distance": [float(v) for v in pr["distance"]], "values": [float(v) for v in pr["values"]],
                  "unit": pr["unit"]}
         data["profiles"].append(entry)
@@ -71,6 +74,24 @@ class PeemAnnotationSteps:
 
     def list_profiles(self, name: str) -> list[dict[str, Any]]:
         return self._annotations(name)["profiles"]
+
+    def remove_profile(self, name: str, index: int) -> list[dict[str, Any]]:
+        """Remove profile ``index`` (0-based, list order); returns the remaining profiles."""
+        data = self._annotations(name)
+        if not 0 <= int(index) < len(data["profiles"]):
+            raise ValueError(f"no profile {index + 1}")
+        gone = data["profiles"].pop(int(index))
+        self._save_annotations(name, data)
+        _record(name, "remove profile", {"label": gone.get("label", "")})
+        return data["profiles"]
+
+    def set_profile_visible(self, name: str, index: int, visible: bool) -> None:
+        """Show / hide profile ``index`` in the profile plot and on the map (it stays in the list)."""
+        data = self._annotations(name)
+        if not 0 <= int(index) < len(data["profiles"]):
+            raise ValueError(f"no profile {index + 1}")
+        data["profiles"][int(index)]["visible"] = bool(visible)
+        self._save_annotations(name, data)
 
     def clear_profiles(self, name: str) -> None:
         data = self._annotations(name)

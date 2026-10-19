@@ -21,6 +21,11 @@ checks every public call is listed here and runs the workflow without Qt):
     load_path, attach_csv  [peem_service] TIF stack / folder for the PEEM tab, beamline CSV
     inspect_folder, load_images           "Load Folder": what a folder holds (UE49 / UView / P3B / TIF /
                                           PNG / JPEG / a folder of acquisitions); PNG / JPEG frames
+    load_maps_nc(path, name)              a NetCDF map file (batch maps.nc, analysis outputs, any 2-D
+                                          variables) -> dataset: /analysis/nc (every map, each with its
+                                          type signed / intensity / domain), + stack and pcd / pld when
+                                          the file has channel means; nc_outputs, map_type for display
+    list_datasets                         loaded PEEM datasets (the panel's Dataset list)
     unload                                remove a dataset
     get_meta, xmcd_meta                   dataset summary (frames, polarizations, FOV, products ...)
 
@@ -53,7 +58,7 @@ checks every public call is listed here and runs the workflow without Qt):
 
 7. Regions and profiles (stored with the data, /analysis/annotations)  [annotations]
     set_roi / get_rois                    "roi", "bg", "drift_box"
-    add_profile, list_profiles, clear_profiles
+    add_profile, list_profiles, clear_profiles, remove_profile, set_profile_visible (show / hide)
     default_drift_roi  [peem_service]     central default region
 
 8. Maps, ROI statistics, domains  [maps_domains]
@@ -74,6 +79,16 @@ checks every public call is listed here and runs the workflow without Qt):
                                           per pair, paired + separated, for background / sum rule
     sum_rule_datasets, channel_image      the Sum Rule window's dataset list and region image
     roi_spectra(name, roi)                CP / CM spectra of a region
+
+11. Compare with a reference dataset  [compare]
+    compare_candidates(name)              other loaded datasets with an asymmetry map
+    compare_maps(name, reference, kind, search, rotation, smooth_reference)
+                                          the reference's map registered onto this one on the intensity
+                                          images (core/peem/map_align: shift, rotation, scale; search
+                                          'auto' / 'none' / 'full' for re-imaged fields), subtracted ->
+                                          /analysis/compare (data = map - reference, map, reference),
+                                          e.g. XMLD = XLD(T) - XLD(T > T_c)
+    compare_outputs, export_compare_figure   what to show; map | reference | difference, one grey scale
 
 Original PEEM steps (peem_service.py): pair, separate, drift, get_view_tensor, default_drift_roi;
 background and sum rule (bg_preview, bg_apply, sumrule_preview, sumrule_apply, with use_roi /
