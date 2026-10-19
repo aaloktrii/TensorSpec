@@ -93,6 +93,9 @@ checks every public call is listed here and runs the workflow without Qt):
 Original PEEM steps (peem_service.py): pair, separate, drift, get_view_tensor, default_drift_roi;
 background and sum rule (bg_preview, bg_apply, sumrule_preview, sumrule_apply, with use_roi /
 roi_dict for a region), used by the Sum Rule window.
+Dichroism map on the panel (peem_service.py, section 4): make_pcd_map, make_pld_map ->
+/analysis/pcd | pld; list_analysis_maps, get_display_tensor (any node for the Frame viewer),
+export_analysis_map (TIFF + colour PNG).
 
 Every step that changes a dataset appends a "PEEM <step>: {parameters}" line to /history; /raw is
 never written after loading. Shared helpers of the steps: common.py.

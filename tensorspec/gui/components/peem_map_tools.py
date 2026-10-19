@@ -6,7 +6,7 @@ Front end only; every step is a ``PeemService`` call (contract: gui/services/pee
 The PEEM panel plugs it in with a few lines:
 
     tools = PeemMapTools(service, get_name=lambda: panel._dataset_name, send_to_sum_rule=...)
-    left_layout.addWidget(tools.controls)           # sections 4-7
+    left_layout.addWidget(tools.controls)           # sections 5-8
     view_tabs.addTab(tools.map_view, "Map")         # maps with ROI / profile overlays
     view_tabs.addTab(tools.plot_view, "Analysis")   # profiles, histogram, FFT (PDF export)
 """
@@ -71,7 +71,7 @@ class PeemMapTools:
         lay = QVBoxLayout(self.controls)
         lay.setContentsMargins(0, 0, 0, 0)
 
-        asym = QGroupBox("4. Asymmetry map")
+        asym = QGroupBox("5. Asymmetry map")
         af = QFormLayout(asym)
         row = QHBoxLayout()
         self.e_lo, self.e_hi = QLineEdit(), QLineEdit()
@@ -89,7 +89,7 @@ class PeemMapTools:
         af.addRow("Show:", self.show_combo)
         lay.addWidget(asym)
 
-        an = QGroupBox("5. Image analysis")
+        an = QGroupBox("6. Image analysis")
         nf = QFormLayout(an)
         row = QHBoxLayout()
         b = QPushButton("Draw line")
@@ -140,7 +140,7 @@ class PeemMapTools:
         nf.addRow(row)
         lay.addWidget(an)
 
-        rd = QGroupBox("6. ROIs and domains")
+        rd = QGroupBox("7. ROIs and domains")
         rf = QFormLayout(rd)
         row = QHBoxLayout()
         for label, kind in (("Draw rectangle", "rect"), ("Draw polygon", "polygon")):
@@ -172,7 +172,7 @@ class PeemMapTools:
         rf.addRow(row)
         lay.addWidget(rd)
 
-        cg = QGroupBox("7. Compare with a reference")
+        cg = QGroupBox("8. Compare with a reference")
         cf = QFormLayout(cg)
         row = QHBoxLayout()
         self.cmp_ref = QComboBox()
@@ -409,7 +409,7 @@ class PeemMapTools:
         self.viewer.start_tool(kind, cb, color)
         self.status.setText("Draw on the Map view.")
 
-    # ------------------------------------------------------------------ 4. asymmetry
+    # ------------------------------------------------------------------ 5. asymmetry
     def _asymmetry(self):
         name = self._name()
         if not name:
@@ -430,7 +430,7 @@ class PeemMapTools:
                             f"{res['formula']}: mean {res.get('mean', float('nan')):+.4f}, std {res.get('std', float('nan')):.4f}")
         self.refresh(select=(res["kind"], "data"))
 
-    # ------------------------------------------------------------------ 7. compare
+    # ------------------------------------------------------------------ 8. compare
     def _compare(self):
         name = self._name()
         if not name:
@@ -466,7 +466,7 @@ class PeemMapTools:
             if out:
                 self.status.setText(f"Saved {os.path.basename(out)}")
 
-    # ------------------------------------------------------------------ 5. analysis
+    # ------------------------------------------------------------------ 6. analysis
     def _on_line(self, sh: dict):
         self._line = (tuple(sh["a"]), tuple(sh["b"]))
         (y1, x1), (y2, x2) = self._line
@@ -615,7 +615,7 @@ class PeemMapTools:
                 self.status.setText(f"Mean domain width {w['domain_width_px']:.1f} px{um} in "
                                     f"{'the ROI' if self._roi() else 'the whole map'} ({kind} / {var}).")
 
-    # ------------------------------------------------------------------ 6. ROIs / domains
+    # ------------------------------------------------------------------ 7. ROIs / domains
     def _set_roi(self, roi: dict | None):
         name = self._name()
         if name:
