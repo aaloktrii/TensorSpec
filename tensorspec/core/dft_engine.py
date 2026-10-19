@@ -79,13 +79,19 @@ class DFTEngineRouter:
         k_pts = []
         eigenvals = []
         fermi_energy = 0.0
+        ha_to_ev = 27.211386
 
-        # Attempt to find Fermi Energy
+        # Attempt to find Fermi Energy. LSDA writes two_fermi_energies (Hartree).
         fermi_elem = root.find('.//fermi_energy')
         if fermi_elem is None:
             fermi_elem = root.find('.//highestOccupiedLevel')
-        if fermi_elem is not None:
-            fermi_energy = float(fermi_elem.text) * 27.211386  # Hartree to eV
+        if fermi_elem is not None and (fermi_elem.text or "").strip():
+            fermi_energy = float(fermi_elem.text) * ha_to_ev
+        else:
+            two = root.find('.//two_fermi_energies')
+            if two is not None and (two.text or "").strip():
+                parts = [float(x) for x in two.text.split()]
+                fermi_energy = sum(parts) / len(parts) * ha_to_ev
 
         # Extract K-points and Eigenvalues
         for ks in root.findall('.//ks_energies'):
@@ -95,7 +101,7 @@ class DFTEngineRouter:
 
             eig_elem = ks.find('eigenvalues')
             if eig_elem is not None:
-                eigenvals.append([float(x) * 27.211386 for x in eig_elem.text.split()])
+                eigenvals.append([float(x) * ha_to_ev for x in eig_elem.text.split()])
 
         k_pts = np.array(k_pts)
         eigenvals = np.array(eigenvals)
@@ -109,5 +115,29 @@ class DFTEngineRouter:
             dist = np.linalg.norm(k_pts[i] - k_pts[i-1])
             k_dist.append(k_dist[-1] + dist)
         k_dist = np.array(k_dist)
+        spin_bands = self._lsda_spin_bands(root, eigenvals)
+        return k_dist, eigenvals, fermi_energy, spin_bands
 
-        return k_dist, eigenvals, fermi_energy
+    @staticmethod
+    def _lsda_spin_bands(root, eigenvals):
+        """QE LSDA packs eigenvalues as [all up | all down], not interleaved.
+
+        Returns {'up', 'down', 'axis'} or None when the file is not collinear spin.
+        """
+        band = root.find('.//band_structure')
+        scope = band if band is not None else root
+        lsda = scope.find('lsda')
+        if lsda is None or (lsda.text or "").strip().lower() != "true":
+            return None
+        try:
+            n_up = int(scope.findtext('nbnd_up', default="0"))
+            n_dn = int(scope.findtext('nbnd_dw', default="0"))
+        except ValueError:
+            return None
+        if n_up < 1 or n_dn < 1 or eigenvals.shape[1] != n_up + n_dn:
+            return None
+        return {
+            "up": eigenvals[:, :n_up],
+            "down": eigenvals[:, n_up:],
+            "axis": "z",
+        }

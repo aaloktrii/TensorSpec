@@ -57,6 +57,9 @@ def test_scf_emits_afm_types(tmp_path, monkeypatch):
     path = gen.write_scf_input(str(out), magnetic=mag)
     text = Path(path).read_text()
     assert "nspin = 2" in text
+    assert "nosym = .true." in text
+    assert "tot_magnetization = 0.0" in text
+    assert "mixing_beta = 0.3" in text
     assert "Fe_up" in text and "Fe_dn" in text
     assert "starting_magnetization(1)" in text
     assert "starting_magnetization(2)" in text

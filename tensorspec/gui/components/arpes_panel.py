@@ -1443,6 +1443,7 @@ class ARPESPanel(QWidget):
                     onsite_e=float(band_data.get("onsite_e", 0.0) or 0.0),
                     fermi_energy_qe=float(band_data.get("fermi_energy", 0.0) or 0.0),
                     h_includes_onsite=bool(band_data.get("h_includes_onsite", False)),
+                    **self._spin_channel_npz(band_data),
                 )
                 print(
                     f"[ARPES remote] TB upload: hops={len(indices)} "
@@ -2613,6 +2614,22 @@ cd {remote_dir}
             QMessageBox.critical(self, "Error", f"Failed to kill SPR-KKR jobs:\n{str(e)}")
 
 
+    @staticmethod
+    def _spin_channel_npz(band_data):
+        """Pass collinear QE spin bands through to the ARPES job file.
+
+        GrizzlyME v0.1 is still spinless; the arrays are there for a later spin ME.
+        """
+        up = band_data.get("spin_up")
+        down = band_data.get("spin_down")
+        if up is None or down is None:
+            return {}
+        return {
+            "spin_up": np.asarray(up, dtype=float),
+            "spin_down": np.asarray(down, dtype=float),
+            "spin_axis": np.array(band_data.get("spin_axis") or "z"),
+        }
+
     def _update_band_energy_meta_label(self):
         name = self.ws_combo.currentText()
         if not name or name == "No band structures found":
@@ -2626,9 +2643,16 @@ cd {remote_dir}
         ef = band.get('fermi_energy', band.get('e_fermi', 'MISSING'))
         shift = band.get('arpes_e_fermi_shift', ef)
         baked = band.get('h_includes_onsite', False)
+        spin_note = ""
+        if band.get("spin_up") is not None and band.get("spin_down") is not None:
+            n_up = np.shape(band["spin_up"])[-1]
+            n_dn = np.shape(band["spin_down"])[-1]
+            spin_note = (
+                f" | spin {band.get('spin_axis', 'z')}: {n_up} up + {n_dn} down"
+            )
         self.lbl_band_energy_meta.setText(
             f"From DFT push: onsite_e={onsite} eV | QE Fermi={ef} eV | "
-            f"ARPES E-shift={shift} eV | onsite baked in H={baked}"
+            f"ARPES E-shift={shift} eV | onsite baked in H={baked}{spin_note}"
         )
 
     def refresh_workspace(self):
