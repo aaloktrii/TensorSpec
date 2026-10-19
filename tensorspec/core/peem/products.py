@@ -12,7 +12,7 @@ import numpy as np
 import xarray as xr
 
 # /analysis/<kind> products of the XMCD-imaging workflow (stack: per-polarization images)
-ANALYSIS_KINDS = ("stack", "pcd", "pld", "pmld", "pmnld", "domain_map")
+ANALYSIS_KINDS = ("stack", "pcd", "pld", "pmld", "pmnld", "domain_map", "compare", "nc")
 
 
 

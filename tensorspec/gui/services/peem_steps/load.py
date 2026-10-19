@@ -162,6 +162,92 @@ class PeemLoadSteps:
         summary["format"] = "images"
         return summary
 
+    # ------------------------------------------------------------- map files (.nc)
+    OLD_SIGNS = {"pcd": ("convention", "(CL-CR)/(CL+CR)"), "pld": ("formula", "(LH-LV)/(LH+LV)")}
+
+    def load_maps_nc(self, path: str | Path, name: str | None = None) -> dict[str, Any]:
+        """A NetCDF map file (core/io/peem_maps_nc: batch maps.nc, analysis outputs, any 2-D variables)
+        -> PEEM dataset. /analysis/nc holds every map (data = the first asymmetry-type one; each
+        variable's type in attrs 'var_types'); with channel means (mean_CP/CM, CL/CR, LH/LV) also
+        /analysis/stack, and a pcd / pld variable as /analysis/pcd | pld (batch maps with the older
+        sign flipped to the suite convention, noted in attrs), so the map tools and Compare (7.)
+        work as on a loaded stack. Frames (Frame view): the 2-D maps, or a 3-D variable."""
+        from tensorspec.core.io import peem_maps_nc
+        from tensorspec.core.io.peem_loaders import package_stack
+        from tensorspec.core.peem import products
+        from tensorspec.gui.services.peem_service import _load_summary, _safe_label  # imports this module
+
+        r = peem_maps_nc.read_maps_nc(path)
+        label = _safe_label(re.sub(r"[^A-Za-z0-9_.-]", "_", name or peem_maps_nc.dataset_name(path))[:64], "maps")
+        maps, types, um = r["maps"], r["types"], r["um_per_px"]
+        flips = {}
+        for var, (key, old) in self.OLD_SIGNS.items():
+            if var in maps and r["attrs"].get(key) == old:
+                maps[var] = -maps[var]
+                flips[var] = f"sign flipped to the suite convention (file: {old})"
+        if r["stacks"]:
+            k3 = next(iter(r["stacks"]))
+            frames, names = r["stacks"][k3], [f"{k3}_{i}" for i in range(len(r["stacks"][k3]))]
+            pol = None
+        else:
+            names = list(maps)
+            frames = np.stack([maps[k] for k in names])
+            pol = [{"mean_cp": "CP", "mean_cl": "CP", "mean_cm": "CM", "mean_cr": "CM", "mean_lh": "LH",
+                    "mean_lv": "LV"}.get(k.lower(), "?") for k in names]
+        tensor = package_stack(frames, names, source=str(path), loader="maps_nc", pol=pol, dtype=np.float32)
+        tensor.metadata.update({"um_per_px": um, "file_attrs": {k: str(v)[:200] for k, v in r["attrs"].items()},
+                                "map_types": types})
+        global_workspace.push_spectroscopy_data(label, tensor)
+        pair = r["pair"]
+        if pair and pair[2] in ("xmcd", "xld"):
+            ka, kb, kind = pair
+            ta, tb = ("CP", "CM") if kind == "xmcd" else ("LH", "LV")
+            a, b = maps[ka], maps[kb]
+            ds = products.map_dataset("stack", a + b, extra={f"mean_{ta.lower()}": a, f"mean_{tb.lower()}": b},
+                                      attrs={"channel_a": ta, "channel_b": tb, "pair": kind,
+                                             "from_step": f"loaded from {Path(path).name}"}, um_per_px=um)
+            self._write(label, "stack", ds)
+        for var in ("pcd", "pld"):
+            if var in maps:
+                extra = {k: maps[k] for k in maps if k.lower().startswith("mean_")}
+                ds = products.map_dataset(var, maps[var], extra=extra, um_per_px=um,
+                                          attrs={"from_step": f"loaded from {Path(path).name}",
+                                                 "sign_note": flips.get(var, "as in the file")})
+                self._write(label, var, ds)
+        primary = r["primary"]
+        ds = products.map_dataset("nc", maps[primary], extra={k: v for k, v in maps.items()}, um_per_px=um,
+                                  attrs={"source": str(path), "primary": primary, "var_types": json.dumps(types),
+                                         "sign_notes": json.dumps(flips)},
+                                  long_name=f"{primary} ({Path(path).name})")
+        self._write(label, "nc", ds)
+        _record(label, "load", {"loader": "maps_nc", "source": str(path), "maps": list(maps)[:20],
+                                "primary": primary, "um_per_px": um, "sign_flips": json.dumps(flips)})
+        summary = _load_summary(label, tensor, csv_prompt=False, csv_candidates=[])
+        summary.update({"format": "maps (.nc)", "maps": list(maps), "primary": primary, "map_types": types,
+                        "um_per_px": um, "sign_flips": flips})
+        return summary
+
+    def nc_outputs(self, name: str) -> list[tuple[str, str]]:
+        """[(label, variable)] of the maps loaded from a .nc file (data = the primary map)."""
+        at = self.get_product_attrs(name, "nc")
+        prim = at.get("primary", "")
+        return [(f"{prim} (primary)", "data")] + [(v, v) for v in self.map_variables(name, "nc")
+                                                  if v not in ("data", prim)]
+
+    def map_type(self, name: str, kind: str, var: str = "data") -> str:
+        """'signed', 'intensity' or 'domain' of a loaded .nc variable (kind 'nc'); '' otherwise."""
+        if kind != "nc":
+            return ""
+        at = self.get_product_attrs(name, "nc")
+        types = json.loads(at.get("var_types", "{}"))
+        return types.get(at.get("primary", "") if var in ("", "data") else var, "")
+
+    @staticmethod
+    def list_datasets() -> list[str]:
+        """Names of the loaded PEEM datasets (anything with frames in /raw), in load order."""
+        return [n for n in list(getattr(global_workspace, "_data", {}))
+                if global_workspace.pull_tensor_data(n, "raw") is not None]
+
     def unload(self, name: str) -> None:
         """Remove a dataset (raw, processed and all maps) from the workspace and free its memory."""
         global_workspace.remove(name)
