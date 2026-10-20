@@ -148,13 +148,13 @@ class PeemPanel(QWidget):
         map_group = QGroupBox("4. Dichroism map (Frame viewer)")
         map_form = QFormLayout(map_group)
         self.map_register = QComboBox()
-        self.map_register.addItem("Register helicities (recommended)", True)
+        self.map_register.addItem("Register polarizations (recommended)", True)
         self.map_register.addItem("No extra registration", False)
         map_form.addRow("Align:", self.map_register)
         map_btns = QHBoxLayout()
         self.btn_make_pcd = QPushButton("Make PCD (XMCD)")
         self.btn_make_pcd.setToolTip(
-            "CP/CM → /analysis/pcd. Prefer Separate first, or beamline load with pol tags."
+            "CP/CM → /analysis/pcd (LH/LV: Make PLD). Prefer Separate first, or beamline load with pol tags."
         )
         self.btn_make_pcd.clicked.connect(self._make_pcd)
         self.btn_make_pld = QPushButton("Make PLD (XLD)")
@@ -558,6 +558,7 @@ class PeemPanel(QWidget):
         n = int((self._meta or {}).get("n_frames", 1) or 1)
         self.drift_ref.setMaximum(max(0, n - 1))
         self._refresh_frame_view()
+        self.map_tools.set_pair((self._meta or {}).get("channel_tags"))
         self.map_tools.refresh()
 
     def _populate_node_combo(self):

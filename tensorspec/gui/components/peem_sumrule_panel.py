@@ -204,7 +204,7 @@ class PeemSumRulePanel(QWidget):
 
     def _require_dataset(self) -> str | None:
         if not self._dataset_name:
-            QMessageBox.warning(self, "No data", "Push corrected CP / CM from the PEEM panel first (→ Sum Rule).")
+            QMessageBox.warning(self, "No data", "Push corrected pairs (CP / CM or LH / LV) from the PEEM panel first (→ Sum Rule).")
             return None
         return self._dataset_name
 

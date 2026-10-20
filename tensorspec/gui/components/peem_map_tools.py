@@ -79,11 +79,13 @@ class PeemMapTools:
             w.setPlaceholderText(ph)
             row.addWidget(w)
         af.addRow("Energy window (eV):", row)
-        b = QPushButton("Stack CP / CM → asymmetry map")
-        b.setToolTip("Mean of the corrected pairs per polarization (within the energy window), CM refined\n"
-                     "onto CP, then XMCD (CM−CP)/(CM+CP) or XLD (LV−LH)/(LV+LH). Run 2. Stack Pairs first.")
+        b = QPushButton("Stack pairs → asymmetry map")
+        b.setToolTip("Mean of the corrected pairs per polarization (within the energy window), the second\n"
+                     "refined onto the first, then XMCD (CM−CP)/(CM+CP) for CP / CM or XLD (LV−LH)/(LV+LH)\n"
+                     "for LH / LV. Run 2. Stack Pairs first.")
         b.clicked.connect(self._asymmetry)
         af.addRow(b)
+        self.btn_asymmetry = b
         self.show_combo = QComboBox()
         self.show_combo.activated.connect(lambda *_: self._select(*self.show_combo.currentData()))
         af.addRow("Show:", self.show_combo)
@@ -210,10 +212,12 @@ class PeemMapTools:
         lay.addWidget(cg)
 
         if self._send_to_sum_rule is not None:
-            b = QPushButton("→ Sum Rule (corrected CP / CM)")
-            b.setToolTip("Open the Sum Rule window with this dataset: ROI spectra, background, sum rule")
+            b = QPushButton("→ Sum Rule (corrected pairs)")
+            b.setToolTip("Open the Sum Rule window with this dataset: ROI spectra, background, sum rule\n"
+                         "(the XMCD sum rule needs CP / CM; LH / LV give spectra and background)")
             b.clicked.connect(self._send)
             lay.addWidget(b)
+            self.btn_sum_rule = b
         self.status = QLabel("")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
@@ -284,6 +288,14 @@ class PeemMapTools:
         return self.service.get_rois(name)["roi"] if name else None
 
     # ------------------------------------------------------------------ map view
+    def set_pair(self, tags: list[str] | None):
+        """Name the buttons after the dataset's pair (CP / CM or LH / LV, from Stack Pairs)."""
+        pair = " / ".join(tags[:2]) if tags and len(tags) >= 2 else "pairs"
+        kind = {"CP / CM": "XMCD", "LH / LV": "XLD"}.get(pair, "asymmetry")
+        self.btn_asymmetry.setText(f"Stack {pair} → {kind} map")
+        if hasattr(self, "btn_sum_rule"):
+            self.btn_sum_rule.setText(f"→ Sum Rule (corrected {pair})")
+
     def refresh(self, select: tuple[str, str] | None = None):
         """Show the dataset's maps (after the asymmetry step); keeps the chosen layer."""
         name = self._get_name()
