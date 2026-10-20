@@ -180,3 +180,24 @@ def test_make_pcd_map_feeds_the_map_tools(qapp, tmp_path, monkeypatch):
     assert "difference" in pcd.data_vars and pcd.attrs["formula"] == "(CM-CP)/(CM+CP)"
     t._domain_width()
     assert "domain width" in t.status.text()
+
+
+def test_drift_uses_the_pairs_after_stack_pairs(qapp, tmp_path, monkeypatch):
+    """After Stack Pairs, Drift works on the pairs (Source: Processed), so Separate still works;
+    if Drift ran on Raw anyway, Separate says how to recover."""
+    from PySide6.QtWidgets import QMessageBox
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
+    p = PeemPanel()
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    assert p.drift_source.currentData() == "processed"
+    p._apply_drift()
+    p._separate()
+    assert not errors and "Separated" in p.status_label.text()
+    p.drift_source.setCurrentIndex(p.drift_source.findData("raw"))
+    p._apply_drift()
+    p._separate()
+    assert errors and "Stack Pairs again" in errors[-1]
