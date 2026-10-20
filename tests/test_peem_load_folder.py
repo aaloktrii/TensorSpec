@@ -150,3 +150,11 @@ def test_frame_viewer_pauses_after_reload(qapp):
         time.sleep(0.05)
     live = [w for w in QApplication.allWidgets() if isinstance(w, StackPlayer) and shiboken6.isValid(w)]
     assert not any(w.playing for w in live)
+
+
+def test_combined_dataset_named_after_all_folders():
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    name = PeemPanel._group_name(["/d/XPEEM_20um_579eV_Cr2p_LH_-15deg", "/d/XPEEM_20um_579eV_Cr2p_LV_-15deg"])
+    assert name == "XPEEM_20um_579eV_Cr2p_LH_LV_-15deg"
+    assert PeemPanel._group_name(["/d/Cr2p_CL_0deg", "/d/Cr2p_CR_0deg_2"]) == "Cr2p_CL_0deg_CR_0deg_2"
