@@ -485,13 +485,18 @@ class PeemPanel(QWidget):
             )
             ny, nx = frame.shape
             roi = self.service.default_drift_roi(ny, nx)
-            result = self.service.drift(
-                name,
-                ref_index=self.drift_ref.value(),
-                roi_dict=roi,
-                search_radius=self.drift_radius.value(),
-                source=self.drift_source.currentData(),
-            )
+            from PySide6.QtGui import QGuiApplication
+            QGuiApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                result = self.service.drift(
+                    name,
+                    ref_index=self.drift_ref.value(),
+                    roi_dict=roi,
+                    search_radius=self.drift_radius.value(),
+                    source=self.drift_source.currentData(),
+                )
+            finally:
+                QGuiApplication.restoreOverrideCursor()
             self._refresh_meta()
             algo = result.get("drift_method", "ncc_roi")
             self.drift_algo_label.setText(f"NCC ROI ({algo})")
