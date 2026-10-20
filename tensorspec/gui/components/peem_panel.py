@@ -614,14 +614,16 @@ class PeemPanel(QWidget):
             result = self.service.make_pcd_map(
                 name, register=bool(self.map_register.currentData())
             )
+            self.service.map_to_tools(name, "pcd")  # also in the Map tab, for sections 6-8
             self._refresh_meta()
+            self.map_tools.refresh(select=("pcd", "data"))
             idx = self.node_combo.findData(result["display_node"])
             if idx >= 0:
                 self.node_combo.setCurrentIndex(idx)
             self.view_tabs.setCurrentIndex(0)
             self.status_label.setText(
                 f"PCD map ({result['formula']}, source={result['source']}, "
-                f"mean={result['mean']:.4g})"
+                f"mean={result['mean']:.4g}) | also in the Map tab for 6-8"
             )
         except Exception as exc:
             QMessageBox.critical(self, "PCD map error", str(exc))
@@ -634,14 +636,16 @@ class PeemPanel(QWidget):
             result = self.service.make_pld_map(
                 name, register=bool(self.map_register.currentData())
             )
+            self.service.map_to_tools(name, "pld")  # also in the Map tab, for sections 6-8
             self._refresh_meta()
+            self.map_tools.refresh(select=("pld", "data"))
             idx = self.node_combo.findData(result["display_node"])
             if idx >= 0:
                 self.node_combo.setCurrentIndex(idx)
             self.view_tabs.setCurrentIndex(0)
             self.status_label.setText(
                 f"PLD map ({result['formula']}, source={result['source']}, "
-                f"mean={result['mean']:.4g})"
+                f"mean={result['mean']:.4g}) | also in the Map tab for 6-8"
             )
         except Exception as exc:
             QMessageBox.critical(self, "PLD map error", str(exc))

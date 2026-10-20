@@ -158,3 +158,25 @@ def test_mismatched_sweeps_are_regrouped_by_energy(tmp_path):
     r = xmcd / xas  # (CM - CP) / ((CP + CM) / 2) = -0.04 for CM 2 % below CP
     assert np.mean(r) == pytest.approx(-0.04, abs=0.005)
     assert np.abs(r + 0.04).max() < 0.025  # bins of 1.25 eV on a 4 eV-wide edge; pairing in order is up to 5 eV off
+
+
+def test_make_pcd_map_feeds_the_map_tools(qapp, tmp_path, monkeypatch):
+    """Section 4 (Make PCD) -> the same map in the Map tab, ready for sections 6-8."""
+    from PySide6.QtWidgets import QMessageBox
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
+    p = PeemPanel()
+    p._dataset_name = _images(tmp_path, p.service)
+    p.service.separate(p._dataset_name)
+    p._refresh_meta()
+    p._make_pcd()
+    assert not errors, errors
+    t = p.map_tools
+    assert t._shown() == ("pcd", "data")
+    assert "stack" in p.service.list_products("img")
+    pcd = global_workspace.pull_analysis_data("img", "pcd")
+    assert "difference" in pcd.data_vars and pcd.attrs["formula"] == "(CM-CP)/(CM+CP)"
+    t._domain_width()
+    assert "domain width" in t.status.text()
