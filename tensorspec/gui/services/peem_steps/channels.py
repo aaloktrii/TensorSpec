@@ -123,6 +123,32 @@ class PeemChannelSteps:
         _record(name, "stack channels", out)
         return out
 
+    def map_to_tools(self, name: str, kind: str) -> dict[str, Any]:
+        """A map made on the panel's section 4 (make_pcd_map / make_pld_map) -> the map tools: its two
+        registered mean images become /analysis/stack, and the asymmetry step rebuilds /analysis/<kind>
+        from them (same formula and convention), adding the variables the tools use (difference ...).
+        Image analysis, ROIs / domains and Compare then work on it as on a section-5 map."""
+        ds = global_workspace.pull_analysis_data(name, kind)
+        if ds is None or kind not in ("pcd", "pld"):
+            raise ValueError(f"no /analysis/{kind} map: run Make PCD / Make PLD first")
+        ta, tb = ("CP", "CM") if kind == "pcd" else ("LH", "LV")
+        at = dict(ds.attrs)
+        a = np.asarray(ds[f"mean_{ta.lower()}"].values, float)
+        b = np.asarray(ds[f"mean_{tb.lower()}"].values, float)
+        na, nb = int(at.get(f"n_{ta.lower()}", 1)), int(at.get(f"n_{tb.lower()}", 1))
+        attrs = {"pair": "xmcd" if kind == "pcd" else "xld", "channel_a": ta, "channel_b": tb,
+                 "channel_a_name": ta, "channel_b_name": tb, "n_a": na, "n_b": nb,
+                 "source_node": f"Make {kind.upper()} ({at.get('source_node', '')})",
+                 "registered": bool(at.get("registered", True))}
+        stack = products.map_dataset(
+            "stack", a + b, extra={f"mean_{ta.lower()}": a, f"mean_{tb.lower()}": b,
+                                   f"sum_{ta.lower()}": a * na, f"sum_{tb.lower()}": b * nb},
+            attrs=attrs, um_per_px=self._um_per_px(name), long_name="stacked images, sum of both polarizations")
+        self._write(name, "stack", stack)
+        out = self.asymmetry(name, convention=at.get("convention") or None) if kind == "pcd" else self.asymmetry(name)
+        _record(name, "map to tools", {"kind": kind, "n_frames": {ta: na, tb: nb}})
+        return out
+
     def to_sum_rule(self, name: str, energy_bin_eV: float | None = None) -> dict[str, Any]:
         """The PEEM tab's corrected frames -> new dataset ``<name>_sumrule`` for the Sum Rule window.
 

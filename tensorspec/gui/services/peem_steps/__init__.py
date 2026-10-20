@@ -79,6 +79,8 @@ checks every public call is listed here and runs the workflow without Qt):
                                           per pair, paired + separated, for background / sum rule
     sum_rule_datasets, channel_image      the Sum Rule window's dataset list and region image
     roi_spectra(name, roi)                CP / CM spectra of a region
+    map_to_tools(name, kind)              a section-4 map (Make PCD / PLD) -> /analysis/stack + rebuilt
+                                          /analysis/<kind>, so image analysis, ROIs and Compare use it
 
 11. Compare with a reference dataset  [compare]
     compare_candidates(name)              other loaded datasets with an asymmetry map

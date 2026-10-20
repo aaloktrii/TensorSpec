@@ -106,7 +106,7 @@ tensorspec/
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
     │   ├── arpes_tabs/            # peakfit_explorer_panel.py (ARPES suite tab 3: Peak-fit Explorer)
-    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder/beamline + Pair/Drift + Make PCD/PLD (4) + map tools (5–8); Frame=DataViewer
+    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + Make PCD/PLD (4, also feeds 6–8) + map tools (5–8); Frame=DataViewer
     │   ├── peem_map_tools.py      # PEEM panel add-on: asymmetry map, image analysis, ROIs / domains,
     │   │                          #   compare with a reference, → Sum Rule
     │   ├── peem_sumrule_panel.py  # Sum Rule window, From PEEM: region spectra, BG, sum rule
