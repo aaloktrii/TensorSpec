@@ -1520,8 +1520,13 @@ class DataViewerPanel(QWidget):
         self.global_halfwidths = {i: 0 for i in range(self.tensor_data.ndim)}
         
         self._clear_tree()
+        from tensorspec.gui.components.stack_player import StackPlayer
+        for old in self.views:  # discarded views must go, or their Play timers keep moving the frame
+            for player in old.findChildren(StackPlayer):
+                player.stop()
+            old.deleteLater()
         self.views.clear()
-        
+
         default_x = 1 if self.tensor_data.ndim > 1 else 0
         default_y = 0
         self.spawn_view(default_x, default_y)

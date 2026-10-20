@@ -32,39 +32,31 @@ from tensorspec.gui.services.peem_service import PeemService
 
 
 class PeemLoadThread(QThread):
+    """Load jobs in order, each ``(kind, source, name)``: ``("path", path, name)`` TIF stack / folder,
+    ``("images", folder, name)`` PNG / JPEG frames, ``("beamline", [paths], name)`` UE49 / UView / P3B.
+    A failed job does not stop the others. Emits (any loaded, [summaries], error lines)."""
+
     finished_signal = Signal(bool, object, str)
 
-    def __init__(
-        self,
-        service: PeemService,
-        path=None,
-        name=None,
-        csv_path=None,
-        *,
-        beamline_paths=None,
-        images_path=None,
-    ):
+    def __init__(self, service: PeemService, jobs: list[tuple[str, object, str | None]]):
         super().__init__()
         self.service = service
-        self.path = path
-        self.name = name
-        self.csv_path = csv_path
-        self.beamline_paths = beamline_paths
-        self.images_path = images_path
+        self.jobs = jobs
 
     def run(self):
-        try:
-            if self.beamline_paths is not None:
-                summary = self.service.load_beamline(self.beamline_paths, name=self.name)
-            elif self.images_path is not None:
-                summary = self.service.load_images(self.images_path, name=self.name)
-            else:
-                summary = self.service.load_path(
-                    self.path, name=self.name, csv_path=self.csv_path
-                )
-            self.finished_signal.emit(True, summary, "Loaded")
-        except Exception as exc:
-            self.finished_signal.emit(False, None, str(exc))
+        summaries, errors = [], []
+        for kind, source, name in self.jobs:
+            try:
+                if kind == "beamline":
+                    summaries.append(self.service.load_beamline(source, name=name))
+                elif kind == "images":
+                    summaries.append(self.service.load_images(source, name=name))
+                else:
+                    summaries.append(self.service.load_path(source, name=name))
+            except Exception as exc:
+                first = source[0] if isinstance(source, list) else source
+                errors.append(f"{os.path.basename(str(first).rstrip(os.sep))}: {exc}")
+        self.finished_signal.emit(bool(summaries), summaries, "\n".join(errors))
 
 
 class PeemPanel(QWidget):
@@ -95,21 +87,13 @@ class PeemPanel(QWidget):
         self.btn_load_stack = QPushButton("Load TIF Stack")
         self.btn_load_stack.clicked.connect(self._load_tif_stack)
         self.btn_load_folder = QPushButton("Load Folder")
-        self.btn_load_folder.setToolTip("Any PEEM folder in one step: TIF / TIFF, PNG / JPEG, UE49 scan,\n"
-                                        "UView .dat, ALS .P3B, or a folder of acquisitions (pick which).\n"
-                                        "Other files (.rtf, .ipf, notes ...) are skipped.")
+        self.btn_load_folder.setToolTip("One or more PEEM folders in one step (shift / cmd-click for several):\n"
+                                        "TIF / TIFF, PNG / JPEG, UE49 scan, UView .dat, ALS .P3B, or a folder\n"
+                                        "of acquisitions. Other files (.rtf, .ipf, notes ...) are skipped.")
         self.btn_load_folder.clicked.connect(self._load_folder)
         btn_row.addWidget(self.btn_load_stack)
         btn_row.addWidget(self.btn_load_folder)
         load_form.addRow(btn_row)
-        self.btn_load_beamline = QPushButton("Load beamline…")
-        self.btn_load_beamline.setToolTip(
-            "UE49 scan .txt, UView .dat, or ALS .P3B (files or folders).\n"
-            "UView CP/CM: pick CL folder, say Yes to add CR (or LH/LV).\n"
-            "Then Pair / Separate → Drift → Make PCD/PLD (Frame) → BG → Sum Rule."
-        )
-        self.btn_load_beamline.clicked.connect(self._load_beamline)
-        load_form.addRow(self.btn_load_beamline)
         self.btn_attach_csv = QPushButton("Attach CSV")
         self.btn_attach_csv.clicked.connect(self._attach_csv)
         load_form.addRow(self.btn_attach_csv)
@@ -241,57 +225,118 @@ class PeemPanel(QWidget):
 
     def _load_tif_stack(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Load TIF stack", "", "TIFF (*.tif *.tiff)"
+            self, "Load TIF stack", self._last_dir(), "TIFF (*.tif *.tiff)"
         )
         if path:
-            self._start_load(path)
+            self._remember_dir(os.path.dirname(path))
+            name = self._typed_name() or os.path.splitext(os.path.basename(path))[0].replace(" ", "_")
+            self._start_jobs([("path", path, name)])
+
+    # --- Load Folder: one or more folders, recognized in one step ---------------------------------
+    @staticmethod
+    def _settings():
+        from PySide6.QtCore import QSettings
+        return QSettings("TensorSpec", "PEEM")
+
+    def _last_dir(self) -> str:
+        return str(self._settings().value("last_dir", "") or "")
+
+    def _remember_dir(self, folder: str):
+        self._settings().setValue("last_dir", folder)
+
+    def _typed_name(self) -> str | None:
+        """The Name box, unless it still shows the current dataset (then loading would overwrite it)."""
+        text = self.name_edit.text().strip()
+        return text if text and text != self._dataset_name else None
+
+    def _pick_folders(self) -> list[str]:
+        """Folder dialog that takes several folders (shift / cmd-click); starts where the last load was."""
+        from PySide6.QtWidgets import QAbstractItemView, QDialog, QListView, QTreeView
+
+        dlg = QFileDialog(self, "Load folder(s) — shift / cmd-click to pick several", self._last_dir())
+        dlg.setFileMode(QFileDialog.Directory)
+        dlg.setOption(QFileDialog.ShowDirsOnly, True)
+        dlg.setOption(QFileDialog.DontUseNativeDialog, True)  # the native dialog picks one folder only
+        for view in dlg.findChildren(QListView) + dlg.findChildren(QTreeView):
+            if view.objectName() in ("listView", "treeView"):
+                view.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        if self._exec_dialog(dlg) != QDialog.Accepted:
+            return []
+        folders = [f for f in dlg.selectedFiles() if os.path.isdir(f)]
+        if folders:
+            self._remember_dir(os.path.dirname(folders[0].rstrip(os.sep)))
+        return folders
 
     def _load_folder(self):
-        """Any PEEM folder in one step (service.inspect_folder): TIF / TIFF, PNG / JPEG, UE49 scan,
-        UView .dat, ALS .P3B, or a folder of acquisitions (pick which). Other files are skipped."""
-        path = QFileDialog.getExistingDirectory(
-            self, "Load folder (TIF, PNG / JPG, UE49 scan, UView .dat, ALS .P3B, or a folder of these)")
-        if not path:
-            return
-        try:
-            info = self.service.inspect_folder(path)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Load folder", str(exc))
-            return
-        skipped = ", ".join(f"{n} {ext}" for ext, n in info.get("ignored", {}).items())
-        self._skipped_note = f" | skipped: {skipped}" if skipped else ""
-        kind = info["kind"]
-        if kind == "tif":
-            self._start_load(path)
-        elif kind == "images":
-            self._start_images_load(path)
-        elif kind == "beamline":
-            self._start_beamline_load([path])
-        else:
-            chosen = self._choose_acquisitions(path, info)
-            if chosen:
-                if not self.name_edit.text().strip():  # one dataset: named after the chosen folder
-                    self.name_edit.setText(os.path.basename(path.rstrip(os.sep)).replace(" ", "_"))
-                self._start_beamline_load(chosen)
+        folders = self._pick_folders()
+        if folders:
+            self.load_folders(folders)
 
-    def _choose_acquisitions(self, root: str, info: dict) -> list[str]:
-        """A folder of acquisitions: all listed and selected; click / shift / cmd to choose, then load
-        the selected ones as one dataset (e.g. the CL and CR folders)."""
+    def load_folders(self, folders: list[str]):
+        """Recognize each folder (service.inspect_folder) and load them all in one go: TIF / image
+        folders become one dataset each; beamline acquisitions (picked directly or inside a parent
+        folder) are listed to choose from, then load as one dataset each or combined (e.g. CL + CR)."""
+        from collections import Counter
+
+        jobs, acqs, problems, skipped = [], [], [], Counter()
+        for path in folders:
+            try:
+                info = self.service.inspect_folder(path)
+            except ValueError as exc:
+                problems.append(str(exc))
+                continue
+            skipped.update(info.get("ignored", {}))
+            base = os.path.basename(path.rstrip(os.sep)).replace(" ", "_")
+            if info["kind"] == "tif":
+                jobs.append(("path", path, base))
+            elif info["kind"] == "images":
+                jobs.append(("images", path, base))
+            else:
+                acqs += [(fmt, q, base if info["kind"] == "container" else None)
+                         for fmt, q in zip(info.get("formats") or [info["format"]], info["paths"])]
+        if acqs:
+            show_list = len(acqs) > 1 or any(parent for *_, parent in acqs)
+            groups = self._choose_acquisitions(acqs) if show_list else [[acqs[0][1]]]
+            for group in groups:
+                parent = next((par for _, q, par in acqs if q == group[0]), None)
+                own = os.path.basename(group[0].rstrip(os.sep)).replace(" ", "_")
+                jobs.append(("beamline", group, parent if len(group) > 1 and parent else own))
+        if problems:
+            QMessageBox.warning(self, "Load folder", "\n\n".join(problems))
+        if not jobs:
+            return
+        if len(jobs) == 1 and self._typed_name():
+            jobs[0] = (jobs[0][0], jobs[0][1], self._typed_name())
+        self._skipped_note = (" | skipped: " + ", ".join(f"{n} {e}" for e, n in skipped.items())) if skipped else ""
+        self._start_jobs(jobs)
+
+    def _choose_acquisitions(self, acqs: list[tuple[str, str, str | None]]) -> list[list[str]]:
+        """List the acquisitions (all selected; click / shift / cmd-click to choose) and how to load
+        them: one dataset each (ALS .P3B: CP and CM are in every acquisition) or one combined dataset
+        (UView CL + CR folders, UE49 CP + CM scans). Returns the groups to load."""
         from PySide6.QtWidgets import QAbstractItemView, QDialog, QDialogButtonBox, QListWidget
 
         dlg = QDialog(self)
-        dlg.setWindowTitle(f"Load from {os.path.basename(root)}")
+        dlg.setWindowTitle("Load acquisitions")
         lay = QVBoxLayout(dlg)
-        lay.addWidget(QLabel(f"{len(info['paths'])} acquisition(s) found, all selected. "
-                             "Click / shift-click / cmd-click to choose; they load as one dataset."))
+        lay.addWidget(QLabel(f"{len(acqs)} acquisition(s) found, all selected. Click / shift-click / "
+                             "cmd-click to choose."))
         lst = QListWidget()
         lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        for fmt, p in zip(info.get("formats", []), info["paths"]):
-            lst.addItem(f"[{fmt}] {os.path.relpath(p, root)}")
-            lst.item(lst.count() - 1).setData(Qt.UserRole, p)
+        for fmt, path, parent in acqs:
+            shown = f"{parent}/{os.path.basename(path)}" if parent else os.path.basename(path)
+            lst.addItem(f"[{fmt}] {shown}")
+            lst.item(lst.count() - 1).setData(Qt.UserRole, path)
         lst.selectAll()
         lst.setMinimumSize(560, 320)
         lay.addWidget(lst)
+        mode = QComboBox()
+        mode.addItem("One dataset per acquisition", "each")
+        mode.addItem("One combined dataset (e.g. CL + CR folders, CP + CM scans)", "combine")
+        mode.setCurrentIndex(0 if all(fmt == "p3b" for fmt, *_ in acqs) else 1)
+        form = QFormLayout()
+        form.addRow("Load as:", mode)
+        lay.addLayout(form)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         ok = bb.button(QDialogButtonBox.Ok)
         bb.accepted.connect(dlg.accept)
@@ -300,111 +345,51 @@ class PeemPanel(QWidget):
                                                   ok.setEnabled(bool(lst.selectedItems()))))
         ok.setText(f"Load selected ({lst.count()})")
         lay.addWidget(bb)
+        self._acq_mode = mode  # tests pick the mode here
         if self._exec_dialog(dlg) != QDialog.Accepted:
             return []
-        return [lst.item(i).data(Qt.UserRole) for i in range(lst.count()) if lst.item(i).isSelected()]
+        chosen = [lst.item(i).data(Qt.UserRole) for i in range(lst.count()) if lst.item(i).isSelected()]
+        if not chosen:
+            return []
+        return [chosen] if mode.currentData() == "combine" else [[c] for c in chosen]
 
     def _exec_dialog(self, dlg) -> int:
         return dlg.exec()
 
-    def _start_images_load(self, path: str):
-        name = self.name_edit.text().strip() or os.path.basename(path.rstrip(os.sep)).replace(" ", "_")
-        self.name_edit.setText(name)
-        self.status_label.setText(f"Loading images {path}…")
+    def _start_jobs(self, jobs: list[tuple[str, object, str | None]]):
+        shown = ", ".join(name or "?" for *_, name in jobs[:3]) + (f", … (+{len(jobs) - 3})" if len(jobs) > 3 else "")
+        self.status_label.setText(f"Loading {len(jobs)} dataset(s): {shown}…")
         self._set_load_buttons_enabled(False)
-        self._load_thread = PeemLoadThread(self.service, name=name, images_path=path)
-        self._load_thread.finished_signal.connect(self._on_load_finished)
-        self._load_thread.start()
-
-    def _load_beamline(self):
-        """Pick UE49/UView/P3B files, or one+ acquisition folders (CL then CR, etc.)."""
-        paths, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Beamline files (Cancel → pick folders)",
-            "",
-            "Beamline (*.txt *.dat *.P3B *.p3b);;All (*)",
-        )
-        if not paths:
-            paths = []
-            while True:
-                folder = QFileDialog.getExistingDirectory(
-                    self, f"Beamline folder {len(paths) + 1} (Cancel when done)"
-                )
-                if not folder:
-                    break
-                paths.append(folder)
-                more = QMessageBox.question(
-                    self,
-                    "Add another folder?",
-                    "Add another acquisition folder?\n"
-                    "(e.g. CR with CL, or LV with LH)",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes if len(paths) == 1 else QMessageBox.No,
-                )
-                if more != QMessageBox.Yes:
-                    break
-        if not paths:
-            return
-        self._start_beamline_load(paths)
-
-    def _start_load(self, path: str):
-        name = self.name_edit.text().strip() or None
-        if name is None:
-            base = os.path.basename(path.rstrip(os.sep))
-            if base.lower().endswith((".tif", ".tiff")):
-                base = os.path.splitext(base)[0]
-            self.name_edit.setText(base.replace(" ", "_"))
-            name = self.name_edit.text().strip() or None
-
-        self.status_label.setText(f"Loading {path}…")
-        self._set_load_buttons_enabled(False)
-        self._load_thread = PeemLoadThread(self.service, path, name=name)
-        self._load_thread.finished_signal.connect(self._on_load_finished)
-        self._load_thread.start()
-
-    def _start_beamline_load(self, paths: list[str]):
-        name = self.name_edit.text().strip() or None
-        if name is None:
-            base = os.path.basename(paths[0].rstrip(os.sep))
-            base = os.path.splitext(base)[0]
-            self.name_edit.setText(base.replace(" ", "_"))
-            name = self.name_edit.text().strip() or None
-
-        shown = ", ".join(os.path.basename(p.rstrip(os.sep)) for p in paths[:3])
-        if len(paths) > 3:
-            shown += f", … (+{len(paths) - 3})"
-        self.status_label.setText(f"Loading beamline ({len(paths)}): {shown}…")
-        self._set_load_buttons_enabled(False)
-        self._load_thread = PeemLoadThread(
-            self.service, name=name, beamline_paths=paths
-        )
+        self._load_thread = PeemLoadThread(self.service, jobs)
         self._load_thread.finished_signal.connect(self._on_load_finished)
         self._load_thread.start()
 
     def _set_load_buttons_enabled(self, enabled: bool):
         self.btn_load_stack.setEnabled(enabled)
         self.btn_load_folder.setEnabled(enabled)
-        self.btn_load_beamline.setEnabled(enabled)
 
-    def _on_load_finished(self, ok: bool, summary, message: str):
+    def _on_load_finished(self, ok: bool, summaries, message: str):
         self._set_load_buttons_enabled(True)
-        if not ok:
+        if message:
             QMessageBox.critical(self, "Load error", message)
+        if not ok:
             self.status_label.setText(f"Load failed: {message}")
             return
-        self._dataset_name = summary["name"]
-        self.name_edit.setText(summary["name"])
+        first = summaries[0]
+        self._dataset_name = first["name"]
+        self.name_edit.setText(first["name"])
         self._refresh_meta()
         self._fill_dataset_combo()
-        parts = [
-            f"Loaded '{summary['name']}'",
-            f"{summary['n_frames']} frames",
-            str(summary.get("pol_summary", {})),
-        ]
-        if summary.get("format"):
-            parts.append(f"format={summary['format']}")
-        if summary.get("csv_prompt"):
-            parts.append("Attach CSV if needed.")
+        if len(summaries) == 1:
+            parts = [f"Loaded '{first['name']}'", f"{first['n_frames']} frames", str(first.get("pol_summary", {}))]
+            if first.get("format"):
+                parts.append(f"format={first['format']}")
+            if first.get("csv_prompt"):
+                parts.append("Attach CSV if needed.")
+        else:
+            parts = [f"Loaded {len(summaries)} datasets: "
+                     + ", ".join(f"{s['name']} ({s['n_frames']} frames)" for s in summaries),
+                     "pick one under Dataset"]
         self.status_label.setText(" | ".join(parts) + getattr(self, "_skipped_note", ""))
         self._skipped_note = ""
 
