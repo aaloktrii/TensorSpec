@@ -175,3 +175,30 @@ class TestDriftCorrect(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             drift_correct(_raw_stack(), ref_index=0, roi=ROI, search_radius=3, track_channel=1)
+
+
+def test_fft_ncc_scores_match_shift_by_shift():
+    """The FFT score map equals the masked NCC of each shift (edge-clamped), so the fast search
+    picks the same shift as trying every shift one by one."""
+    from tensorspec.core.peem.engine import _ncc_best_shift, _ncc_score_map
+
+    rng = np.random.default_rng(3)
+    base = rng.random((70, 80)) * 1000 + 5000  # large offset: checks the variance stays accurate
+    ref, mov = base[10:60, 10:70], base[13:63, 8:68]  # moved by 3 rows, -2 columns: correct with dx=-2, dy=3
+    for mask in (np.zeros(ref.shape, bool), None):
+        if mask is None:
+            yy, xx = np.mgrid[: ref.shape[0], : ref.shape[1]]
+            mask = ((yy - 25) / 15) ** 2 + ((xx - 30) / 20) ** 2 < 1  # ellipse
+        else:
+            mask[12:38, 15:45] = True
+        r = 6
+        scores = _ncc_score_map(ref, mov, mask, r)
+        my, mx = np.nonzero(mask)
+        t = ref[mask] - ref[mask].mean()
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                c = mov[np.clip(my - dy, 0, 49), np.clip(mx - dx, 0, 59)]
+                c = c - c.mean()
+                exact = t @ c / (np.linalg.norm(t) * np.linalg.norm(c))
+                assert abs(scores[r - dy, r - dx] - exact) < 1e-9
+        assert _ncc_best_shift(ref, mov, mask, r) == (-2, 3)
