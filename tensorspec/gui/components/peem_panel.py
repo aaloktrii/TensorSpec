@@ -503,7 +503,12 @@ class PeemPanel(QWidget):
             self._refresh_meta()
             self.status_label.setText(f"Separated channels: {', '.join(result['channels'])}")
         except Exception as exc:
-            QMessageBox.critical(self, "Separate error", str(exc))
+            msg = str(exc)
+            if "(pair, channel=2, y, x)" in msg:  # Drift on Raw replaced the pairs with single frames
+                msg = ("The pairs are gone: Drift with Source 'Raw' replaced them with drift-corrected single "
+                       "frames.\n\nRun 2. Stack Pairs again, then 3. Drift with Source 'Processed' "
+                       "(now chosen automatically after Stack Pairs), then Separate.")
+            QMessageBox.critical(self, "Separate error", msg)
 
     def _apply_drift(self):
         name = self._require_dataset()
@@ -559,6 +564,8 @@ class PeemPanel(QWidget):
         self.drift_ref.setMaximum(max(0, n - 1))
         self._refresh_frame_view()
         self.map_tools.set_pair((self._meta or {}).get("channel_tags"))
+        if (self._meta or {}).get("processed_is_paired"):  # drift the pairs, not the raw frames
+            self.drift_source.setCurrentIndex(self.drift_source.findData("processed"))
         self.map_tools.refresh()
 
     def _populate_node_combo(self):
