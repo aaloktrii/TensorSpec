@@ -324,6 +324,21 @@ def load_private_key(path: str):
     )
 
 
+def local_mpi_prefix(ranks: int, *, windows: bool) -> str:
+    """Non-SLURM launcher. Windows local is ``mpiexec -n``; otherwise ``mpirun -np``.
+
+    No hwthread/oversubscribe — those break QE FFT groups on conda / Homebrew Open MPI.
+    """
+    if windows:
+        return f"mpiexec -n {ranks} "
+    return f"mpirun -np {ranks} "
+
+
+def _windows_local(cluster: Optional[Mapping[str, Any]]) -> bool:
+    """True only when this GUI machine runs the job. A cluster dict is a remote host."""
+    return not cluster and os.name == "nt"
+
+
 def mpi_launch_prefix(
     cluster: Optional[Mapping[str, Any]],
     ranks: int,
@@ -334,10 +349,7 @@ def mpi_launch_prefix(
         return ""
     if is_slurm(cluster):
         return f"srun -n {ranks} --cpu-bind=cores "
-    # Daemon / local: plain Open MPI. Do NOT use --use-hwthread-cpus or
-    # --oversubscribe — those break QE FFT task groups (inconsistent desc%nnr)
-    # on conda / Homebrew Open MPI builds (Linux workstation and macOS).
-    return f"mpirun -np {ranks} "
+    return local_mpi_prefix(ranks, windows=_windows_local(cluster))
 
 
 def adapt_pipeline_mpi_launcher(
@@ -347,7 +359,8 @@ def adapt_pipeline_mpi_launcher(
     """Rewrite MPI launch prefixes to match the selected compute target.
 
     SLURM (HPC) → ``srun -n N --cpu-bind=cores``
-    Daemon / local → ``mpirun -np N`` (no hwthread/oversubscribe)
+    Windows local → ``mpiexec -n N``
+    macOS / Linux local → ``mpirun -np N`` (no hwthread/oversubscribe)
 
     Rank counts are preserved. Safe to call at Generate and again at Run so
     switching Compute Target after Generate still uploads the right launcher.
@@ -362,14 +375,16 @@ def adapt_pipeline_mpi_launcher(
         r"srun\s+-n\s+(\d+)(?:\s+--cpu-bind=cores)?\s+"
         r"|"
         r"mpirun(?:\s+--use-hwthread-cpus)?(?:\s+--oversubscribe)?\s+-np\s+(\d+)\s+"
+        r"|"
+        r"mpiexec\s+-n\s+(\d+)\s+"
         r")"
     )
 
     def _replace(match: re.Match) -> str:
-        ranks = match.group(1) or match.group(2)
+        ranks = match.group(1) or match.group(2) or match.group(3)
         if want_srun:
             return f"srun -n {ranks} --cpu-bind=cores "
-        return f"mpirun -np {ranks} "
+        return local_mpi_prefix(int(ranks), windows=_windows_local(cluster))
 
     return re.sub(pattern, _replace, script)
 

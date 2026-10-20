@@ -125,6 +125,24 @@ def test_mpi_launch_prefix_daemon_is_plain():
     assert "--oversubscribe" not in mpi_launch_prefix(None, 4)
 
 
+def test_windows_local_uses_mpiexec(monkeypatch):
+    import tensorspec.core.compute.cluster_paths as cp
+
+    monkeypatch.setattr(cp.os, "name", "nt")
+    assert cp.mpi_launch_prefix(None, 4) == "mpiexec -n 4 "
+    # Remote daemon stays mpirun even if the GUI is Windows.
+    assert cp.mpi_launch_prefix({"mode": "Daemon"}, 4) == "mpirun -np 4 "
+    assert cp.mpi_launch_prefix(
+        {"mode": "SLURM", "paths": {"slurm": {"account": "als"}}}, 4
+    ).startswith("srun -n 4")
+    rewritten = cp.adapt_pipeline_mpi_launcher("mpirun -np 8 pw.x -in scf.in\n", None)
+    assert rewritten.strip() == "mpiexec -n 8 pw.x -in scf.in"
+    remote = cp.adapt_pipeline_mpi_launcher(
+        "mpiexec -n 8 pw.x -in scf.in\n", {"mode": "Daemon"}
+    )
+    assert remote.strip() == "mpirun -np 8 pw.x -in scf.in"
+
+
 def test_load_private_key_sshproxy_rsa_pem():
     # Point TENSORSPEC_TEST_SSHPROXY_KEY at a real sshproxy key to exercise this.
     key_path = os.path.expanduser(os.environ.get("TENSORSPEC_TEST_SSHPROXY_KEY", ""))

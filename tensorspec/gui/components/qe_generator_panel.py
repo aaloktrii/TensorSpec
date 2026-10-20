@@ -846,8 +846,9 @@ class QEGeneratorPanel(QWidget):
         use_gpu: bool,
         cuda_devices: str,
         relax_enabled: bool,
+        windows: bool = False,
     ) -> str:
-        if os.name == "nt":
+        if windows:
             sync_cmd = (
                 "& $env:PYTHON -m tensorspec.core.dft.sync_after_relax "
                 "--out-dir . --template-cif structure_template.cif"
@@ -857,7 +858,7 @@ class QEGeneratorPanel(QWidget):
                 '"$PYTHON" -m tensorspec.core.dft.sync_after_relax '
                 "--out-dir . --template-cif structure_template.cif"
             )
-        if os.name == "nt":
+        if windows:
             _, py_ps = pipeline_python_env(None)
             hse_block = (
                 "# ==================================================================\n"
@@ -885,8 +886,8 @@ class QEGeneratorPanel(QWidget):
                 + gpu_line
                 + "\n"
                 + hse_block
-                + "mkdir -p out tmp\n"
-                + "export TMPDIR=$(pwd)/tmp\n"
+                + "New-Item -ItemType Directory -Force -Path out, tmp | Out-Null\n"
+                + "$env:TMPDIR = Join-Path (Get-Location) 'tmp'\n"
                 + "# Edit this script to run specific parts of the pipeline\n"
                 + relax_block
                 + f"{pw_mpi_cmd}{pw_exec} -in scf.in | Tee-Object -FilePath scf.out\n"
@@ -1031,6 +1032,9 @@ class QEGeneratorPanel(QWidget):
             pw2wan_exec = self.line_pw2wan_cmd.text().strip()
 
             cluster = self.get_selected_cluster()
+            # PowerShell + mpiexec only for a local Windows run. A remote
+            # Linux/SLURM target still gets bash even if this GUI is on Windows.
+            windows_local = os.name == "nt" and (not cluster or cluster == "local")
             pw_mpi_cmd = cp.mpi_launch_prefix(
                 cluster,
                 pw_ranks,
@@ -1056,6 +1060,7 @@ class QEGeneratorPanel(QWidget):
                 use_gpu=use_gpu,
                 cuda_devices=cuda_devices,
                 relax_enabled=relax_enabled,
+                windows=windows_local,
             )
 
             self.script_editor.setPlainText(script_text)
@@ -1067,7 +1072,7 @@ class QEGeneratorPanel(QWidget):
     def run_qe_script(self):
         out_dir = self.line_outdir.text()
         cluster = self.get_selected_cluster()
-        # Always adapt launcher to current target (SLURM→srun, else mpirun).
+        # Always adapt launcher to current target (SLURM→srun, Windows→mpiexec, else mpirun).
         script_content = cp.adapt_pipeline_mpi_launcher(
             self.script_editor.toPlainText(), cluster
         ).strip()
@@ -1089,7 +1094,12 @@ class QEGeneratorPanel(QWidget):
         self.is_viewing = True
         
         _pw_ranks, _wan_ranks, slurm_ntasks = self._mpi_rank_settings()
-        launcher = "srun" if cp.is_slurm(cluster) else "mpirun"
+        if cp.is_slurm(cluster):
+            launcher = "srun"
+        elif os.name == "nt":
+            launcher = "mpiexec"
+        else:
+            launcher = "mpirun"
         self.log_display.appendPlainText(
             f"MPI launcher for this run: {launcher} (target={'SLURM' if cp.is_slurm(cluster) else 'Daemon/local'})"
         )
