@@ -48,11 +48,13 @@ class PeemLoadThread(QThread):
         for kind, source, name in self.jobs:
             try:
                 if kind == "beamline":
-                    summaries.append(self.service.load_beamline(source, name=name))
+                    summary = self.service.load_beamline(source, name=name)
                 elif kind == "images":
-                    summaries.append(self.service.load_images(source, name=name))
+                    summary = self.service.load_images(source, name=name)
                 else:
-                    summaries.append(self.service.load_path(source, name=name))
+                    summary = self.service.load_path(source, name=name)
+                summary["sources"] = [str(q) for q in (source if isinstance(source, list) else [source])]
+                summaries.append(summary)
             except Exception as exc:
                 first = source[0] if isinstance(source, list) else source
                 errors.append(f"{os.path.basename(str(first).rstrip(os.sep))}: {exc}")
@@ -299,8 +301,7 @@ class PeemPanel(QWidget):
             groups = self._choose_acquisitions(acqs) if show_list else [[acqs[0][1]]]
             for group in groups:
                 parent = next((par for _, q, par in acqs if q == group[0]), None)
-                own = os.path.basename(group[0].rstrip(os.sep)).replace(" ", "_")
-                jobs.append(("beamline", group, parent if len(group) > 1 and parent else own))
+                jobs.append(("beamline", group, parent if len(group) > 1 and parent else self._group_name(group)))
         if problems:
             QMessageBox.warning(self, "Load folder", "\n\n".join(problems))
         if not jobs:
@@ -309,6 +310,24 @@ class PeemPanel(QWidget):
             jobs[0] = (jobs[0][0], jobs[0][1], self._typed_name())
         self._skipped_note = (" | skipped: " + ", ".join(f"{n} {e}" for e, n in skipped.items())) if skipped else ""
         self._start_jobs(jobs)
+
+    @staticmethod
+    def _group_name(paths: list[str]) -> str:
+        """Dataset name from its folders: the parts they share, with the parts that differ joined,
+        e.g. ..._Cr2p_LH_-15deg + ..._Cr2p_LV_-15deg -> ..._Cr2p_LH_LV_-15deg."""
+        names = [os.path.basename(p.rstrip(os.sep)).replace(" ", "_") for p in paths]
+        if len(names) == 1:
+            return names[0]
+        parts = [n.split("_") for n in names]
+        lead = 0
+        while all(len(q) > lead for q in parts) and len({q[lead] for q in parts}) == 1:
+            lead += 1
+        tail = 0
+        while all(len(q) - lead > tail for q in parts) and len({q[-1 - tail] for q in parts}) == 1:
+            tail += 1
+        middle = list(dict.fromkeys("_".join(q[lead:len(q) - tail]) for q in parts))  # LH, LV
+        middle = [m for m in middle if m]
+        return "_".join(parts[0][:lead] + middle + (parts[0][len(parts[0]) - tail:] if tail else []))[:64]
 
     def _choose_acquisitions(self, acqs: list[tuple[str, str, str | None]]) -> list[list[str]]:
         """List the acquisitions (all selected; click / shift / cmd-click to choose) and how to load
@@ -376,12 +395,19 @@ class PeemPanel(QWidget):
             self.status_label.setText(f"Load failed: {message}")
             return
         first = summaries[0]
+        if not hasattr(self, "_sources"):
+            self._sources = {}
+        for summary in summaries:
+            self._sources[summary["name"]] = summary.get("sources", [])
         self._dataset_name = first["name"]
         self.name_edit.setText(first["name"])
         self._refresh_meta()
         self._fill_dataset_combo()
         if len(summaries) == 1:
             parts = [f"Loaded '{first['name']}'", f"{first['n_frames']} frames", str(first.get("pol_summary", {}))]
+            if len(first.get("sources", [])) > 1:
+                parts.insert(1, f"{len(first['sources'])} folders: "
+                             + ", ".join(os.path.basename(q.rstrip(os.sep)) for q in first["sources"]))
             if first.get("format"):
                 parts.append(f"format={first['format']}")
             if first.get("csv_prompt"):
@@ -398,6 +424,10 @@ class PeemPanel(QWidget):
         self.dataset_combo.blockSignals(True)
         self.dataset_combo.clear()
         self.dataset_combo.addItems(names)
+        for i, n in enumerate(names):  # hover a dataset to see the folders it came from
+            folders = getattr(self, "_sources", {}).get(n)
+            if folders:
+                self.dataset_combo.setItemData(i, "\n".join(folders), Qt.ToolTipRole)
         if self._dataset_name in names:
             self.dataset_combo.setCurrentText(self._dataset_name)
         self.dataset_combo.blockSignals(False)
