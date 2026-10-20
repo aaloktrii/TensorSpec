@@ -1,0 +1,73 @@
+#------------------------------------------------------------------------------
+# LaTe3 at 100 K -- AVERAGE (unmodulated) structure
+#
+# Source: ja0641608_si_002.cif, data block "data_LaTe3" (100.0(3) K),
+#         supporting information of J. Am. Chem. Soc. article ja0641608.
+#
+# The source refines LaTe3 at 100 K as an incommensurately modulated (CDW)
+# structure in superspace group C2cm(00g)000. This file keeps the average
+# structure only: the 8 superspace operations with the 4th coordinate (x4)
+# dropped, i.e. 3D space group C2cm (non-standard setting), and the average
+# atom positions. The modulation is NOT applied here; it is recorded below
+# for reference. Use the source file for the full modulated refinement.
+#
+# CDW wave vector:  q = (0, 0, 0.2757(4)) in units of c*
+# Displacive modulation, first harmonic (fractional units; u = cos*cos(2pi x4) + sin*sin(2pi x4)):
+#   atom  axis      cos            sin
+#   La1   x       0.0059(2)      0
+#   La1   y      -0.00003(14)    0
+#   La1   z       0              0.0008(8)
+#   Te1   x       0.0008(2)      0
+#   Te1   y       0.00006(17)    0
+#   Te1   z       0             -0.0008(9)
+#   Te2   x      -0.0325(5)      0
+#   Te2   y      -0.00167(14)    0
+#   Te2   z       0             -0.0046(10)
+#   Te3   x       0.0236(4)      0
+#   Te3   y       0.00008(15)    0
+#   Te3   z       0             -0.0011(10)
+# (Te2 x amplitude ~ 0.0325*a = 0.14 A; Te3 x ~ 0.0236*a = 0.10 A.)
+#
+# Stacking (van der Waals) axis: b.
+#------------------------------------------------------------------------------
+
+data_LaTe3_100K_average
+
+_chemical_formula_sum                    'La1 Te3'
+_diffrn_ambient_temperature              100.0(3)
+
+_symmetry_cell_setting                   orthorhombic
+_symmetry_space_group_name_H-M           'C 2 c m'
+loop_
+ _symmetry_equiv_pos_site_id
+ _symmetry_equiv_pos_as_xyz
+ 1   x,y,z
+ 2   x,-y,1/2+z
+ 3   x,y,1/2-z
+ 4   x,-y,-z
+ 5   1/2+x,1/2+y,z
+ 6   1/2+x,1/2-y,1/2+z
+ 7   1/2+x,1/2+y,1/2-z
+ 8   1/2+x,1/2-y,-z
+
+_cell_length_a                           4.3779(10)
+_cell_length_b                           26.149(5)
+_cell_length_c                           4.3968(8)
+_cell_angle_alpha                        90
+_cell_angle_beta                         90
+_cell_angle_gamma                        90
+_cell_volume                             503.34(17)
+_cell_formula_units_Z                    4
+
+loop_
+ _atom_site_label
+ _atom_site_type_symbol
+ _atom_site_fract_x
+ _atom_site_fract_y
+ _atom_site_fract_z
+ _atom_site_U_iso_or_equiv
+ _atom_site_occupancy
+ La1 La 0.92       0.16859(3) 0.25 0.0236(2) 1
+ Te1 Te 0.9202(12) 0.29589(3) 0.25 0.0236(2) 1
+ Te2 Te 0.9154(15) 0.06887(3) 0.75 0.0248(3) 1
+ Te3 Te 0.9198(13) 0.43064(3) 0.75 0.0251(2) 1
