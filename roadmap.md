@@ -72,7 +72,7 @@ Grand App
 - [x] PEEM Suite (`core/peem/`, `gui/services/peem_service.py`, `gui/components/peem_panel.py`, `gui/suites/peem_suite.py`)
 	- [x] loader of tif file stacks (`core/io/peem_loaders.py`, needs `tifffile`)
 	- [x] loader of sequences / ZIP / folder stacks
-	- [x] Beamline loaders: `peem_beamline_loaders.load_beamline` + `ue49` / `uview` / `p3b`; PEEM panel **Load beamline…** (Pair/Drift/BG/Sum Rule unchanged)
+	- [x] Beamline loaders: `peem_beamline_loaders.load_beamline` + `ue49` / `uview` / `p3b`; PEEM panel **Load Folder** (one or more folders: TIF, PNG / JPEG, UE49, UView, P3B; replaces Load beamline…)
 	- [x] stack / pair CP+CM or LH+LV
 	- [x] drift correction
 	- [x] separate CP/CM or LH/LV into processed children
