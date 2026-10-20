@@ -418,8 +418,21 @@ class PeemMapTools:
         if self.viewer.tensor_data is None:
             self._err("Make the asymmetry map first (4.): drawing works on the Map view.")
             return
+        self._show_map_tab()  # the tools draw on the Map view, not the Frame view
         self.viewer.start_tool(kind, cb, color)
-        self.status.setText("Draw on the Map view.")
+        self.status.setText({"line": "Line: click the start, then the end point on the Map view.",
+                             "rect": "Rectangle: press and drag on the Map view.",
+                             "polygon": "Polygon: click the corners on the Map view; click the first corner "
+                                        "again to close."}.get(kind, "Draw on the Map view."))
+
+    def _show_map_tab(self):
+        from PySide6.QtWidgets import QTabWidget
+
+        w = self.map_view.parentWidget()
+        while w is not None and not isinstance(w, QTabWidget):
+            w = w.parentWidget()
+        if w is not None:
+            w.setCurrentWidget(self.map_view)
 
     # ------------------------------------------------------------------ 5. asymmetry
     def _asymmetry(self):
@@ -485,6 +498,8 @@ class PeemMapTools:
         self.line_edit.setText(f"{x1:.0f}, {y1:.0f}, {x2:.0f}, {y2:.0f}")
         self._update_overlays()
         self._dock_profiles()
+        self.status.setText(f"Line ({x1:.0f}, {y1:.0f}) → ({x2:.0f}, {y2:.0f}) px: Add profile, Histogram, "
+                            "FFT or Domain width use it.")
 
     def _set_line(self):
         try:
@@ -638,6 +653,7 @@ class PeemMapTools:
         self._set_roi(sh)
         if sh.get("kind") == "rect":
             self.roi_edit.setText(f"{sh['x0']}, {sh['x1']}, {sh['y0']}, {sh['y1']}")
+        self.status.setText("ROI set: ROI statistics, Domain map and Domain width use it.")
 
     def _set_roi_typed(self):
         try:

@@ -201,3 +201,19 @@ def test_drift_uses_the_pairs_after_stack_pairs(qapp, tmp_path, monkeypatch):
     p._apply_drift()
     p._separate()
     assert errors and "Stack Pairs again" in errors[-1]
+
+
+def test_draw_buttons_bring_up_the_map_view(qapp, tmp_path):
+    """Draw line / rectangle work on the Map view: the button switches to it from the Frame tab."""
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    p.map_tools._asymmetry()
+    p.view_tabs.setCurrentIndex(0)  # Frame
+    p.map_tools._start_tool("line", p.map_tools._on_line, "orange")
+    assert p.view_tabs.currentWidget() is p.map_tools.map_view
+    assert p.map_tools.viewer.primary_view().tool_active and "click the start" in p.map_tools.status.text()
+    p.map_tools.viewer.primary_view()._finish_tool({"kind": "line", "a": (10, 5), "b": (10, 50)})
+    assert p.map_tools.line_edit.text() == "5, 10, 50, 10" and "Line (5, 10)" in p.map_tools.status.text()
