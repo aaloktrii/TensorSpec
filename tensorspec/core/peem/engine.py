@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from typing import Any, Literal
 
@@ -30,13 +31,47 @@ def _shift_plane(plane: np.ndarray, dx: int, dy: int) -> np.ndarray:
     return plane[np.ix_(source_y, source_x)]
 
 
+def _ncc_score_map(
+    ref_plane: np.ndarray,
+    mov_plane: np.ndarray,
+    mask: np.ndarray,
+    search_radius: int,
+) -> np.ndarray:
+    """Masked NCC for every shift at once (FFT); scores[r - dy, r - dx], NaN where the moving window
+    is flat. Same score as the per-shift loop in _ncc_best_shift, up to rounding."""
+    from scipy.signal import fftconvolve
+
+    r = search_radius
+    ys, xs = np.nonzero(mask)
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    m = mask[y0:y1, x0:x1].astype(float)
+    n = m.sum()
+    t = np.asarray(ref_plane[y0:y1, x0:x1], dtype=float)
+    t = (t - t[m > 0].mean()) * m
+    # edge-clamped moving plane = np.clip of the indices in the loop
+    region = np.pad(np.asarray(mov_plane, dtype=float), r, mode="edge")[y0:y1 + 2 * r, x0:x1 + 2 * r]
+    region = region - region.mean()  # NCC ignores offsets; keeps the window variance accurate
+    corr = fftconvolve(region, t[::-1, ::-1], mode="valid")
+    s1 = fftconvolve(region, m[::-1, ::-1], mode="valid")
+    s2 = fftconvolve(region * region, m[::-1, ::-1], mode="valid")
+    var = s2 - s1 * s1 / n
+    with np.errstate(invalid="ignore", divide="ignore"):
+        score = corr / (np.linalg.norm(t) * np.sqrt(var))
+    score[~(var > 1e-9 * max(float(np.abs(s2).max()), 1e-300))] = np.nan
+    return score
+
+
 def _ncc_best_shift(
     ref_plane: np.ndarray,
     mov_plane: np.ndarray,
     mask: np.ndarray,
     search_radius: int,
 ) -> tuple[int, int]:
-    """Return the integer shift that maximizes masked normalized correlation."""
+    """Return the integer shift that maximizes masked normalized correlation.
+
+    All shifts are scored at once with FFTs (_ncc_score_map); the shifts within 1e-6 of the best
+    are then scored exactly, in the original order and with the original tie rule, so the result
+    is the same as trying every shift one by one (only much faster on large frames)."""
     mask_y, mask_x = np.nonzero(mask)
     template = np.asarray(ref_plane[mask], dtype=float)
     template_centered = template - template.mean()
@@ -44,12 +79,20 @@ def _ncc_best_shift(
     if not np.isfinite(template_norm) or template_norm <= np.finfo(float).eps:
         raise ValueError("reference ROI template must have non-zero variance")
 
+    r = search_radius
+    candidates = None
+    scores = _ncc_score_map(ref_plane, mov_plane, mask, r)
+    if np.isfinite(scores).any():
+        top = np.nanmax(scores)
+        near = np.argwhere(scores >= top - 1e-6)  # rows r - dy, cols r - dx; row-major = loop order
+        candidates = [(r - int(a), r - int(b)) for a, b in near]  # (dy, dx)
     ny, nx = ref_plane.shape
-    best_score = -np.inf
-    best_shift: tuple[int, int] | None = None
-    for dy in range(-search_radius, search_radius + 1):
-        source_y = np.clip(mask_y - dy, 0, ny - 1)
-        for dx in range(-search_radius, search_radius + 1):
+
+    def pick(shifts):
+        best_score = -np.inf
+        best_shift: tuple[int, int] | None = None
+        for dy, dx in shifts:
+            source_y = np.clip(mask_y - dy, 0, ny - 1)
             source_x = np.clip(mask_x - dx, 0, nx - 1)
             candidate = np.asarray(mov_plane[source_y, source_x], dtype=float)
             candidate_centered = candidate - candidate.mean()
@@ -77,7 +120,12 @@ def _ncc_best_shift(
             elif scores_tie and (best_rank is None or shift_rank < best_rank):
                 best_score = max(best_score, score)
                 best_shift = (dx, dy)
+        return best_shift
 
+    every = [(dy, dx) for dy in range(-r, r + 1) for dx in range(-r, r + 1)]
+    best_shift = pick(candidates) if candidates else None
+    if best_shift is None:  # no usable FFT candidate: try every shift
+        best_shift = pick(every)
     if best_shift is None:
         raise ValueError("no valid NCC shift found in search range")
     return best_shift
@@ -150,14 +198,15 @@ def drift_correct(
     if not np.isfinite(ref_norm) or ref_norm <= np.finfo(float).eps:
         raise ValueError("reference ROI template must have non-zero variance")
 
-    shifts: list[tuple[int, int]] = []
-    for index, moving_plane in enumerate(tracking_planes):
+    from concurrent.futures import ThreadPoolExecutor  # frames are independent; the FFTs release the GIL
+
+    def frame_shift(index: int) -> tuple[int, int]:
         if index == ref_index:
-            shifts.append((0, 0))
-        else:
-            shifts.append(
-                _ncc_best_shift(ref_plane, moving_plane, mask, search_radius)
-            )
+            return (0, 0)
+        return _ncc_best_shift(ref_plane, tracking_planes[index], mask, search_radius)
+
+    with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:
+        shifts: list[tuple[int, int]] = list(pool.map(frame_shift, range(n_items)))
 
     corrected = np.empty_like(tensor.value)
     for index, (dx, dy) in enumerate(shifts):
