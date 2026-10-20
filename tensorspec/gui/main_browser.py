@@ -19,6 +19,7 @@ from tensorspec.gui.suites.dft_suite import DFTSuite
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.core.workspace import global_workspace
 from tensorspec.core.io.arpes_loader import ARPESLoader
+from tensorspec.core.io.matlab_arpes import save_arpes_matlab
 from tensorspec.core.io.simulated_loader import SimulatedARPESLoader
 
 import time
@@ -363,6 +364,11 @@ class TensorSpecMainBrowser(QMainWindow):
         self.btn_launch_viewer.setEnabled(False)
         self.btn_launch_viewer.clicked.connect(self.launch_standalone_viewer)
         right_layout.addWidget(self.btn_launch_viewer)
+
+        self.btn_save_matlab = QPushButton("Save to MATLAB")
+        self.btn_save_matlab.setEnabled(False)
+        self.btn_save_matlab.clicked.connect(self.save_selected_to_matlab)
+        right_layout.addWidget(self.btn_save_matlab)
         
         main_splitter.addWidget(right_widget)
         main_splitter.setSizes([350, 650])
@@ -460,11 +466,13 @@ class TensorSpecMainBrowser(QMainWindow):
 
     def on_item_selected(self, current_item, previous_item):
         """Triggers preview update in the Inspector Panel upon selecting a variable."""
-        if not current_item: 
+        if not current_item:
+            self.btn_save_matlab.setEnabled(False)
             return
-            
+
         var_name = current_item.text(0)
         self.current_selected_var = var_name
+        self.btn_save_matlab.setEnabled(False)
         
         if var_name in self.workspace_data:
             meta_text = self.workspace_data[var_name].get("metadata", "No metadata available for this object.")
@@ -484,8 +492,43 @@ class TensorSpecMainBrowser(QMainWindow):
                     
                 if item_type == 'spectroscopy_tree':
                     self.btn_launch_viewer.setEnabled(True)
+                    self.btn_save_matlab.setEnabled(True)
                 else:
                     self.btn_launch_viewer.setEnabled(False)
+
+    def _selected_tensor(self):
+        var_name = getattr(self, "current_selected_var", None)
+        if not var_name:
+            return None, None
+        tensor = global_workspace.pull_tensor_data(var_name)
+        if tensor is None:
+            tensor = global_workspace.pull_tensor_data(var_name, node="raw")
+        if tensor is None:
+            tensor = global_workspace.pull_tensor_data(var_name, node="/raw")
+        return var_name, tensor
+
+    def save_selected_to_matlab(self):
+        """Write the selected ARPES cube. Axis fields use the tensor labels. Intensity is data.value."""
+        var_name, tensor = self._selected_tensor()
+        if tensor is None:
+            QMessageBox.warning(self, "Save to MATLAB", "Select an ARPES dataset first.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save to MATLAB", f"{var_name}.mat", "MATLAB files (*.mat)"
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".mat"):
+            path += ".mat"
+        try:
+            save_arpes_matlab(tensor, path)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Save to MATLAB", str(exc))
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, "Save to MATLAB", f"Failed to write {path}:\n{exc}")
+            return
+        QMessageBox.information(self, "Save to MATLAB", f"Wrote {path}")
 
     def launch_standalone_viewer(self):
         """Reads the workspace data type and spawns the correct floating component."""
