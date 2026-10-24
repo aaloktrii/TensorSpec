@@ -91,15 +91,12 @@ class MagneticSpec:
         order = list(type_order) if type_order is not None else list(self.starting_magnetization)
         if self.mode == "collinear" or self.mode == "afm":
             lines = ["\n  nspin = 2"]
-            # Symmetry will often wipe a collinear AFM pattern on a doubled cell.
-            if self.mode == "afm":
-                lines.append("\n  nosym = .true.")
             for i, lab in enumerate(order, start=1):
                 mag = self.starting_magnetization.get(lab, 0.0)
                 if isinstance(mag, (list, tuple)):
                     raise ValueError(f"Collinear/AFM mag for {lab} must be a scalar, got {mag!r}")
                 lines.append(f"\n  starting_magnetization({i}) = {float(mag)}")
-            if self.tot_magnetization is not None:
+            if self.mode == "collinear" and self.tot_magnetization is not None:
                 lines.append(f"\n  tot_magnetization = {float(self.tot_magnetization)}")
             return "".join(lines)
         lines = ["\n  noncolin = .true."]
@@ -163,12 +160,7 @@ def afm_split_spec(
         if el.symbol not in elements and el.symbol not in mag:
             mag[el.symbol] = 0.0
 
-    return MagneticSpec(
-        mode="afm",
-        starting_magnetization=mag,
-        site_labels=site_labels,
-        tot_magnetization=0.0,
-    )
+    return MagneticSpec(mode="afm", starting_magnetization=mag, site_labels=site_labels)
 
 
 def collinear_spec(
