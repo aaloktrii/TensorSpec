@@ -1401,44 +1401,8 @@ class DFTSuite(QWidget):
             f"Reciprocal lattice for ARPES: {recip_src}"
             f"{basis_line}\n\n"
             f"(onsite is baked into H_dict for ARPES)\n\n"
-            f"Load it in the ARPES Suite."
-            + (
-                "\n\nSpin channels: up and down (axis z) are on this band object."
-                if payload.get("spin_up") is not None
-                else ""
-            ),
+            f"Load it in the ARPES Suite.",
         )
-
-    def _stash_qe_bands_for_push(self, k_dist, eigenvals, fermi, spin_bands):
-        """Keep QE eigenvalues on the band object Push sends to ARPES."""
-        data = getattr(self, "active_bands_data", None)
-        if not isinstance(data, dict):
-            data = {
-                "type": "band_structure",
-                "is_2d": False,
-                "title": "QE bands",
-                "onsite_e": 0.0,
-                "h_includes_onsite": False,
-                "arpes_e_fermi_shift": float(fermi),
-            }
-            self.active_bands_data = data
-        data["qe_k_dist"] = k_dist
-        data["fermi_energy"] = float(fermi)
-        data["e_fermi"] = float(fermi)
-        if spin_bands:
-            data["spin_axis"] = spin_bands["axis"]
-            data["spin_up"] = spin_bands["up"] - fermi
-            data["spin_down"] = spin_bands["down"] - fermi
-            data["nspin"] = 2
-        else:
-            data.pop("spin_up", None)
-            data.pop("spin_down", None)
-            data["nspin"] = 1
-        if "k_dist" not in data:
-            data["k_dist"] = k_dist
-            data["eigenvalues"] = (spin_bands["up"] - fermi) if spin_bands else (eigenvals - fermi)
-            data["labels"] = data.get("labels")
-        self.btn_push_bands.setEnabled(True)
 
     def load_qe_xml_bands(self):
         """Loads and overlays raw Quantum ESPRESSO bands onto the current plot."""
@@ -1447,44 +1411,26 @@ class DFTSuite(QWidget):
             return
 
         try:
-            qe_k_dist, qe_eigenvals, qe_fermi, spin_bands = self.engine.parse_qe_xml(fname)
-            plot_k = np.array(qe_k_dist, dtype=float, copy=True)
+            qe_k_dist, qe_eigenvals, qe_fermi = self.engine.parse_qe_xml(fname)
 
             # Scale the QE x-axis to perfectly align with the PyMatgen tight-binding axis
             if hasattr(self, 'active_bands_data') and not self.active_bands_data.get('is_2d'):
                 tb_k_dist = self.active_bands_data.get('k_dist')
-                if tb_k_dist is not None and len(tb_k_dist) > 0 and plot_k[-1] > 0:
-                    plot_k = plot_k * (tb_k_dist[-1] / plot_k[-1])
+                if tb_k_dist is not None and len(tb_k_dist) > 0 and qe_k_dist[-1] > 0:
+                    qe_k_dist = qe_k_dist * (tb_k_dist[-1] / qe_k_dist[-1])
 
-            if not hasattr(self, 'ax'):
-                self.ax = self.figure.add_subplot(111)
+            num_bands = qe_eigenvals.shape[1]
+            label_added = False
+            
+            # Plot the solid black DFT bands behind the current bands (zorder=0)
+            for b in range(num_bands):
+                lbl = "Ab-Initio (QE)" if not label_added else None
+                self.ax.plot(qe_k_dist, qe_eigenvals[:, b] - qe_fermi, color='black', linewidth=1.5, zorder=0, label=lbl)
+                label_added = True
 
-            # Two legend entries, not one line per band.
-            if spin_bands:
-                series = (
-                    ("spin up", spin_bands["up"] - qe_fermi, "#c0392b"),
-                    ("spin down", spin_bands["down"] - qe_fermi, "#1f4e79"),
-                )
-                for name, energies, color in series:
-                    for b in range(energies.shape[1]):
-                        lbl = name if b == 0 else None
-                        self.ax.plot(plot_k, energies[:, b], color=color, linewidth=1.2, zorder=2, label=lbl)
-                note = f"{spin_bands['up'].shape[1]} up + {spin_bands['down'].shape[1]} down"
-            else:
-                shifted = qe_eigenvals - qe_fermi
-                for b in range(shifted.shape[1]):
-                    lbl = "Ab-Initio (QE)" if b == 0 else None
-                    self.ax.plot(plot_k, shifted[:, b], color='black', linewidth=1.5, zorder=0, label=lbl)
-                note = f"{shifted.shape[1]} bands"
-
-            self._stash_qe_bands_for_push(qe_k_dist, qe_eigenvals, qe_fermi, spin_bands)
-            self.ax.legend(loc='upper right', frameon=False)
-            self.ax.axhline(0, color='gray', linestyle='--', linewidth=1, zorder=1)
-            self.ax.set_ylabel("E − E$_F$ (eV)")
-            if hasattr(self, "tb_panel"):
-                self.ax.set_ylim(self.tb_panel.spin_emin.value(), self.tb_panel.spin_emax.value())
+            self.ax.legend(loc='upper right')
             self.canvas.draw()
-            QMessageBox.information(self, "Success", f"Loaded QE bands ({note}). Push to Workspace is enabled.")
+            QMessageBox.information(self, "Success", f"Successfully loaded and overlaid {num_bands} Ab-Initio bands from QE.")
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to parse QE XML:\n{str(e)}")

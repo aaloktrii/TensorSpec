@@ -150,8 +150,6 @@ class QEInputGenerator:
         mag_flags = mag.system_flags(type_labels)
         gpu_flags = "\n  use_gpu = .true." if use_gpu else ""
         vdw_flags = self._vdw_system_flag(vdw_dft_d3)
-        # Magnetic Mn SCF diverges at the non-magnetic mixing_beta = 0.7.
-        mixing_beta = 0.3 if mag.mode in ("collinear", "afm") else 0.7
 
         scf_content = f"""&CONTROL
   calculation = 'scf'
@@ -172,7 +170,7 @@ class QEInputGenerator:
 /
 &ELECTRONS
   conv_thr = 1.0d-8
-  mixing_beta = {mixing_beta}
+  mixing_beta = 0.7
 /
 ATOMIC_SPECIES
 {atomic_species_str}
