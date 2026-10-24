@@ -1,6 +1,7 @@
 import os
 from .loaders.mock_data_loader import MockDataLoader
 from .loaders.maestro_loader import MaestroLoader
+from .loaders.matlab_loader import MatlabLoader
 from .loaders.maestro import MaestroSignatureError
 from tensorspec.core.data_models import TensorData
 
@@ -51,6 +52,7 @@ class ARPESLoader:
         available_loaders = [
             MockDataLoader,
             MaestroLoader,
+            MatlabLoader,
         ]
 
         for LoaderClass in available_loaders:
@@ -62,7 +64,7 @@ class ARPESLoader:
             except MaestroSignatureError:
                 continue
             except ValueError:
-                if LoaderClass is MockDataLoader:
+                if LoaderClass in (MockDataLoader, MatlabLoader):
                     continue
                 raise
             except Exception as e:
