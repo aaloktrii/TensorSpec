@@ -42,7 +42,7 @@ from PySide6.QtWidgets import (
 
 from tensorspec.core.data_models import TensorData
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
-from tensorspec.gui.components.peem_map_common import _coords_row, _dspin, _numbers
+from tensorspec.gui.components.peem_map_common import _coords_row, _dspin, _numbers, action_style, bold_titles
 from tensorspec.plotting import peem_plots
 
 
@@ -75,6 +75,7 @@ class PeemMapTools:
         lay.setContentsMargins(0, 0, 0, 0)
 
         asym = QGroupBox("4. Dichroism map")
+        bold_titles(asym)
         af = QFormLayout(asym)
         self.map_register = QComboBox()
         self.map_register.addItem("Register polarizations (recommended)", True)
@@ -86,7 +87,7 @@ class PeemMapTools:
             w.setPlaceholderText(ph)
             row.addWidget(w)
         af.addRow("Energy window (eV):", row)
-        b = QPushButton("Make dichroism map")
+        b = action_style(QPushButton("Make dichroism map"), "map")
         b.setToolTip("XMCD (CM−CP)/(CM+CP) for CP / CM, XLD (LV−LH)/(LV+LH) for LH / LV.\n"
                      "After 2. Stack Pairs (+ 3. Drift): the corrected pairs, optionally only the frames in the\n"
                      "energy window. Without Stack Pairs: all frames, each aligned by Register polarizations.")
@@ -99,6 +100,7 @@ class PeemMapTools:
         lay.addWidget(asym)
 
         an = QGroupBox("5. Image analysis")
+        bold_titles(an)
         nf = QFormLayout(an)
         row = QHBoxLayout()
         b = QPushButton("Draw line")
@@ -150,6 +152,7 @@ class PeemMapTools:
         lay.addWidget(an)
 
         rd = QGroupBox("6. ROIs and domains")
+        bold_titles(rd)
         rf = QFormLayout(rd)
         row = QHBoxLayout()
         for label, kind in (("Draw rectangle", "rect"), ("Draw polygon", "polygon")):
@@ -182,6 +185,7 @@ class PeemMapTools:
         lay.addWidget(rd)
 
         cg = QGroupBox("7. Compare with a reference")
+        bold_titles(cg)
         cf = QFormLayout(cg)
         row = QHBoxLayout()
         self.cmp_ref = QComboBox()
@@ -219,7 +223,7 @@ class PeemMapTools:
         lay.addWidget(cg)
 
         if self._send_to_sum_rule is not None:
-            b = QPushButton("→ Sum Rule (corrected pairs)")
+            b = action_style(QPushButton("→ Sum Rule (corrected pairs)"), "handover")
             b.setToolTip("Open the Sum Rule window with this dataset: ROI spectra, background, sum rule\n"
                          "(the XMCD sum rule needs CP / CM; LH / LV give spectra and background)")
             b.clicked.connect(self._send)
