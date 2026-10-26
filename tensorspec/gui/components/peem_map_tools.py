@@ -101,8 +101,8 @@ class PeemMapTools:
         af.addRow("Show:", self.show_combo)
         b = QPushButton("Subtract offset")
         b.setToolTip("Map minus its offset, so 0 is the magnetic zero -> layer '… · offset_removed' (the map is kept).\n"
-                     "Offset from the Sym ± centre of the Map view: background = mean in your rectangle (best);\n"
-                     "median / mean = of the map without the drift strips at the edges.")
+                     "Offset = the Sym ± median / mean of the Map view: inside its Region if drawn (best: bare\n"
+                     "substrate), else of the map without the drift strips at the edges.")
         b.clicked.connect(self._subtract_offset)
         af.addRow("Offset:", b)
         lay.addWidget(asym)
@@ -620,9 +620,8 @@ class PeemMapTools:
         if not name or view is None:
             return
         kind, var = self._shown()
-        mode = view.combo_center.currentText()
-        how, region = {"background": ("region", view.sym_bg_box), "mean": ("mean", None)}.get(mode, ("median", None))
-        res = self._call(self.service.subtract_map_offset, name, kind, var, how, region)
+        how = "mean" if view.combo_center.currentText() == "mean" else "median"  # 0: median
+        res = self._call(self.service.subtract_map_offset, name, kind, var, how, view.sym_bg_box)
         if res is None:
             return
         self.refresh(select=(kind, "offset_removed"))

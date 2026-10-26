@@ -879,19 +879,21 @@ class PeemDomainAnalysisSteps:
     # ---------------------------------------------------------------- map offset (zero of the colour scale)
     def map_offset(self, name: str, kind: str, var: str = "data", how: str = "median",
                    region: dict | None = None) -> dict[str, Any]:
-        """The offset of a map: the mean in a background region (how='region'), or the median / mean of the
-        map without the drift strips at the field's edges (how='median' / 'mean')."""
+        """The offset of a map: the median or mean (how) inside a region, or, without a region, of the map
+        without the drift strips at the field's edges. how='region' = the mean in the region."""
         a = np.asarray(self.get_map(name, kind, var), float)
         if how == "region":
             if region is None:
-                raise ValueError("draw the background rectangle first (Sym ± → background)")
+                raise ValueError("draw the region first (Sym ± → Region)")
+            how = "mean"
+        if how not in ("median", "mean"):
+            raise ValueError("how must be 'median', 'mean' or 'region'")
+        if region is not None:
             vals = a[_roi_mask(a.shape, region) & np.isfinite(a)]
-            source = "background region"
-        elif how in ("median", "mean"):
+            source = f"{how} in the region"
+        else:
             vals = a[da.edge_strips(a) & np.isfinite(a)]
             source = f"{how} of the map without drift strips"
-        else:
-            raise ValueError("how must be 'region', 'median' or 'mean'")
         if not vals.size:
             raise ValueError("no finite pixels to take the offset from")
         value = float(np.median(vals) if how == "median" else vals.mean())
