@@ -10,7 +10,7 @@ import numpy as np
 
 SIGNED_KINDS = {"pcd", "pld", "pmld", "pmnld", "domain_map", "compare"}
 SIGNED_VARS = ("", "data", "difference", "flattened", "bg_removed", "fft_filtered", "data_original",
-               "map", "reference")
+               "map", "reference", "offset_removed")
 
 
 def display_hint(kind: str, var: str, image: np.ndarray | None = None) -> dict:

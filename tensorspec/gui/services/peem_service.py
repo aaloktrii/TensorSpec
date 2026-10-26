@@ -876,6 +876,37 @@ class PeemDomainAnalysisSteps:
         _step_record(name, f"domain analysis {label}", {k: v for k, v in out.items() if np.isscalar(v)})
         return out
 
+    # ---------------------------------------------------------------- map offset (zero of the colour scale)
+    def map_offset(self, name: str, kind: str, var: str = "data", how: str = "median",
+                   region: dict | None = None) -> dict[str, Any]:
+        """The offset of a map: the mean in a background region (how='region'), or the median / mean of the
+        map without the drift strips at the field's edges (how='median' / 'mean')."""
+        a = np.asarray(self.get_map(name, kind, var), float)
+        if how == "region":
+            if region is None:
+                raise ValueError("draw the background rectangle first (Sym ± → background)")
+            vals = a[_roi_mask(a.shape, region) & np.isfinite(a)]
+            source = "background region"
+        elif how in ("median", "mean"):
+            vals = a[da.edge_strips(a) & np.isfinite(a)]
+            source = f"{how} of the map without drift strips"
+        else:
+            raise ValueError("how must be 'region', 'median' or 'mean'")
+        if not vals.size:
+            raise ValueError("no finite pixels to take the offset from")
+        value = float(np.median(vals) if how == "median" else vals.mean())
+        return {"offset": value, "source": source, "n_px": int(vals.size)}
+
+    def subtract_map_offset(self, name: str, kind: str, var: str = "data", how: str = "median",
+                            region: dict | None = None) -> dict[str, Any]:
+        """Map minus its offset (map_offset) -> variable 'offset_removed' (the map is kept), so 0 is the
+        magnetic zero and a colour scale symmetric about 0 is meaningful."""
+        off = self.map_offset(name, kind, var, how, region)
+        a = np.asarray(self.get_map(name, kind, var), float)
+        out = self._map_variant(name, kind, var or "data", "offset_removed", a - off["offset"],
+                                f"offset {off['offset']:+.6g} removed ({off['source']})")
+        return {**out, **off}
+
     # ---------------------------------------------------------------- regions of a pushed map
     def domain_regions(self, name: str, label: str) -> dict[str, dict | None]:
         """{"roi": ..., "bg": ...} of a pushed map (rect / polygon / ellipse in px), None where not set."""

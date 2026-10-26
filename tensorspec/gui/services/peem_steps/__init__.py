@@ -98,6 +98,9 @@ checks every public call is listed here and runs the workflow without Qt):
                                           a shown map -> /analysis/domains_<n> with its ROI and (if ticked)
                                           background region; mode 'raw' (values) or 'shown' (colour range
                                           and gamma of the Map view); several maps of several datasets
+    map_offset, subtract_map_offset(name, kind, var, how, region)
+                                          a map's offset (background region / median / mean without drift
+                                          strips) -> '… · offset_removed', 0 = magnetic zero
     domain_inputs, remove_domain_input    the pushed maps
     domain_look(name, label)              how it looked in the Map view (cmap, range, gamma, ROI / background)
     domain_regions, set_domain_region(name, label, which, region)
