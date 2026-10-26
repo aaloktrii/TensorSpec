@@ -42,10 +42,11 @@ def _coords_row(placeholder: str, on_set) -> tuple[QHBoxLayout, QLineEdit]:
 
 
 # Colours of the other suites' main buttons (QE / Wannier90: Load W90 #5cb85c, Run #c82333, Fetch
-# #17a2b8). Kept to the few main steps so the panel stays clean.
+# #17a2b8; ARPES: Push #E67E22). Kept to the few main steps so the panel stays clean.
 ACTION = {
     "load": ("#5cb85c", "white", "#2d5c2d"),
     "map": ("#c82333", "white", "#5c161b"),
+    "domains": ("#E67E22", "white", "#6b3a10"),  # ARPES "Push" orange
     "handover": ("#17a2b8", "white", "#0c5460"),
 }
 
