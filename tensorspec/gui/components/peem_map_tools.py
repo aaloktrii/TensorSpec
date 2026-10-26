@@ -106,12 +106,16 @@ class PeemMapTools:
             lay.addWidget(b)
             self.btn_sum_rule = b
 
-        an = QGroupBox("5. Image analysis")
+        an = QGroupBox("5. Line profile")
         bold_titles(an)
         nf = QFormLayout(an)
         row = QHBoxLayout()
         b = QPushButton("Draw line")
-        b.clicked.connect(lambda: self._start_tool("line", self._on_line, "orange"))
+        b.setCheckable(True)
+        b.setToolTip("On the Map view: press, drag, release (Shift: 0 / 45 / 90°); drag an end to move it;\n"
+                     "drag again for a new line. Stays on until clicked again or Esc.")
+        b.toggled.connect(self._line_tool_toggled)
+        self.btn_line = b
         row.addWidget(b)
         r2, self.line_edit = _coords_row("x0, y0, x1, y1 (px)", self._set_line)
         row.addLayout(r2, 1)
@@ -147,14 +151,6 @@ class PeemMapTools:
         self.prof_offset = _dspin(0, 1e6, 0.0, 0.01, 4)
         self.prof_offset.valueChanged.connect(lambda *_: self._draw_profiles())
         nf.addRow("Offset between profiles:", self.prof_offset)
-        row = QHBoxLayout()
-        for label, fn, tip in (("Histogram", self._histogram, "of the shown map, inside the ROI if set"),
-                               ("FFT", self._fft, "2-D FFT and dominant spatial period")):
-            b = QPushButton(label)
-            b.setToolTip(tip)
-            b.clicked.connect(fn)
-            row.addWidget(b)
-        nf.addRow(row)
         lay.addWidget(an)
 
         rd = QGroupBox("6. Push and export")
@@ -257,6 +253,12 @@ class PeemMapTools:
         self.analysis_view.setDocumentMode(True)
         v = QVBoxLayout(self.plot_view)
         h = QHBoxLayout()
+        for label, fn, tip in (("Histogram", self._histogram, "Pixel values of the map shown in the Map view (inside its ROI if set)"),
+                               ("FFT", self._fft, "2-D FFT of the map shown in the Map view: the ring gives the domain period")):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(fn)
+            h.addWidget(b)
         self.plot_title = QLabel("")
         h.addWidget(self.plot_title, 1)
         b = QPushButton("Export PDF…")
@@ -327,6 +329,8 @@ class PeemMapTools:
             td = TensorData(value=np.asarray(img, np.float32)[None], axes=[np.zeros(1), np.arange(ny, dtype=float),
                             np.arange(nx, dtype=float)], labels=["frame", "y", "x"], units=["", "px", "px"],
                             data_type="Experimental PEEM", metadata={"source": name})
+            if self.btn_line.isChecked():  # a new map replaces the view: the line tool ends
+                self.btn_line.setChecked(False)
             self.viewer.load_data(td)
             view = self.viewer.primary_view()
             view.combo_x.setCurrentIndex(2)
@@ -557,8 +561,27 @@ class PeemMapTools:
         self.line_edit.setText(f"{x1:.0f}, {y1:.0f}, {x2:.0f}, {y2:.0f}")
         self._update_overlays()
         self._dock_profiles()
-        self.status.setText(f"Line ({x1:.0f}, {y1:.0f}) → ({x2:.0f}, {y2:.0f}) px: Add profile, Histogram, "
-                            "FFT or Domain width use it.")
+        name = self._get_name()
+        um = self.service._um_per_px(name) if name else None
+        length = float(np.hypot(x2 - x1, y2 - y1))
+        angle = float(np.degrees(np.arctan2(-(y2 - y1), x2 - x1))) % 180.0
+        size = f"{length * um:.2f} µm" if um else f"{length:.0f} px"
+        self.status.setText(f"Line ({x1:.0f}, {y1:.0f}) → ({x2:.0f}, {y2:.0f}) px, {size}, {angle:.0f}°. "
+                            "Add profile keeps it.")
+
+    def _line_tool_toggled(self, on: bool):
+        if not on:
+            self.viewer.cancel_tool()
+            return
+        if self.viewer.tensor_data is None:
+            self._err("Make the dichroism map first (4.): lines are drawn on the Map view.")
+            self.btn_line.setChecked(False)
+            return
+        self._show_map_tab()
+        self.viewer.start_tool("line", self._on_line, "orange", sticky=True,
+                               on_cancel=lambda: self.btn_line.setChecked(False))
+        self.status.setText("Drag on the map to draw a line (Shift: 0 / 45 / 90°); drag an end to move it; "
+                            "Esc or Draw line to stop.")
 
     def _set_line(self):
         try:
