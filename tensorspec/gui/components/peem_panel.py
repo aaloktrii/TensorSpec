@@ -663,7 +663,7 @@ class PeemDomainView(QWidget):
         self.items.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.items.setToolTip("Maps pushed from the Map view (6. Push to analysis); select one or more")
         self.items.setMaximumHeight(130)
-        self.items.itemSelectionChanged.connect(self._show)
+        self.items.itemSelectionChanged.connect(self._on_item_changed)
         v.addWidget(self.items)
         row = QHBoxLayout()
         b = QPushButton("Remove selected")
@@ -677,6 +677,54 @@ class PeemDomainView(QWidget):
         v.addLayout(row)
         lay.addWidget(g)
 
+        g = QGroupBox("ROI and background")
+        bold_titles(g)
+        f = QFormLayout(g)
+        row = QHBoxLayout()
+        for label, kind in (("Draw rectangle", "rect"), ("Draw polygon", "polygon")):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, k=kind: self._start_draw("roi", k))
+            row.addWidget(b)
+        b = QPushButton("Clear")
+        b.clicked.connect(lambda: self._set_region("roi", None))
+        row.addWidget(b)
+        f.addRow("ROI:", row)
+        row = QHBoxLayout()
+        self.roi_edit = QLineEdit()
+        self.roi_edit.setPlaceholderText("x0, x1, y0, y1 (px)")
+        self.roi_edit.returnPressed.connect(self._set_roi_typed)
+        row.addWidget(self.roi_edit, 1)
+        b = QPushButton("Set")
+        b.clicked.connect(self._set_roi_typed)
+        row.addWidget(b)
+        f.addRow("Type ROI:", row)
+        row = QHBoxLayout()
+        self.auto_flake = QCheckBox("Auto flake outline")
+        self.auto_flake.setToolTip("Find the flake on the pushed map (denoise, local contrast, Otsu, largest region;\n"
+                                   "not the drift strips at the edges) and use its outline as the ROI; untick to clear")
+        self.auto_flake.toggled.connect(self._auto_flake_toggled)
+        row.addWidget(self.auto_flake)
+        for label, fn in (("Save outline…", self._save_outline), ("Load outline…", self._load_outline)):
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        f.addRow(row)
+        row = QHBoxLayout()
+        self.use_bg = QCheckBox("Background region")
+        self.use_bg.setToolTip("A non-magnetic area: its mean is the zero for ROI statistics (and for the\n"
+                               "analysis with Background: Background region). Used only while ticked.")
+        row.addWidget(self.use_bg)
+        for label, kind in (("Draw rect", "rect"), ("Draw polygon", "polygon")):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, k=kind: self._start_draw("bg", k))
+            row.addWidget(b)
+        f.addRow(row)
+        b = QPushButton("ROI statistics")
+        b.setToolTip("Of the pushed map in the ROI: f_up / f_down split at zero (the background mean if ticked)")
+        b.clicked.connect(self._roi_stats)
+        f.addRow(b)
+        lay.addWidget(g)
+
         g = QGroupBox("Steps")
         bold_titles(g)
         f = QFormLayout(g)
@@ -688,7 +736,8 @@ class PeemDomainView(QWidget):
         row.addWidget(QLabel("w"))
         row.addWidget(self.tv_weight)
         f.addRow("Denoise:", row)
-        self.flake = _domain_combo([("Pushed ROI", "pushed"), ("Automatic", "auto"), ("Whole map", "all")], d["flake"])
+        self.flake = _domain_combo([("ROI (drawn / outline)", "pushed"), ("Automatic", "auto"), ("Whole map", "all")],
+                                   d["flake"])
         f.addRow("Flake:", self.flake)
         self.background = _domain_combo([("Gaussian high-pass", "gaussian"), ("Background region", "region"),
                                   ("None (asymmetry 0)", "none")], d["background"])
@@ -747,9 +796,8 @@ class PeemDomainView(QWidget):
             row.addWidget(b)
         f.addRow("Export:", row)
         lay.addWidget(g)
-        self.status = QLabel("")
+        self.status = QLabel("")  # shown under the image (see _build_results)
         self.status.setWordWrap(True)
-        lay.addWidget(self.status)
         lay.addStretch(1)
         return w
 
@@ -765,6 +813,7 @@ class PeemDomainView(QWidget):
         self.caption = QLabel("")
         self.caption.setWordWrap(True)
         v.addWidget(self.caption)
+        v.addWidget(self.status)
         split.addWidget(top)
         self.table = QTableWidget()
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -820,6 +869,12 @@ class PeemDomainView(QWidget):
                 self.table.setItem(r, c, QTableWidgetItem(text))
 
     # ------------------------------------------------------------------ actions
+    def _on_item_changed(self):
+        self.auto_flake.blockSignals(True)  # the tick belongs to the map it was ticked on
+        self.auto_flake.setChecked(False)
+        self.auto_flake.blockSignals(False)
+        self._show()
+
     def _run(self, all_items: bool):
         items = [(it["name"], it["label"]) for it in self.service.domain_inputs()] if all_items else self._selected()
         if not items:
@@ -864,9 +919,11 @@ class PeemDomainView(QWidget):
             img, step = self.service.domain_layer(name, label, "input"), "input"
         look = self.service.domain_look(name, label)
         um = look["um_per_px"]
+        self._tool = None
         sizes = self.sizes.isChecked() and bool(result)
         ax = self.fig.add_subplot(1, 2 if sizes else 1, 1)
         title = f"{name} · {da.STEP_LABELS.get(step, 'pushed map (as in the Map view)')}"
+        self._ax, self._scale = ax, (um or 1.0)
         if step == "input":  # the live image as pushed: same colours, range, gamma, outlines
             im = peem_plots.pushed_map(ax, img, look, title)
         else:
@@ -881,6 +938,123 @@ class PeemDomainView(QWidget):
             peem_plots.domain_sizes(self.fig.add_subplot(1, 2, 2), self.service.domain_areas(name, label))
         self.caption.setText(peem_plots.domain_numbers_text(result) if result else "Not run yet: Run selected.")
         self.canvas.draw_idle()
+
+    # ------------------------------------------------------------------ ROI and background
+    def _current(self) -> tuple[str, str] | None:
+        sel = self._selected()
+        if not sel:
+            self._err("Push a map first (Map view, 6. Push to analysis) and select it.")
+            return None
+        return sel[0]
+
+    def _start_draw(self, which: str, kind: str):
+        """Draw the ROI / background region on the pushed map (shown as in the Map view)."""
+        from matplotlib.widgets import PolygonSelector, RectangleSelector
+
+        cur = self._current()
+        if cur is None:
+            return
+        self.step.setCurrentIndex(self.step.findData("input"))  # draw on the pushed map
+        self._show()
+        s, color = self._scale, ("yellow" if which == "roi" else "cyan")
+        if kind == "rect":
+            def done(press, release):
+                xs = sorted((press.xdata / s, release.xdata / s))
+                ys = sorted((press.ydata / s, release.ydata / s))
+                self._set_region(which, {"kind": "rect", "x0": int(round(xs[0])), "x1": int(round(xs[1])),
+                                         "y0": int(round(ys[0])), "y1": int(round(ys[1]))})
+            self._tool = RectangleSelector(self._ax, done, useblit=False, interactive=False,
+                                           props=dict(ec=color, fill=False, lw=1.2))
+            self.status.setText("Press and drag on the pushed map.")
+        else:
+            def done(verts):
+                self._set_region(which, {"kind": "polygon", "points": [[x / s, y / s] for x, y in verts]})
+            self._tool = PolygonSelector(self._ax, done, useblit=False, props=dict(color=color, lw=1.2))
+            self.status.setText("Click the corners on the pushed map; click the first corner again to close.")
+
+    def _set_region(self, which: str, region: dict | None):
+        cur = self._current()
+        if cur is None:
+            return
+        try:
+            self.service.set_domain_region(cur[0], cur[1], which, region)
+        except ValueError as exc:
+            self._err(str(exc))
+            return
+        if which == "bg" and region is not None:
+            self.use_bg.setChecked(True)
+        if which == "roi" and region is not None and region.get("kind") == "rect":
+            self.roi_edit.setText(f"{region['x0']}, {region['x1']}, {region['y0']}, {region['y1']}")
+        self.status.setText({"roi": "ROI", "bg": "Background region"}[which] + (" set." if region else " cleared."))
+        self.refresh(select=cur)
+
+    def _set_roi_typed(self):
+        from tensorspec.gui.components.peem_map_common import _numbers
+
+        try:
+            x0, x1, y0, y1 = (int(round(v)) for v in _numbers(self.roi_edit.text(), 4))
+        except ValueError as exc:
+            self._err(str(exc))
+            return
+        self._set_region("roi", {"kind": "rect", "x0": min(x0, x1), "x1": max(x0, x1), "y0": min(y0, y1), "y1": max(y0, y1)})
+
+    def _auto_flake_toggled(self, on: bool):
+        cur = self._selected()[0] if self._selected() else None
+        if cur is None:
+            return
+        if not on:
+            self._set_region("roi", None)
+            return
+        try:
+            roi = self.service.domain_auto_flake(*cur)
+        except ValueError as exc:
+            self._err(str(exc))
+            self.auto_flake.blockSignals(True)
+            self.auto_flake.setChecked(False)
+            self.auto_flake.blockSignals(False)
+            return
+        self.step.setCurrentIndex(self.step.findData("input"))
+        self.refresh(select=cur)
+        self.status.setText(f"Flake outline found ({len(roi['points'])} points): it is the ROI now.")
+
+    def _save_outline(self):
+        cur = self._current()
+        if cur is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save ROI outline", f"{cur[0]}_roi.json", "ROI (*.json)")
+        if path:
+            try:
+                self.status.setText(f"Saved {self.service.save_domain_region(cur[0], cur[1], path, 'roi')}")
+            except ValueError as exc:
+                self._err(str(exc))
+
+    def _load_outline(self):
+        cur = self._current()
+        if cur is None:
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Load ROI outline", "", "ROI (*.json)")
+        if path:
+            try:
+                self.service.load_domain_region(cur[0], cur[1], path, "roi")
+            except ValueError as exc:
+                self._err(str(exc))
+                return
+            self.refresh(select=cur)
+            self.status.setText(f"ROI loaded from {os.path.basename(path)}")
+
+    def _roi_stats(self):
+        cur = self._current()
+        if cur is None:
+            return
+        try:
+            st = self.service.domain_roi_statistics(cur[0], cur[1], use_bg=self.use_bg.isChecked())
+        except ValueError as exc:
+            self._err(str(exc))
+            return
+        where = "in the ROI" if st["in_roi"] else "in the whole map"
+        zero = f"background mean {st['zero']:+.4g}" if st["zero_from"] != "0" else "0 (tick Background region for the map's own zero)"
+        self.status.setText(f"{where}: f_up {st['f_up']:.3f}, f_down {st['f_down']:.3f}, <m_z> {st['mz']:+.3f}; "
+                            f"mean {st['mean']:+.4g} (zero = {zero})")
 
     def _export_pdf(self):
         sel = self._selected()

@@ -106,9 +106,10 @@ tensorspec/
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
     │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + map tools (4–7); Frame=DataViewer;
-    │   │                          #   PeemDomainView = Analysis tab "Domains" (pushed maps, steps, table, export)
-    │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), image analysis, ROI and
-    │   │                          #   background (auto outline, save / load), push to analysis, compare, → Sum Rule
+    │   │                          #   PeemDomainView = Analysis tab "Domains" (pushed maps, ROI / background
+    │   │                          #   drawn on them, auto outline, ROI statistics, steps, table, export)
+    │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), image analysis, push to
+    │   │                          #   analysis + export, compare, → Sum Rule
     │   ├── peem_sumrule_panel.py  # Sum Rule window, From PEEM: region spectra, BG, sum rule
     │   ├── peem_export_dialog.py / peem_map_common.py  # map export options; small widget helpers
     │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)

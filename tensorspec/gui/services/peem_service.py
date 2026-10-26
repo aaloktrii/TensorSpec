@@ -775,6 +775,8 @@ def _load_summary(
 # each, /analysis/domains_<n>: the pushed map, roi / bg masks and, after a run, the steps of
 # core/peem/domain_analysis (the SDA toolkit pipeline) with the numbers in attrs.
 DOMAIN_PREFIX = "domains_"
+DOMAIN_PUSH_ATTRS = ("source_kind", "source_var", "mode", "gamma", "vmin", "vmax", "cmap", "um_per_px",
+                     "roi_region", "bg_region")
 DOMAIN_TABLE_KEYS = ("f_up", "f_down", "mz", "p_up", "p_neutral", "p_down", "n_domains_up", "n_domains_down",
               "mean_domain_area_um2", "width_up", "width_down", "period", "wall_length_um",
               "wall_density_per_um", "stripe_angle_deg", "alignment", "flake_area_um2")
@@ -809,7 +811,9 @@ class PeemDomainAnalysisSteps:
         if bg is not None:
             extra["bg"] = _roi_mask(a.shape, bg).astype(np.uint8)
         attrs = {"source_kind": kind, "source_var": var, "mode": mode, "gamma": float(gamma or 1.0),
-                 "vmin": vmin, "vmax": vmax, "cmap": cmap, "analysed": 0, "um_per_px": self._um_per_px(name)}
+                 "vmin": vmin, "vmax": vmax, "cmap": cmap, "analysed": 0, "um_per_px": self._um_per_px(name),
+                 "roi_region": json.dumps(roi) if roi is not None else None,
+                 "bg_region": json.dumps(bg) if bg is not None else None}
         self._write_domains(name, label, a, extra, attrs)
         out = {"name": name, "label": label, "source": self.layer_for(name, kind, var), "mode": mode,
                "has_roi": roi is not None, "has_bg": bg is not None}
@@ -861,8 +865,7 @@ class PeemDomainAnalysisSteps:
                          gamma=at.get("gamma", 1.0), **params)
         extra = {k: ds[k].values for k in ("roi", "bg") if k in ds}
         extra.update(res["layers"])
-        keep = {k: at[k] for k in ("source_kind", "source_var", "mode", "gamma", "vmin", "vmax", "cmap", "um_per_px")
-                if k in at}
+        keep = {k: at[k] for k in DOMAIN_PUSH_ATTRS if k in at}
         p = {**da.DEFAULTS, **params}
         attrs = {**keep, "analysed": 1, **{f"param_{k}": v for k, v in p.items()},
                  **{k: v for k, v in res["metrics"].items()},
@@ -872,6 +875,77 @@ class PeemDomainAnalysisSteps:
         out = {"name": name, "label": label, **res["metrics"]}
         _step_record(name, f"domain analysis {label}", {k: v for k, v in out.items() if np.isscalar(v)})
         return out
+
+    # ---------------------------------------------------------------- regions of a pushed map
+    def domain_regions(self, name: str, label: str) -> dict[str, dict | None]:
+        """{"roi": ..., "bg": ...} of a pushed map (rect / polygon / ellipse in px), None where not set."""
+        at = dict(self._domains(name, label).attrs)
+        return {w: (json.loads(at[f"{w}_region"]) if at.get(f"{w}_region") else None) for w in ("roi", "bg")}
+
+    def set_domain_region(self, name: str, label: str, which: str, region: dict | None) -> dict[str, dict | None]:
+        """Set (None: clear) the ROI ('roi') or background region ('bg') of a pushed map. Earlier results of
+        that map are dropped (run it again)."""
+        if which not in ("roi", "bg"):
+            raise ValueError("which must be 'roi' or 'bg'")
+        if region is not None and region.get("kind") not in ("rect", "polygon", "ellipse"):
+            raise ValueError("region kind must be rect, polygon or ellipse")
+        ds = self._domains(name, label)
+        a = np.asarray(ds["data"].values)
+        at = {k: v for k, v in ds.attrs.items() if k in DOMAIN_PUSH_ATTRS}
+        extra = {k: ds[k].values for k in ("roi", "bg") if k in ds and k != which}
+        if region is not None:
+            extra[which] = _roi_mask(a.shape, region).astype(np.uint8)
+            at[f"{which}_region"] = json.dumps(region)
+        else:
+            at.pop(f"{which}_region", None)
+        self._write_domains(name, label, a, extra, {**at, "analysed": 0})
+        _step_record(name, f"domain {which} {label}", {"region": json.dumps(region)})
+        return self.domain_regions(name, label)
+
+    def domain_auto_flake(self, name: str, label: str, tv_weight: float = 0.20, min_px: int = 800) -> dict[str, Any]:
+        """Find the flake on a pushed map (denoise, local std, Otsu, closing, largest region; not the drift
+        strips at the edges) and set it as that map's ROI (a polygon, to save and reuse)."""
+        a = np.asarray(self._domains(name, label)["data"].values, float)
+        img, _ = da.normalize(a, "raw")
+        mask = da.auto_flake(da.local_std(da.denoise(img, "tv", tv_weight)), min_px=min_px, valid=da.edge_strips(a))
+        roi = {"kind": "polygon", "points": da.flake_outline(mask)}
+        self.set_domain_region(name, label, "roi", roi)
+        return roi
+
+    def save_domain_region(self, name: str, label: str, path: str | Path, which: str = "roi") -> str:
+        """A pushed map's ROI / background region as JSON (same format as save_roi), to reuse."""
+        region = self.domain_regions(name, label)[which]
+        if region is None:
+            raise ValueError(f"no {'ROI' if which == 'roi' else 'background region'} to save")
+        Path(path).write_text(json.dumps({"tensorspec_roi": 1, "which": which, "roi": region, "source": name,
+                                          "um_per_px": self._um_per_px(name)}, indent=1))
+        return str(path)
+
+    def load_domain_region(self, name: str, label: str, path: str | Path, which: str = "roi") -> dict[str, Any]:
+        d = json.loads(Path(path).read_text())
+        region = d.get("roi", d) if isinstance(d, dict) else None
+        if not isinstance(region, dict) or region.get("kind") not in ("rect", "polygon", "ellipse"):
+            raise ValueError("not a saved TensorSpec ROI (.json)")
+        self.set_domain_region(name, label, which, region)
+        return region
+
+    def domain_roi_statistics(self, name: str, label: str, use_bg: bool = False) -> dict[str, Any]:
+        """Of the pushed map's values in its ROI: f_up / f_down split at zero (the background region's mean
+        with use_bg), <m_z> = f_up - f_down, and the mean."""
+        from tensorspec.core.peem import roi_stats
+
+        ds = self._domains(name, label)
+        a = np.asarray(ds["data"].values, float)
+        roi = np.asarray(ds["roi"].values, bool) if "roi" in ds else None
+        bg = 0.0
+        if use_bg:
+            if "bg" not in ds:
+                raise ValueError("Background region is ticked but none is drawn")
+            bg = roi_stats.background_level(a, np.asarray(ds["bg"].values, bool))["bg"]
+        avg = roi_stats.roi_average(a, roi, bg=bg)
+        fr = roi_stats.updown_fractions(a, roi, threshold=0.0, bg=bg)
+        return {"f_up": fr["f_up"], "f_down": fr["f_down"], "mz": fr["f_up"] - fr["f_down"], "mean": avg["mean"],
+                "zero": bg, "zero_from": "background region" if use_bg else "0", "in_roi": roi is not None}
 
     def domain_look(self, name: str, label: str) -> dict[str, Any]:
         """How the pushed map looked in the Map view: cmap, vmin, vmax, gamma, um_per_px, ROI / background masks."""
