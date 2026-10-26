@@ -153,7 +153,37 @@ class PeemMapTools:
         nf.addRow("Offset between profiles:", self.prof_offset)
         lay.addWidget(an)
 
-        rd = QGroupBox("6. Push and export")
+        fl = QGroupBox("6. Flatten")
+        bold_titles(fl)
+        ff = QFormLayout(fl)
+        self.flat_hw = QSpinBox()
+        self.flat_hw.setRange(0, 500)
+        self.flat_hw.setValue(30)
+        self.flat_hw.setToolTip("Profile averaged over ± this many px across the line (Igor Flatten width)")
+        ff.addRow("Half width (px):", self.flat_hw)
+        row = QHBoxLayout()
+        self.flat_points = QCheckBox("Points only")
+        self.flat_points.setToolTip("Use only the mean of a box at each end of the line (A and B), not the whole profile")
+        row.addWidget(self.flat_points)
+        self.flat_offset = QCheckBox("Subtract offset")
+        self.flat_offset.setToolTip("Also remove the fitted level (centred on the image), not only the tilt")
+        row.addWidget(self.flat_offset)
+        ff.addRow(row)
+        row = QHBoxLayout()
+        b = QPushButton("Flatten along the line")
+        b.setToolTip("Igor Flatten: fit a straight line to the profile along the drawn line (5. Line profile) and\n"
+                     "subtract that tilt from the shown map -> new layer '… · flattened'; the map is kept")
+        b.clicked.connect(self._flatten)
+        row.addWidget(b, 1)
+        b = QPushButton("Use as map data")
+        b.setToolTip("Make the shown variant (e.g. flattened) the map's data for later steps;\n"
+                     "the original is kept as '… · data_original'")
+        b.clicked.connect(self._use_as_map_data)
+        row.addWidget(b)
+        ff.addRow(row)
+        lay.addWidget(fl)
+
+        rd = QGroupBox("7. Push and export")
         bold_titles(rd)
         rf = QFormLayout(rd)
         row = QHBoxLayout()
@@ -179,7 +209,7 @@ class PeemMapTools:
         rf.addRow(row)
         lay.addWidget(rd)
 
-        cg = QGroupBox("7. Compare with a reference")
+        cg = QGroupBox("8. Compare with a reference")
         bold_titles(cg)
         cf = QFormLayout(cg)
         row = QHBoxLayout()
@@ -575,6 +605,34 @@ class PeemMapTools:
         size = f"{length * um:.2f} µm" if um else f"{length:.0f} px"
         self.status.setText(f"Line ({x1:.0f}, {y1:.0f}) → ({x2:.0f}, {y2:.0f}) px, {size}, {angle:.0f}°. "
                             "Add profile keeps it.")
+
+    # ------------------------------------------------------------------ 6. flatten (Igor Flatten)
+    def _flatten(self):
+        name = self._name()
+        if not name:
+            return
+        if not self._line:
+            self._err("Draw a line first (5. Line profile): Flatten fits the tilt along it.")
+            return
+        kind, var = self._shown()
+        res = self._call(self.service.flatten, name, kind, var, 0, self._line[0], self._line[1],
+                         self.flat_hw.value(), self.flat_offset.isChecked(), self.flat_points.isChecked())
+        if res is None:
+            return
+        self.refresh(select=(kind, "flattened"))
+        self.status.setText(f"Flattened {self.service.layer_for(name, kind, var)} along the line "
+                            f"(half width {self.flat_hw.value()} px) → layer '{self.service.layer_for(name, kind, 'flattened')}'.")
+
+    def _use_as_map_data(self):
+        name = self._name()
+        if not name:
+            return
+        kind, var = self._shown()
+        res = self._call(self.service.use_as_map_data, name, kind, var)
+        if res is None:
+            return
+        self.refresh(select=(kind, "data"))
+        self.status.setText(res.get("note") or f"'{var}' is now the {kind} map data (original kept as data_original).")
 
     def _line_tool_toggled(self, on: bool):
         if not on:

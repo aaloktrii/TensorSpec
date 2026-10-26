@@ -257,7 +257,7 @@ def test_push_raw_or_as_shown_with_roi_and_background(qapp, tmp_path, monkeypatc
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
     p = PeemPanel()
     t, s = p.map_tools, p.service
-    assert [g.title() for g in p.findChildren(QGroupBox) if g.title().startswith("6.")] == ["6. Push and export"]
+    assert [g.title() for g in p.findChildren(QGroupBox) if g.title().startswith("7.")] == ["7. Push and export"]
     p._dataset_name = _images(tmp_path, s)
     p._refresh_meta()
     t._asymmetry()
@@ -417,3 +417,36 @@ def test_sym_centres_and_typed_contrast(qapp, tmp_path):
     v.sl_contrast.setValue(50)
     assert t.viewer.color_limits()[1] - t.viewer.color_limits()[0] < hi - lo
     assert not hasattr(v, "slider_dx")
+
+
+def test_flatten_along_the_line_in_the_map_tab(qapp, tmp_path):
+    """6. Flatten (Igor Flatten): a tilt along the drawn line is removed into '… · flattened'; Use as map
+    data makes it the map data (original kept)."""
+    from PySide6.QtWidgets import QGroupBox
+    from tensorspec.core.workspace import global_workspace as gw
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    assert any(g.title() == "6. Flatten" for g in p.findChildren(QGroupBox))
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    ds = gw.pull_analysis_data("img", "pcd").copy()
+    ny, nx = ds["data"].shape
+    ds["data"] = ds["data"] + np.linspace(0, 0.05, nx)[None, :]  # add a left-right tilt
+    gw.write_analysis_data("img", "pcd", ds)
+    t._on_line({"a": (32, 2), "b": (32, nx - 3)})
+    t.flat_hw.setValue(20)
+    t._flatten()
+    f = p.service.get_map("img", "pcd", "flattened")
+    def tilt(a):  # slope of a straight-line fit to the column means, over the whole width
+        cols = np.nanmean(a, axis=0)
+        ok = np.isfinite(cols)
+        return np.polyfit(np.arange(cols.size)[ok], cols[ok], 1)[0] * cols.size
+
+    tilt_before, tilt_after = tilt(ds["data"].values), tilt(f)
+    assert abs(tilt_after) < 0.2 * abs(tilt_before) and t._shown() == ("pcd", "flattened")
+    t._use_as_map_data()
+    assert np.allclose(p.service.get_map("img", "pcd", "data"), f, equal_nan=True)
+    assert "data_original" in gw.pull_analysis_data("img", "pcd")
