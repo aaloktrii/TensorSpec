@@ -92,11 +92,11 @@ tensorspec/
     ├── __init__.py
     ├── main_browser.py       # THE BIG GUI: Global Data Workspace Explorer & Suite Launcher Ribbon
     ├── services/             # Non-HTTP service layer between panels and core
-    │   ├── peem_service.py   # PEEM service: load / pair / drift / BG / sum rule + steps in peem_steps/
+    │   ├── peem_service.py   # PEEM service: load / pair / drift / BG / sum rule, spatial domain analysis
+    │   │                     #   (pushed maps -> /analysis/domains_<n>) + steps in peem_steps/
     │   ├── peem_steps/       # service mixins: channels (maps + Sum Rule hand-over from the panel's pairs),
     │   │                     #   drift_stack, image_analysis, maps_domains, annotations, load, cleanup,
-    │   │                     #   compare (map minus a registered reference dataset, e.g. XMLD),
-    │   │                     #   domain_analysis (pushed maps -> /analysis/domains_<n>)
+    │   │                     #   compare (map minus a registered reference dataset, e.g. XMLD)
     │   │                     #   Back-end contract (every call, no Qt): peem_steps/__init__.py
     │   ├── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     │   └── raman_service.py  # Qt-free Raman back-end API (all state; one method per action)
@@ -105,10 +105,10 @@ tensorspec/
     │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
-    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + map tools (4–7); Frame=DataViewer
+    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + map tools (4–7); Frame=DataViewer;
+    │   │                          #   PeemDomainView = Analysis tab "Domains" (pushed maps, steps, table, export)
     │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), image analysis, ROI and
     │   │                          #   background (auto outline, save / load), push to analysis, compare, → Sum Rule
-    │   ├── peem_domain_view.py    # Analysis tab, Domains: pushed maps, pipeline steps, numbers table, export
     │   ├── peem_sumrule_panel.py  # Sum Rule window, From PEEM: region spectra, BG, sum rule
     │   ├── peem_export_dialog.py / peem_map_common.py  # map export options; small widget helpers
     │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)
