@@ -169,7 +169,7 @@ class PeemMapTools:
         rf.addRow("Domain threshold:", self.thr)
         row = QHBoxLayout()
         for label, fn in (("ROI statistics", self._roi_stats), ("Domain map", self._domain_map)):
-            b = QPushButton(label)
+            b = action_style(QPushButton(label), "domains") if label == "Domain map" else QPushButton(label)
             b.clicked.connect(fn)
             row.addWidget(b)
         rf.addRow(row)
