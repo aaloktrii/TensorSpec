@@ -229,11 +229,11 @@ class PeemMapTools:
         rng = QHBoxLayout()
         rng.addWidget(QLabel("Colour range:"))
         self.range_min, self.range_max = QDoubleSpinBox(), QDoubleSpinBox()
-        for sp in (self.range_min, self.range_max):
+        for sp, which in ((self.range_min, "min"), (self.range_max, "max")):
             sp.setRange(-1e12, 1e12)
             sp.setDecimals(4)
             sp.setKeyboardTracking(False)
-            sp.valueChanged.connect(self._apply_range)
+            sp.valueChanged.connect(lambda *_, w=which: self._apply_range(w))
         rng.addWidget(self.range_min, 1)
         rng.addWidget(QLabel("to"))
         rng.addWidget(self.range_max, 1)
@@ -337,7 +337,7 @@ class PeemMapTools:
             view.combo_y.setCurrentIndex(1)
             view.combo_layer.currentIndexChanged.connect(self._on_layer_changed)
             view.canvas.mpl_connect("draw_event", lambda _e, v=view: (
-                self._sync_range() if getattr(v, "fixed_limits", None) is None else None))
+                self._sync_range()))  # the boxes show the range drawn (symmetrised when Sym ± is on)
             self._loaded_name = name
         kind, var = select or (self._shown() if base == "stack" or name == self._shown_name else ("nc", "data"))
         self._shown_name = name
@@ -439,8 +439,17 @@ class PeemMapTools:
             sp.setValue(val)
             sp.blockSignals(False)
 
-    def _apply_range(self, *_):
+    def _apply_range(self, which: str | None = None):
+        """Typed colour range. With Sym ± on, the edited bound sets the half-width about the centre (0 or the
+        median), so the range stays symmetric and can be narrowed or widened from either box."""
         lo, hi = self.range_min.value(), self.range_max.value()
+        view = self.viewer.primary_view()
+        if which and view is not None and view.chk_sym.isChecked():
+            img = self.viewer.current_image()
+            fin = np.asarray(img, float)[np.isfinite(img)] if img is not None else np.array([])
+            c = float(np.median(fin)) if (view.combo_center.currentText() == "median" and fin.size) else 0.0
+            half = abs((hi if which == "max" else lo) - c)
+            lo, hi = c - half, c + half
         if hi > lo:
             self.viewer.configure_view(limits=(lo, hi))
 

@@ -779,6 +779,10 @@ class SliceWidget(QFrame):
                 vmin, vmax_adj = c - half, c + half
             if self.fixed_limits is not None:
                 vmin, vmax_adj = self.fixed_limits
+                if self.chk_sym.isChecked() and finite.size:  # a typed range is made symmetric about the centre
+                    c = float(np.median(finite)) if self.combo_center.currentText() == "median" else 0.0
+                    half = max(abs(vmax_adj - c), abs(vmin - c)) or 1.0
+                    vmin, vmax_adj = c - half, c + half
             self.shown_limits = (float(vmin), float(vmax_adj))
             gamma = float(self.spin_gamma.value())
             cmap_name = _mpl_cmap(self.combo_cmap.currentText(), self.chk_invert.isChecked())
