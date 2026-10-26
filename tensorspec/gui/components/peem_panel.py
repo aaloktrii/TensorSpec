@@ -648,8 +648,11 @@ class PeemDomainView(QWidget):
         root.addWidget(split)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setWidget(self._build_controls())
-        scroll.setMinimumWidth(390)
+        controls = self._build_controls()
+        tidy_forms(controls)
+        scroll.setWidget(controls)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(controls.minimumSizeHint().width() + scroll.verticalScrollBar().sizeHint().width() + 4)
         split.addWidget(scroll)
         split.addWidget(self._build_results())
         split.setStretchFactor(1, 1)
@@ -780,10 +783,9 @@ class PeemDomainView(QWidget):
         g = QGroupBox("Show and export")
         bold_titles(g)
         f = QFormLayout(g)
-        self.step = _domain_combo([("pushed map (as in the Map view)", "input")]
-                                  + [(da.STEP_LABELS[s], s) for s in da.STEPS], "three_states")
+        self.step = _domain_combo([(da.STEP_LABELS[s], s) for s in da.STEPS], "width_map")  # right panel
         self.step.currentIndexChanged.connect(self._show)
-        f.addRow("Show:", self.step)
+        f.addRow("Show (right):", self.step)
         self.sizes = QCheckBox("Domain-size distribution")
         self.sizes.toggled.connect(self._show)
         f.addRow(self.sizes)
@@ -902,38 +904,42 @@ class PeemDomainView(QWidget):
         self.refresh()
 
     def _show(self):
+        """Left: the pushed map as in the Map view (ROI / background drawn on it). Right: the chosen step,
+        zoomed to the flake. Third panel: the domain-size distribution, when ticked."""
         sel = self._selected()
         self.fig.clear()
         self.caption.setText("")
+        self._tool = None
         if not sel:
             self.canvas.draw_idle()
             return
         name, label = sel[0]
         step = self.step.currentData()
         result = self.service.domain_result(name, label)
-        try:
-            img = self.service.domain_layer(name, label, step)
-        except ValueError:
-            img, step = self.service.domain_layer(name, label, "input"), "input"
         look = self.service.domain_look(name, label)
         um = look["um_per_px"]
-        self._tool = None
         sizes = self.sizes.isChecked() and bool(result)
-        ax = self.fig.add_subplot(1, 2 if sizes else 1, 1)
-        title = f"{name} · {da.STEP_LABELS.get(step, 'pushed map (as in the Map view)')}"
-        self._ax, self._scale = ax, (um or 1.0)
-        if step == "input":  # the live image as pushed: same colours, range, gamma, outlines
-            im = peem_plots.pushed_map(ax, img, look, title)
-        else:
-            im = peem_plots.domain_step(ax, img, step, um, title)
+        n = 3 if sizes else 2
+        ax0 = self.fig.add_subplot(1, n, 1)
+        im0 = peem_plots.pushed_map(ax0, self.service.domain_layer(name, label, "input"), look, f"{name} · pushed map")
+        self.fig.colorbar(im0, ax=ax0, fraction=0.04, pad=0.02)
+        self._ax, self._scale = ax0, (um or 1.0)  # drawing happens on the pushed map
+        ax1 = self.fig.add_subplot(1, n, 2)
+        if result:
+            im1 = peem_plots.domain_step(ax1, self.service.domain_layer(name, label, step), step, um,
+                                         da.STEP_LABELS.get(step, step))
             try:  # zoom to the flake (axes keep the field's coordinates)
-                peem_plots.zoom_to_mask(ax, self.service.domain_layer(name, label, "flake"), um)
+                peem_plots.zoom_to_mask(ax1, self.service.domain_layer(name, label, "flake"), um)
             except ValueError:
                 pass
-        if im is not None:
-            self.fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
+            if im1 is not None:
+                self.fig.colorbar(im1, ax=ax1, fraction=0.04, pad=0.02)
+        else:
+            ax1.set_axis_off()
+            ax1.text(0.5, 0.5, f"{da.STEP_LABELS.get(step, step)}\n\nRun selected to compute it", ha="center",
+                     va="center", transform=ax1.transAxes, fontsize=9, color="0.4")
         if sizes:
-            peem_plots.domain_sizes(self.fig.add_subplot(1, 2, 2), self.service.domain_areas(name, label))
+            peem_plots.domain_sizes(self.fig.add_subplot(1, n, 3), self.service.domain_areas(name, label))
         self.caption.setText(peem_plots.domain_numbers_text(result) if result else "Not run yet: Run selected.")
         self.canvas.draw_idle()
 
@@ -952,7 +958,6 @@ class PeemDomainView(QWidget):
         cur = self._current()
         if cur is None:
             return
-        self.step.setCurrentIndex(self.step.findData("input"))  # draw on the pushed map
         self._show()
         s, color = self._scale, ("yellow" if which == "roi" else "cyan")
         if kind == "rect":
@@ -1011,7 +1016,6 @@ class PeemDomainView(QWidget):
             self.auto_flake.setChecked(False)
             self.auto_flake.blockSignals(False)
             return
-        self.step.setCurrentIndex(self.step.findData("input"))
         self.refresh(select=cur)
         self.status.setText(f"Flake outline found ({len(roi['points'])} points): it is the ROI now.")
 
