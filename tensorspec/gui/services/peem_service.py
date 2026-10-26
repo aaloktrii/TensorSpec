@@ -49,6 +49,7 @@ from tensorspec.gui.services.peem_steps.load import PeemLoadSteps
 from tensorspec.gui.services.peem_steps.maps_domains import PeemMapsDomainsSteps
 from tensorspec.gui.services.peem_steps.channels import PeemChannelSteps
 from tensorspec.gui.services.peem_steps.compare import PeemCompareSteps
+from tensorspec.gui.services.peem_steps.domain_analysis import PeemDomainAnalysisSteps
 
 MAX_PEEM_BYTES = 512 * 1024 * 1024
 MAX_PEEM_FRAMES = 10_000
@@ -765,7 +766,8 @@ def _load_summary(
 
 
 class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImageAnalysisSteps,
-                  PeemMapsDomainsSteps, PeemAnnotationSteps, PeemChannelSteps, PeemCompareSteps):
+                  PeemMapsDomainsSteps, PeemAnnotationSteps, PeemChannelSteps, PeemCompareSteps,
+                  PeemDomainAnalysisSteps):
     """Qt-facing PEEM operations via global_workspace.
 
     The XPEEM map tab's steps (drift_correct, stack, asymmetry, maps, ROIs ...) and the Sum Rule

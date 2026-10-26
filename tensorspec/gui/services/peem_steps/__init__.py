@@ -93,6 +93,23 @@ checks every public call is listed here and runs the workflow without Qt):
                                           e.g. XMLD = XLD(T) - XLD(T > T_c)
     compare_outputs, export_compare_figure   what to show; map | reference | difference, one grey scale
 
+12. Spatial domain analysis  [domain_analysis]
+    push_to_domains(name, kind, var, mode, vmin, vmax, gamma, use_roi, use_bg)
+                                          a shown map -> /analysis/domains_<n> with its ROI and (if ticked)
+                                          background region; mode 'raw' (values) or 'shown' (colour range
+                                          and gamma of the Map view); several maps of several datasets
+    domain_inputs, remove_domain_input    the pushed maps
+    run_domain_analysis(name, label, **params)
+                                          core/peem/domain_analysis (the SDA toolkit's pipeline): normalize,
+                                          denoise (TV), local std, flake, background (Gaussian / region /
+                                          none), FFT filter, asymmetry m, three states, up / down, width map,
+                                          skeleton, walls -> f_up, f_down, <m_z>, counts, widths, period,
+                                          walls, stripe direction and alignment
+    domain_result, domain_layer, domain_areas, domain_table
+    export_domain_table, export_domain_areas, export_domain_figure (editable PDF, axes in um)
+    auto_flake_roi(name, kind, var)       automatic flake outline -> the dataset's ROI (polygon)
+    save_roi, load_roi                    ROI / background region as JSON, to reuse
+
 Original PEEM steps (peem_service.py): pair, separate, drift, get_view_tensor, default_drift_roi;
 background and sum rule (bg_preview, bg_apply, sumrule_preview, sumrule_apply, with use_roi /
 roi_dict for a region), used by the Sum Rule window.

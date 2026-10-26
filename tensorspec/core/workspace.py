@@ -211,6 +211,25 @@ class WorkspaceManager:
         item['tree'] = DataTreeBuilder.write_analysis(item['tree'], node_name, dataset)
         return True
 
+    def list_analysis_children(self, name: str) -> list[str]:
+        """Names of the ``/analysis`` nodes of a dataset (empty when there are none)."""
+        item = self._data.get(name)
+        if not item or item.get('type') != 'spectroscopy_tree':
+            return []
+        try:
+            return list(item['tree']["analysis"].children)
+        except Exception:
+            return []
+
+    def remove_analysis_data(self, name: str, node_name: str) -> bool:
+        """Delete ``/analysis/<node_name>``; False when it is not there."""
+        item = self._data.get(name)
+        leaf = node_name.strip("/")
+        if not item or item.get('type') != 'spectroscopy_tree' or leaf not in self.list_analysis_children(name):
+            return False
+        del item['tree']["analysis"][leaf]
+        return True
+
     def pull_analysis_data(self, name: str, node_name: str = "mdc_peakfit"):
         """Return an analysis Dataset, or None."""
         item = self._data.get(name)
