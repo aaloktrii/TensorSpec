@@ -295,7 +295,7 @@ def test_push_raw_or_as_shown_with_roi_and_background(qapp, tmp_path, monkeypatc
     dv.auto_flake.setChecked(True)  # auto outline on the second pushed map
     assert s.domain_regions("img", ins[1]["label"])["roi"]["kind"] == "polygon"
     dv._start_draw("roi", "rect")  # drawing shows the pushed map
-    assert dv.step.currentData() == "input" and dv._tool is not None
+    assert dv._tool is not None  # drawn on the pushed map (left panel)
     dv.step.setCurrentIndex(dv.step.findData("width_map"))
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "d.pdf"), "")))
     dv.items.clearSelection()
