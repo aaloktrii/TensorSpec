@@ -391,3 +391,29 @@ def test_symmetric_colour_range_with_a_typed_range(qapp, tmp_path):
     v.chk_sym.setChecked(False)
     t.range_max.setValue(0.05)
     assert t.viewer.color_limits() == pytest.approx((-0.01, 0.05))
+
+
+def test_sym_centres_and_typed_contrast(qapp, tmp_path):
+    """Sym ± centre: 0 / median / mean / background (mean of a drawn rectangle); Contrast is typed."""
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    v = t.viewer.primary_view()
+    a = np.asarray(v._last_sliced, float)
+    v.chk_sym.setChecked(True)
+    v.combo_center.setCurrentText("mean")
+    assert v.sym_center() == pytest.approx(np.nanmean(a))
+    v.combo_center.setCurrentText("background")
+    v.combo_center.activated.emit(3)
+    assert v.tool_active
+    v._finish_tool({"kind": "rect", "x0": 0, "x1": 9, "y0": 0, "y1": 9})
+    assert v.sym_center() == pytest.approx(np.nanmean(a[0:10, 0:10]))
+    lo, hi = t.viewer.color_limits()
+    assert (lo + hi) / 2 == pytest.approx(v.sym_center())
+    v.sl_contrast.setValue(50)
+    assert t.viewer.color_limits()[1] - t.viewer.color_limits()[0] < hi - lo
+    assert not hasattr(v, "slider_dx")
