@@ -108,7 +108,7 @@ tensorspec/
     │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + map tools (4–7); Frame=DataViewer;
     │   │                          #   PeemDomainView = Analysis tab "Domains" (pushed maps, ROI / background
     │   │                          #   drawn on them, auto outline, ROI statistics, steps, table, export)
-    │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), line profile (drag), Flatten (Igor), push to
+    │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), line (drag) → Flatten (Igor) → profiles, push to
     │   │                          #   analysis + export, compare, → Sum Rule
     │   ├── peem_sumrule_panel.py  # Sum Rule window, From PEEM: region spectra, BG, sum rule
     │   ├── peem_export_dialog.py / peem_map_common.py  # map export options; small widget helpers
