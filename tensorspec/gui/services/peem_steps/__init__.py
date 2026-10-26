@@ -93,7 +93,7 @@ checks every public call is listed here and runs the workflow without Qt):
                                           e.g. XMLD = XLD(T) - XLD(T > T_c)
     compare_outputs, export_compare_figure   what to show; map | reference | difference, one grey scale
 
-12. Spatial domain analysis  [domain_analysis]
+12. Spatial domain analysis  [peem_service.py: PeemDomainAnalysisSteps]
     push_to_domains(name, kind, var, mode, vmin, vmax, gamma, use_roi, use_bg)
                                           a shown map -> /analysis/domains_<n> with its ROI and (if ticked)
                                           background region; mode 'raw' (values) or 'shown' (colour range

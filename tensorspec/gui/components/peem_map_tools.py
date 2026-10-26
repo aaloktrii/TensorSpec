@@ -286,7 +286,7 @@ class PeemMapTools:
     def _build_plot_view(self):
         from PySide6.QtWidgets import QTabWidget
 
-        from tensorspec.gui.components.peem_domain_view import PeemDomainView
+        from tensorspec.gui.components.peem_panel import PeemDomainView  # lazy: the panel imports this module
 
         self.plot_view = QWidget()
         self.domain_view = PeemDomainView(self.service, self._parent)
