@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.core.peem import domain_analysis as da
-from tensorspec.gui.components.peem_map_common import _dspin, action_style, bold_titles
+from tensorspec.gui.components.peem_map_common import _dspin, action_style, bold_titles, tidy_forms
 from tensorspec.gui.services.peem_service import PeemService
 from tensorspec.plotting import peem_plots
 
@@ -89,6 +89,7 @@ class PeemPanel(QWidget):
         # --- LEFT: controls (forms only — plots live on right tabs) ---
         control_panel = QWidget()
         control_layout = QVBoxLayout(control_panel)
+        control_layout.setSpacing(12)
 
         load_group = QGroupBox("1. Load")
         bold_titles(load_group)
@@ -169,10 +170,11 @@ class PeemPanel(QWidget):
         control_layout.addWidget(self.map_tools.controls)
 
         control_layout.addStretch()
+        tidy_forms(control_panel)  # same clean form layout on macOS / Windows / Linux
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(control_panel)
-        scroll.setMinimumWidth(360)
+        scroll.setMinimumWidth(400)
         splitter.addWidget(scroll)
         self._controls_scroll = scroll
 
@@ -205,7 +207,7 @@ class PeemPanel(QWidget):
         splitter.addWidget(self.view_tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([380, 720])
+        splitter.setSizes([420, 720])
 
     def _sync_controls(self):
         mt = self.map_tools
@@ -651,6 +653,7 @@ class PeemDomainView(QWidget):
         split.addWidget(self._build_results())
         split.setStretchFactor(1, 1)
         split.setSizes([400, 700])
+        tidy_forms(self)
 
     # ------------------------------------------------------------------ building
     def _build_controls(self) -> QWidget:
@@ -698,23 +701,23 @@ class PeemDomainView(QWidget):
         b.clicked.connect(self._set_roi_typed)
         row.addWidget(b)
         f.addRow("Type ROI:", row)
-        row = QHBoxLayout()
         self.auto_flake = QCheckBox("Auto flake outline")
         self.auto_flake.setToolTip("Find the flake on the pushed map (denoise, local contrast, Otsu, largest region;\n"
                                    "not the drift strips at the edges) and use its outline as the ROI; untick to clear")
         self.auto_flake.toggled.connect(self._auto_flake_toggled)
-        row.addWidget(self.auto_flake)
+        f.addRow(self.auto_flake)
+        row = QHBoxLayout()
         for label, fn in (("Save outline…", self._save_outline), ("Load outline…", self._load_outline)):
             b = QPushButton(label)
             b.clicked.connect(fn)
             row.addWidget(b)
         f.addRow(row)
-        row = QHBoxLayout()
         self.use_bg = QCheckBox("Background region")
         self.use_bg.setToolTip("A non-magnetic area: its mean is the zero for ROI statistics (and for the\n"
                                "analysis with Background: Background region). Used only while ticked.")
-        row.addWidget(self.use_bg)
-        for label, kind in (("Draw rect", "rect"), ("Draw polygon", "polygon")):
+        f.addRow(self.use_bg)
+        row = QHBoxLayout()
+        for label, kind in (("Draw rectangle", "rect"), ("Draw polygon", "polygon")):
             b = QPushButton(label)
             b.clicked.connect(lambda _=False, k=kind: self._start_draw("bg", k))
             row.addWidget(b)
@@ -731,11 +734,8 @@ class PeemDomainView(QWidget):
         d = da.DEFAULTS
         self.denoise = _domain_combo([("TV-Chambolle", "tv"), ("Median", "median"), ("None", "none")], d["denoise"])
         self.tv_weight = _dspin(0.0, 2.0, d["tv_weight"], 0.01, 2)
-        row = QHBoxLayout()
-        row.addWidget(self.denoise, 1)
-        row.addWidget(QLabel("w"))
-        row.addWidget(self.tv_weight)
-        f.addRow("Denoise:", row)
+        f.addRow("Denoise:", self.denoise)
+        f.addRow("TV weight:", self.tv_weight)
         self.flake = _domain_combo([("ROI (drawn / outline)", "pushed"), ("Automatic", "auto"), ("Whole map", "all")],
                                    d["flake"])
         f.addRow("Flake:", self.flake)
@@ -745,22 +745,19 @@ class PeemDomainView(QWidget):
                                    "Background region: its mean is the magnetic zero (push with the region ticked).\n"
                                    "None: the map's own zero.")
         self.sigma = _dspin(1.0, 1000.0, d["flatten_sigma"], 5.0, 0)
-        row = QHBoxLayout()
-        row.addWidget(self.background, 1)
-        row.addWidget(QLabel("σ"))
-        row.addWidget(self.sigma)
-        f.addRow("Background:", row)
+        f.addRow("Background:", self.background)
+        f.addRow("Gaussian σ (px):", self.sigma)
         self.fft = QCheckBox()
         self.fft_cut = QSpinBox()
         self.fft_cut.setRange(1, 2000)
         self.fft_cut.setValue(d["fft_cutoff"])
         self.fft_mode = _domain_combo([("radial", "radial"), ("along x", "x")], d["fft_mode"])
+        self.fft.setText("FFT filter")
+        f.addRow(self.fft)
         row = QHBoxLayout()
-        row.addWidget(self.fft)
-        row.addWidget(QLabel("cutoff"))
-        row.addWidget(self.fft_cut)
-        row.addWidget(self.fft_mode)
-        f.addRow("FFT filter:", row)
+        row.addWidget(self.fft_cut, 1)
+        row.addWidget(self.fft_mode, 1)
+        f.addRow("FFT cutoff:", row)
         self.m0 = _dspin(0.0, 1.0, d["m_threshold"], 0.01, 3)
         f.addRow("Three states m₀:", self.m0)
         self.min_px = QSpinBox()
