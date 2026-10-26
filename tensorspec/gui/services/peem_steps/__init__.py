@@ -100,6 +100,10 @@ checks every public call is listed here and runs the workflow without Qt):
                                           and gamma of the Map view); several maps of several datasets
     domain_inputs, remove_domain_input    the pushed maps
     domain_look(name, label)              how it looked in the Map view (cmap, range, gamma, ROI / background)
+    domain_regions, set_domain_region(name, label, which, region)
+                                          ROI / background region of one pushed map (drawn in Analysis -> Domains)
+    domain_auto_flake(name, label)        automatic flake outline -> that map's ROI
+    save_domain_region, load_domain_region, domain_roi_statistics (split at zero / background mean)
     run_domain_analysis(name, label, **params)
                                           core/peem/domain_analysis (the SDA toolkit's pipeline): normalize,
                                           denoise (TV), local std, flake, background (Gaussian / region /
