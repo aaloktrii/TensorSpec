@@ -222,11 +222,12 @@ class SliceWidget(QFrame):
         self.combo_profile_mode.addItems(["Raw (Sum)", "Mean", "Normalized to Max"])
         self.combo_profile_mode.currentIndexChanged.connect(self.redraw)
 
-        self.sl_contrast = QSlider(Qt.Horizontal)
+        self.sl_contrast = QSpinBox()  # typed, not a slider
         self.sl_contrast.setRange(1, 100)
         self.sl_contrast.setValue(100)
-        self.sl_contrast.setMinimumWidth(80)
-        self.sl_contrast.setMaximumWidth(140)
+        self.sl_contrast.setSuffix(" %")
+        self.sl_contrast.setKeyboardTracking(False)
+        self.sl_contrast.setFixedWidth(70)
         self.sl_contrast.setToolTip(
             "Scale color limits from data min toward max (100% = full range)."
         )
@@ -255,9 +256,12 @@ class SliceWidget(QFrame):
         self.chk_sym.setToolTip("Symmetric colour limits c ± L (white = c with bwr); L = contrast % of the 99th percentile of |v - c|")
         self.chk_sym.toggled.connect(self.redraw)
         self.combo_center = QComboBox()
-        self.combo_center.addItems(["0", "median"])
-        self.combo_center.setToolTip("Centre of the symmetric limits")
+        self.combo_center.addItems(["0", "median", "mean", "background"])
+        self.combo_center.setToolTip("Centre (white) of the symmetric limits: 0, the median or mean of the shown map,\n"
+                                     "or the mean of a background region (choose it, then drag a rectangle on the map)")
         self.combo_center.currentIndexChanged.connect(self.redraw)
+        self.combo_center.activated.connect(self._on_center_chosen)
+        self.sym_bg_box: dict | None = None  # background region for the 'background' centre (pixel indices)
         self.chk_image_origin = QCheckBox("Top-left origin")
         self.chk_image_origin.setToolTip("Image convention: first row at the top (PEEM / camera images)")
         self.chk_image_origin.toggled.connect(self.redraw)
@@ -280,7 +284,7 @@ class SliceWidget(QFrame):
         self.chk_sync.toggled.connect(self.spin_sync_group.setEnabled)
         self._sync_group_box = group(self.chk_sync, self.spin_sync_group)
         for widgets in ((QLabel("Colormap:"), self.combo_cmap, self.chk_invert), (self.btn_export,),
-                        (self.chk_profiles, self.combo_profile_mode), (QLabel("Contrast %:"), self.sl_contrast),
+                        (self.chk_profiles, self.combo_profile_mode), (QLabel("Contrast:"), self.sl_contrast),
                         (QLabel("γ:"), self.spin_gamma), (QLabel("Norm:"), self.combo_norm),
                         (self.chk_sym, self.combo_center), (self.chk_image_origin,)):
             row_disp.addWidget(group(*widgets))
@@ -293,22 +297,16 @@ class SliceWidget(QFrame):
         self.row2_widget = QWidget()
         row2 = FlowLayout(self.row2_widget)
         self.spin_dx = QSpinBox(); self.spin_dx.setRange(0, 100); self.spin_dx.setSuffix(" px")
-        self.slider_dx = QSlider(Qt.Horizontal); self.slider_dx.setRange(0, 100); self.slider_dx.setFixedWidth(50)
-        self.spin_dx.valueChanged.connect(self.slider_dx.setValue)
-        self.slider_dx.valueChanged.connect(self.spin_dx.setValue)
         self.spin_dx.valueChanged.connect(self._on_delta_changed)
 
         self.spin_dy = QSpinBox(); self.spin_dy.setRange(0, 100); self.spin_dy.setSuffix(" px")
-        self.slider_dy = QSlider(Qt.Horizontal); self.slider_dy.setRange(0, 100); self.slider_dy.setFixedWidth(50)
-        self.spin_dy.valueChanged.connect(self.slider_dy.setValue)
-        self.slider_dy.valueChanged.connect(self.spin_dy.setValue)
         self.spin_dy.valueChanged.connect(self._on_delta_changed)
 
         self.chk_ortho = QCheckBox("Extract Orthogonal:")
         self.chk_ortho.stateChanged.connect(self.toggle_profiles)
         self.combo_ortho = QComboBox()
         self.combo_ortho.currentIndexChanged.connect(self.redraw)
-        for widgets in ((QLabel("ΔX:"), self.spin_dx, self.slider_dx), (QLabel("ΔY:"), self.spin_dy, self.slider_dy),
+        for widgets in ((QLabel("ΔX:"), self.spin_dx), (QLabel("ΔY:"), self.spin_dy),
                         (self.chk_ortho, self.combo_ortho)):
             row2.addWidget(group(*widgets))
 
@@ -523,18 +521,10 @@ class SliceWidget(QFrame):
 
     def _sync_delta_spins_from_global(self):
         half = self.parent_panel.global_halfwidths
-        self.spin_dx.blockSignals(True)
-        self.slider_dx.blockSignals(True)
-        self.spin_dy.blockSignals(True)
-        self.slider_dy.blockSignals(True)
-        self.spin_dx.setValue(int(half.get(self.x_idx, 0)))
-        self.slider_dx.setValue(int(half.get(self.x_idx, 0)))
-        self.spin_dy.setValue(int(half.get(self.y_idx, 0)))
-        self.slider_dy.setValue(int(half.get(self.y_idx, 0)))
-        self.spin_dx.blockSignals(False)
-        self.slider_dx.blockSignals(False)
-        self.spin_dy.blockSignals(False)
-        self.slider_dy.blockSignals(False)
+        for sp, dim in ((self.spin_dx, self.x_idx), (self.spin_dy, self.y_idx)):
+            sp.blockSignals(True)
+            sp.setValue(int(half.get(dim, 0)))
+            sp.blockSignals(False)
 
     def _integration_slices(self):
         """Build nd slices: full span on display axes, ±Δ window on hidden axes."""
@@ -774,13 +764,13 @@ class SliceWidget(QFrame):
             c_scale = max(0.01, float(self.sl_contrast.value()) / 100.0)
             vmax_adj = vmin + (vmax - vmin) * c_scale + 1e-8
             if self.chk_sym.isChecked() and finite.size:
-                c = float(np.median(finite)) if self.combo_center.currentText() == "median" else 0.0
+                c = self.sym_center(sliced)
                 half = float(np.percentile(np.abs(finite - c), 99)) * c_scale or 1.0  # robust to outliers
                 vmin, vmax_adj = c - half, c + half
             if self.fixed_limits is not None:
                 vmin, vmax_adj = self.fixed_limits
                 if self.chk_sym.isChecked() and finite.size:  # a typed range is made symmetric about the centre
-                    c = float(np.median(finite)) if self.combo_center.currentText() == "median" else 0.0
+                    c = self.sym_center(sliced)
                     half = max(abs(vmax_adj - c), abs(vmin - c)) or 1.0
                     vmin, vmax_adj = c - half, c + half
             self.shown_limits = (float(vmin), float(vmax_adj))
@@ -942,6 +932,40 @@ class SliceWidget(QFrame):
         else:
             raise ValueError("tool must be 'rect', 'polygon' or 'line'")
 
+    def sym_center(self, image: np.ndarray | None = None) -> float:
+        """Centre of the symmetric colour limits: 0, the median or mean of the shown map, or the mean of the
+        background region (falls back to the median until one is drawn)."""
+        img = getattr(self, "_last_sliced", None) if image is None else image
+        a = np.asarray(img, float) if img is not None else np.array([])
+        fin = a[np.isfinite(a)] if a.size else a
+        mode = self.combo_center.currentText()
+        if mode == "0" or not fin.size:
+            return 0.0
+        if mode == "mean":
+            return float(fin.mean())
+        if mode == "background" and self.sym_bg_box and a.ndim == 2:
+            b = self.sym_bg_box
+            sub = a[max(int(b["y0"]), 0):int(b["y1"]) + 1, max(int(b["x0"]), 0):int(b["x1"]) + 1]
+            sub = sub[np.isfinite(sub)]
+            if sub.size:
+                return float(sub.mean())
+        return float(np.median(fin))
+
+    def _on_center_chosen(self, *_):
+        """'background' chosen: drag a rectangle on the map; its mean becomes the white point."""
+        if self.combo_center.currentText() != "background":
+            return
+        if not self.chk_sym.isChecked():
+            self.chk_sym.setChecked(True)
+
+        def done(box):
+            self.sym_bg_box = box
+            self.redraw()
+            self._draw_overlays()
+            self.canvas.draw_idle()
+
+        self.start_tool("rect", done, color="cyan")
+
     def _start_line_tool(self, color: str, sticky: bool) -> None:
         """Rubber-band line: press-drag-release (or click, click); Shift snaps the angle to 45 deg steps;
         sticky: stays on, a drag near an end moves that end, Esc stops."""
@@ -1080,7 +1104,10 @@ class SliceWidget(QFrame):
             except (ValueError, NotImplementedError):
                 pass
         self._overlay_artists = []
-        for ov in getattr(self.parent_panel, "overlays", []) or []:
+        overlays = list(getattr(self.parent_panel, "overlays", []) or [])
+        if self.sym_bg_box and self.combo_center.currentText() == "background":  # the white-point region
+            overlays.append({**self.sym_bg_box, "kind": "rect", "color": "cyan"})
+        for ov in overlays:
             if tuple(ov.get("dims", (self.y_idx, self.x_idx))) != (self.y_idx, self.x_idx):
                 continue
             col = ov.get("color", "yellow")
