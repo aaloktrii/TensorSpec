@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
+from tensorspec.gui.components.peem_map_common import action_style, bold_titles
 from tensorspec.gui.services.peem_service import PeemService
 
 
@@ -81,6 +82,7 @@ class PeemPanel(QWidget):
         control_layout = QVBoxLayout(control_panel)
 
         load_group = QGroupBox("1. Load")
+        bold_titles(load_group)
         load_form = QFormLayout(load_group)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Dataset name (auto from path)")
@@ -93,6 +95,7 @@ class PeemPanel(QWidget):
                                         "TIF / TIFF, PNG / JPEG, UE49 scan, UView .dat, ALS .P3B, or a folder\n"
                                         "of acquisitions. Other files (.rtf, .ipf, notes ...) are skipped.")
         self.btn_load_folder.clicked.connect(self._load_folder)
+        action_style(self.btn_load_folder, "load")
         btn_row.addWidget(self.btn_load_stack)
         btn_row.addWidget(self.btn_load_folder)
         load_form.addRow(btn_row)
@@ -109,6 +112,7 @@ class PeemPanel(QWidget):
         control_layout.addWidget(load_group)
 
         pair_group = QGroupBox("2. Pair / Separate")
+        bold_titles(pair_group)
         pair_form = QFormLayout(pair_group)
         self.pair_mode = QComboBox()
         self.pair_mode.addItem("Auto", "auto")
@@ -126,6 +130,7 @@ class PeemPanel(QWidget):
         control_layout.addWidget(pair_group)
 
         drift_group = QGroupBox("3. Drift")
+        bold_titles(drift_group)
         drift_form = QFormLayout(drift_group)
         self.drift_algo_label = QLabel("NCC ROI (ncc_roi)")
         drift_form.addRow("Algorithm:", self.drift_algo_label)
