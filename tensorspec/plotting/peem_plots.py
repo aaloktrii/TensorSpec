@@ -340,6 +340,36 @@ def zoom_to_mask(ax, mask: np.ndarray, um_per_px: float | None = None, margin_um
     ax.set_ylim(min((ys.max() + 1) * s + pad, ny * s), max(ys.min() * s - pad, 0))
 
 
+def pushed_map(ax, img: np.ndarray, look: dict, title: str = ""):
+    """A pushed map exactly as it looked in the Map view (colour map incl. invert, colour range, gamma),
+    axes in um, with the ROI (yellow) and background region (cyan) outlines. Returns the image artist."""
+    from matplotlib import colors as mcolors
+
+    a = np.asarray(img, float)
+    um = look.get("um_per_px")
+    s = um or 1.0
+    ny, nx = a.shape
+    vmin, vmax = look.get("vmin"), look.get("vmax")
+    if vmin is None or vmax is None:
+        fin = a[np.isfinite(a)]
+        vmin, vmax = (float(np.percentile(fin, 1)), float(np.percentile(fin, 99))) if fin.size else (0.0, 1.0)
+    g = float(look.get("gamma") or 1.0)
+    norm = mcolors.Normalize(vmin, vmax) if abs(g - 1.0) < 1e-6 else mcolors.PowerNorm(g, vmin, vmax)
+    im = ax.imshow(a, cmap=look.get("cmap") or "gray", norm=norm, extent=[0, nx * s, ny * s, 0],
+                   interpolation="nearest")
+    xs, ys = (np.arange(nx) + 0.5) * s, (np.arange(ny) + 0.5) * s
+    for key, color in (("roi", "yellow"), ("bg", "cyan")):
+        m = look.get(key)
+        if m is not None and np.any(m):
+            ax.contour(xs, ys, np.asarray(m, float), [0.5], colors=color, linewidths=0.8)
+    unit = "µm" if um else "px"
+    ax.set_xlabel(f"x ({unit})")
+    ax.set_ylabel(f"y ({unit})")
+    if title:
+        ax.set_title(title, fontsize=8)
+    return im
+
+
 def domain_numbers_text(m: dict) -> str:
     """Short caption of the main numbers of one analysed map."""
     if not m:
@@ -369,7 +399,8 @@ def domain_sizes(ax, areas: dict) -> None:
 
 
 def save_domain_step_pdf(path, img: np.ndarray, step: str, um_per_px: float | None, title: str,
-                         numbers: dict | None = None, flake: np.ndarray | None = None) -> None:
+                         numbers: dict | None = None, flake: np.ndarray | None = None,
+                         look: dict | None = None) -> None:
     """Editable PDF (TrueType text, axes in um) of one domain-analysis step, 8.7 cm wide."""
     import matplotlib
     from matplotlib.figure import Figure
@@ -379,9 +410,12 @@ def save_domain_step_pdf(path, img: np.ndarray, step: str, um_per_px: float | No
                                 "font.size": 7, "axes.linewidth": 0.6}):
         fig = Figure(figsize=(3.42, 3.2), layout="constrained")
         ax = fig.add_subplot(111)
-        im = domain_step(ax, img, step, um_per_px, title)
-        if flake is not None:
-            zoom_to_mask(ax, flake, um_per_px)
+        if step == "input" and look is not None:
+            im = pushed_map(ax, img, look, title)
+        else:
+            im = domain_step(ax, img, step, um_per_px, title)
+            if flake is not None:
+                zoom_to_mask(ax, flake, um_per_px)
         if im is not None:
             fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02).outline.set_linewidth(0.5)
         if numbers:

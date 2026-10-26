@@ -174,6 +174,7 @@ class PeemPanel(QWidget):
         scroll.setWidget(control_panel)
         scroll.setMinimumWidth(360)
         splitter.addWidget(scroll)
+        self._controls_scroll = scroll
 
         # --- RIGHT: Frame (DataViewer) | Map | Analysis ---
         self.view_tabs = QTabWidget()
@@ -197,11 +198,20 @@ class PeemPanel(QWidget):
 
         self.view_tabs.addTab(self.map_tools.map_view, "Map")
         self.view_tabs.addTab(self.map_tools.analysis_view, "Analysis")
+        # Analysis -> Domains has its own controls: the left column (1-7) is hidden there
+        self.view_tabs.currentChanged.connect(lambda *_: self._sync_controls())
+        self.map_tools.analysis_view.currentChanged.connect(lambda *_: self._sync_controls())
 
         splitter.addWidget(self.view_tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([380, 720])
+
+    def _sync_controls(self):
+        mt = self.map_tools
+        on_domains = (self.view_tabs.currentWidget() is mt.analysis_view
+                      and mt.analysis_view.currentWidget() is mt.domain_view)
+        self._controls_scroll.setVisible(not on_domains)
 
     @staticmethod
     def _pair_row(a, b):
@@ -723,7 +733,8 @@ class PeemDomainView(QWidget):
         g = QGroupBox("Show and export")
         bold_titles(g)
         f = QFormLayout(g)
-        self.step = _domain_combo([("input map", "input")] + [(da.STEP_LABELS[s], s) for s in da.STEPS], "three_states")
+        self.step = _domain_combo([("pushed map (as in the Map view)", "input")]
+                                  + [(da.STEP_LABELS[s], s) for s in da.STEPS], "three_states")
         self.step.currentIndexChanged.connect(self._show)
         f.addRow("Show:", self.step)
         self.sizes = QCheckBox("Domain-size distribution")
@@ -851,16 +862,19 @@ class PeemDomainView(QWidget):
             img = self.service.domain_layer(name, label, step)
         except ValueError:
             img, step = self.service.domain_layer(name, label, "input"), "input"
-        um = result.get("um_per_px") if result else None
-        um = um if um and um == um else None
+        look = self.service.domain_look(name, label)
+        um = look["um_per_px"]
         sizes = self.sizes.isChecked() and bool(result)
         ax = self.fig.add_subplot(1, 2 if sizes else 1, 1)
-        title = f"{name} · {da.STEP_LABELS.get(step, 'input map')}"
-        im = peem_plots.domain_step(ax, img, step, um, title)
-        try:  # zoom to the flake (axes keep the field's coordinates)
-            peem_plots.zoom_to_mask(ax, self.service.domain_layer(name, label, "flake"), um)
-        except ValueError:
-            pass
+        title = f"{name} · {da.STEP_LABELS.get(step, 'pushed map (as in the Map view)')}"
+        if step == "input":  # the live image as pushed: same colours, range, gamma, outlines
+            im = peem_plots.pushed_map(ax, img, look, title)
+        else:
+            im = peem_plots.domain_step(ax, img, step, um, title)
+            try:  # zoom to the flake (axes keep the field's coordinates)
+                peem_plots.zoom_to_mask(ax, self.service.domain_layer(name, label, "flake"), um)
+            except ValueError:
+                pass
         if im is not None:
             self.fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02)
         if sizes:
