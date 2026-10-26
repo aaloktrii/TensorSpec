@@ -39,9 +39,12 @@ def _default_floor_ref_dir() -> Path:
     ).expanduser()
 
 
-def _mpl_cmap(name: str) -> str:
-    """Menu names with white at low intensity. Matplotlib names pass through."""
-    return {"grey": "gray_r", "blue": "Blues", "terrain": "terrain_r"}.get(name, name)
+def _mpl_cmap(name: str, invert: bool = False) -> str:
+    """Menu names with white at low intensity. Matplotlib names pass through. invert: the reversed map."""
+    name = {"grey": "gray_r", "blue": "Blues", "terrain": "terrain_r"}.get(name, name)
+    if invert:
+        name = name[:-2] if name.endswith("_r") else name + "_r"
+    return name
 
 
 def is_ml_label_layer(layer_name: str) -> bool:
@@ -201,6 +204,9 @@ class SliceWidget(QFrame):
         )
         self.combo_cmap.setCurrentText("magma")
         self.combo_cmap.currentIndexChanged.connect(self.redraw)
+        self.chk_invert = QCheckBox("Invert")
+        self.chk_invert.setToolTip("Reverse the colour map (e.g. bwr: red for negative, blue for positive)")
+        self.chk_invert.toggled.connect(self.redraw)
 
         self.btn_export = QPushButton("Save EPS/PDF")
         self.btn_export.setToolTip(
@@ -273,7 +279,7 @@ class SliceWidget(QFrame):
         )
         self.chk_sync.toggled.connect(self.spin_sync_group.setEnabled)
         self._sync_group_box = group(self.chk_sync, self.spin_sync_group)
-        for widgets in ((QLabel("Colormap:"), self.combo_cmap), (self.btn_export,),
+        for widgets in ((QLabel("Colormap:"), self.combo_cmap, self.chk_invert), (self.btn_export,),
                         (self.chk_profiles, self.combo_profile_mode), (QLabel("Contrast %:"), self.sl_contrast),
                         (QLabel("γ:"), self.spin_gamma), (QLabel("Norm:"), self.combo_norm),
                         (self.chk_sym, self.combo_center), (self.chk_image_origin,)):
@@ -775,7 +781,7 @@ class SliceWidget(QFrame):
                 vmin, vmax_adj = self.fixed_limits
             self.shown_limits = (float(vmin), float(vmax_adj))
             gamma = float(self.spin_gamma.value())
-            cmap_name = _mpl_cmap(self.combo_cmap.currentText())
+            cmap_name = _mpl_cmap(self.combo_cmap.currentText(), self.chk_invert.isChecked())
             self.im_main.set_cmap(cmap_name)
             if abs(gamma - 1.0) < 1e-6:
                 self.im_main.set_norm(mcolors.Normalize(vmin=vmin, vmax=vmax_adj))
