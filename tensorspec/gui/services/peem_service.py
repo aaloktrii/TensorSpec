@@ -784,9 +784,10 @@ class PeemDomainAnalysisSteps:
     # ------------------------------------------------------------------ push / list
     def push_to_domains(self, name: str, kind: str, var: str = "data", mode: str = "raw",
                         vmin: float | None = None, vmax: float | None = None, gamma: float = 1.0,
-                        use_roi: bool = True, use_bg: bool = False) -> dict[str, Any]:
+                        use_roi: bool = True, use_bg: bool = False, cmap: str | None = None) -> dict[str, Any]:
         """Send a map to the domain analysis. mode 'raw': its values; 'shown': with the Map view's
-        colour range (vmin, vmax) and gamma. The dataset's ROI and (use_bg) background region go along."""
+        colour range (vmin, vmax) and gamma. The dataset's ROI and (use_bg) background region go along.
+        The look (vmin, vmax, gamma, cmap) is kept either way, so the pushed map is shown as it was."""
         if mode not in ("raw", "shown"):
             raise ValueError("mode must be 'raw' or 'shown'")
         if mode == "shown" and (vmin is None or vmax is None or not vmax > vmin):
@@ -808,7 +809,7 @@ class PeemDomainAnalysisSteps:
         if bg is not None:
             extra["bg"] = _roi_mask(a.shape, bg).astype(np.uint8)
         attrs = {"source_kind": kind, "source_var": var, "mode": mode, "gamma": float(gamma or 1.0),
-                 "vmin": vmin, "vmax": vmax, "analysed": 0, "um_per_px": self._um_per_px(name)}
+                 "vmin": vmin, "vmax": vmax, "cmap": cmap, "analysed": 0, "um_per_px": self._um_per_px(name)}
         self._write_domains(name, label, a, extra, attrs)
         out = {"name": name, "label": label, "source": self.layer_for(name, kind, var), "mode": mode,
                "has_roi": roi is not None, "has_bg": bg is not None}
@@ -860,7 +861,8 @@ class PeemDomainAnalysisSteps:
                          gamma=at.get("gamma", 1.0), **params)
         extra = {k: ds[k].values for k in ("roi", "bg") if k in ds}
         extra.update(res["layers"])
-        keep = {k: at[k] for k in ("source_kind", "source_var", "mode", "gamma", "vmin", "vmax", "um_per_px") if k in at}
+        keep = {k: at[k] for k in ("source_kind", "source_var", "mode", "gamma", "vmin", "vmax", "cmap", "um_per_px")
+                if k in at}
         p = {**da.DEFAULTS, **params}
         attrs = {**keep, "analysed": 1, **{f"param_{k}": v for k, v in p.items()},
                  **{k: v for k, v in res["metrics"].items()},
@@ -870,6 +872,16 @@ class PeemDomainAnalysisSteps:
         out = {"name": name, "label": label, **res["metrics"]}
         _step_record(name, f"domain analysis {label}", {k: v for k, v in out.items() if np.isscalar(v)})
         return out
+
+    def domain_look(self, name: str, label: str) -> dict[str, Any]:
+        """How the pushed map looked in the Map view: cmap, vmin, vmax, gamma, um_per_px, ROI / background masks."""
+        ds = self._domains(name, label)
+        at = dict(ds.attrs)
+        um = at.get("um_per_px")
+        return {"cmap": at.get("cmap"), "vmin": at.get("vmin"), "vmax": at.get("vmax"), "gamma": at.get("gamma", 1.0),
+                "um_per_px": um if um and np.isfinite(um) else None,
+                "roi": np.asarray(ds["roi"].values, bool) if "roi" in ds else None,
+                "bg": np.asarray(ds["bg"].values, bool) if "bg" in ds else None}
 
     def domain_result(self, name: str, label: str) -> dict[str, Any]:
         """The numbers of one analysed map ({} before a run)."""
@@ -938,7 +950,7 @@ class PeemDomainAnalysisSteps:
         ds = self._domains(name, label)
         flake = np.asarray(ds["flake"].values) if "flake" in ds else None
         peem_plots.save_domain_step_pdf(path, img, step, um if um and np.isfinite(um) else None, title,
-                                        self.domain_result(name, label), flake)
+                                        self.domain_result(name, label), flake, self.domain_look(name, label))
         return str(path)
 
     # ------------------------------------------------------------------ ROI helpers
@@ -948,7 +960,8 @@ class PeemDomainAnalysisSteps:
         the dataset's ROI (a polygon, so it can be saved, edited and reused)."""
         a = np.asarray(self.get_map(name, kind, var), float)
         img, _ = da.normalize(a, "raw")
-        mask = da.auto_flake(da.local_std(da.denoise(img, "tv", tv_weight)), min_px=min_px)
+        mask = da.auto_flake(da.local_std(da.denoise(img, "tv", tv_weight)), min_px=min_px,
+                             valid=da.edge_strips(a))  # not the drift strips at the field's edges
         roi = {"kind": "polygon", "points": da.flake_outline(mask)}
         self.set_roi(name, "roi", roi)
         return roi
