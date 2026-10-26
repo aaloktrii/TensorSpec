@@ -451,3 +451,32 @@ def test_flatten_along_the_line_in_the_map_tab(qapp, tmp_path):
     t._use_as_map_data()
     assert np.allclose(p.service.get_map("img", "pcd", "data"), f, equal_nan=True)
     assert "data_original" in gw.pull_analysis_data("img", "pcd")
+
+
+def test_subtract_offset_and_white_point_label(qapp, tmp_path):
+    """4. Offset: the map minus its offset (background rectangle, or median without drift strips) ->
+    '… · offset_removed', shown signed and symmetric about 0; the viewer shows the white point."""
+    from tensorspec.core.workspace import global_workspace as gw
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    ds = gw.pull_analysis_data("img", "pcd").copy()
+    ds["data"] = ds["data"] + 0.03  # a beam offset everywhere
+    gw.write_analysis_data("img", "pcd", ds)
+    t.refresh(select=("pcd", "data"))
+    v = t.viewer.primary_view()
+    v.chk_sym.setChecked(True)
+    v.combo_center.setCurrentText("background")
+    v.combo_center.activated.emit(3)
+    v._finish_tool({"kind": "rect", "x0": 0, "x1": 63, "y0": 0, "y1": 63})
+    assert v.lbl_center.text().startswith("white at +0.0")
+    t._subtract_offset()
+    f = p.service.get_map("img", "pcd", "offset_removed")
+    assert abs(np.nanmean(f)) < 1e-9 and t._shown() == ("pcd", "offset_removed")
+    v = t.viewer.primary_view()
+    lo, hi = t.viewer.color_limits()
+    assert lo == pytest.approx(-hi) and v.combo_cmap.currentText() == "bwr" and v.lbl_center.text() == "white at +0"

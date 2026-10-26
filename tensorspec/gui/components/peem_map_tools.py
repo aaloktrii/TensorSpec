@@ -99,6 +99,12 @@ class PeemMapTools:
         self.show_combo = QComboBox()
         self.show_combo.activated.connect(lambda *_: self._select(*self.show_combo.currentData().split("|", 1)))
         af.addRow("Show:", self.show_combo)
+        b = QPushButton("Subtract offset")
+        b.setToolTip("Map minus its offset, so 0 is the magnetic zero -> layer '… · offset_removed' (the map is kept).\n"
+                     "Offset from the Sym ± centre of the Map view: background = mean in your rectangle (best);\n"
+                     "median / mean = of the map without the drift strips at the edges.")
+        b.clicked.connect(self._subtract_offset)
+        af.addRow("Offset:", b)
         lay.addWidget(asym)
         if self._send_to_sum_rule is not None:
             b = action_style(QPushButton("→ Sum Rule (corrected pairs)"), "handover")
@@ -607,6 +613,24 @@ class PeemMapTools:
         size = f"{length * um:.2f} µm" if um else f"{length:.0f} px"
         self.status.setText(f"Line ({x1:.0f}, {y1:.0f}) → ({x2:.0f}, {y2:.0f}) px, {size}, {angle:.0f}°. "
                             "Add profile keeps it.")
+
+    def _subtract_offset(self):
+        name = self._name()
+        view = self.viewer.primary_view()
+        if not name or view is None:
+            return
+        kind, var = self._shown()
+        mode = view.combo_center.currentText()
+        how, region = {"background": ("region", view.sym_bg_box), "mean": ("mean", None)}.get(mode, ("median", None))
+        res = self._call(self.service.subtract_map_offset, name, kind, var, how, region)
+        if res is None:
+            return
+        self.refresh(select=(kind, "offset_removed"))
+        v = self.viewer.primary_view()
+        v.chk_sym.setChecked(True)
+        v.combo_center.setCurrentText("0")  # the zero is now the magnetic zero
+        self.status.setText(f"Offset {res['offset']:+.4g} ({res['source']}, {res['n_px']} px) removed → "
+                            f"'{self.service.layer_for(name, kind, 'offset_removed')}', colours symmetric about 0.")
 
     # ------------------------------------------------------------------ 5. flatten along the line (Igor Flatten)
     def _flatten(self):
