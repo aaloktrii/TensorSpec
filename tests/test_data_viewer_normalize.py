@@ -130,3 +130,10 @@ def test_norm_combo_per_panel_and_along_energy(app):
     assert np.nanmax(v0._last_sliced) == pytest.approx(30.0)
     assert np.nanmax(v1._last_sliced, axis=0) == pytest.approx([1.0, 1.0, 1.0])
     panel.close()
+
+
+def test_colormap_invert_tick():
+    from tensorspec.gui.components.data_viewer_panel import _mpl_cmap
+
+    assert _mpl_cmap("bwr", True) == "bwr_r" and _mpl_cmap("bwr") == "bwr"
+    assert _mpl_cmap("grey") == "gray_r" and _mpl_cmap("grey", True) == "gray"  # menu maps already reversed

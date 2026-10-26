@@ -6,7 +6,7 @@ Front end only; every step is a ``PeemService`` call (contract: gui/services/pee
 The PEEM panel plugs it in with a few lines:
 
     tools = PeemMapTools(service, get_name=lambda: panel._dataset_name, send_to_sum_rule=...)
-    left_layout.addWidget(tools.controls)           # sections 5-8
+    left_layout.addWidget(tools.controls)           # sections 4-7
     view_tabs.addTab(tools.map_view, "Map")         # maps with ROI / profile overlays
     view_tabs.addTab(tools.plot_view, "Analysis")   # profiles, histogram, FFT (PDF export)
 """
@@ -55,9 +55,12 @@ class PeemMapTools:
     """Sections 4-7 of the PEEM panel and their two views (see the module docstring)."""
 
     def __init__(self, service, get_name: Callable[[], str | None], parent: QWidget | None = None,
-                 send_to_sum_rule: Callable[[str], None] | None = None):
+                 send_to_sum_rule: Callable[[str], None] | None = None,
+                 on_map_made: Callable[[], None] | None = None):
         self.service, self._get_name, self._parent = service, get_name, parent
         self._send_to_sum_rule = send_to_sum_rule
+        self._on_map_made = on_map_made  # e.g. the panel refreshes its Frame "Show" list
+        self._pair_tags: list[str] | None = None
         self._line: tuple | None = None
         self._loaded_name: str | None = None
         self._shown_name: str | None = None
@@ -71,27 +74,31 @@ class PeemMapTools:
         lay = QVBoxLayout(self.controls)
         lay.setContentsMargins(0, 0, 0, 0)
 
-        asym = QGroupBox("5. Asymmetry map")
+        asym = QGroupBox("4. Dichroism map")
         af = QFormLayout(asym)
+        self.map_register = QComboBox()
+        self.map_register.addItem("Register polarizations (recommended)", True)
+        self.map_register.addItem("No extra registration", False)
+        af.addRow("Align:", self.map_register)
         row = QHBoxLayout()
         self.e_lo, self.e_hi = QLineEdit(), QLineEdit()
         for w, ph in ((self.e_lo, "from (all)"), (self.e_hi, "to (all)")):
             w.setPlaceholderText(ph)
             row.addWidget(w)
         af.addRow("Energy window (eV):", row)
-        b = QPushButton("Stack pairs → asymmetry map")
-        b.setToolTip("Mean of the corrected pairs per polarization (within the energy window), the second\n"
-                     "refined onto the first, then XMCD (CM−CP)/(CM+CP) for CP / CM or XLD (LV−LH)/(LV+LH)\n"
-                     "for LH / LV. Run 2. Stack Pairs first.")
+        b = QPushButton("Make dichroism map")
+        b.setToolTip("XMCD (CM−CP)/(CM+CP) for CP / CM, XLD (LV−LH)/(LV+LH) for LH / LV.\n"
+                     "After 2. Stack Pairs (+ 3. Drift): the corrected pairs, optionally only the frames in the\n"
+                     "energy window. Without Stack Pairs: all frames, each aligned by Register polarizations.")
         b.clicked.connect(self._asymmetry)
         af.addRow(b)
         self.btn_asymmetry = b
         self.show_combo = QComboBox()
-        self.show_combo.activated.connect(lambda *_: self._select(*self.show_combo.currentData()))
+        self.show_combo.activated.connect(lambda *_: self._select(*self.show_combo.currentData().split("|", 1)))
         af.addRow("Show:", self.show_combo)
         lay.addWidget(asym)
 
-        an = QGroupBox("6. Image analysis")
+        an = QGroupBox("5. Image analysis")
         nf = QFormLayout(an)
         row = QHBoxLayout()
         b = QPushButton("Draw line")
@@ -142,7 +149,7 @@ class PeemMapTools:
         nf.addRow(row)
         lay.addWidget(an)
 
-        rd = QGroupBox("7. ROIs and domains")
+        rd = QGroupBox("6. ROIs and domains")
         rf = QFormLayout(rd)
         row = QHBoxLayout()
         for label, kind in (("Draw rectangle", "rect"), ("Draw polygon", "polygon")):
@@ -174,7 +181,7 @@ class PeemMapTools:
         rf.addRow(row)
         lay.addWidget(rd)
 
-        cg = QGroupBox("8. Compare with a reference")
+        cg = QGroupBox("7. Compare with a reference")
         cf = QFormLayout(cg)
         row = QHBoxLayout()
         self.cmp_ref = QComboBox()
@@ -290,9 +297,10 @@ class PeemMapTools:
     # ------------------------------------------------------------------ map view
     def set_pair(self, tags: list[str] | None):
         """Name the buttons after the dataset's pair (CP / CM or LH / LV, from Stack Pairs)."""
+        self._pair_tags = list(tags[:2]) if tags and len(tags) >= 2 else None
         pair = " / ".join(tags[:2]) if tags and len(tags) >= 2 else "pairs"
-        kind = {"CP / CM": "XMCD", "LH / LV": "XLD"}.get(pair, "asymmetry")
-        self.btn_asymmetry.setText(f"Stack {pair} → {kind} map")
+        kind = {"CP / CM": "XMCD", "LH / LV": "XLD"}.get(pair, "dichroism")
+        self.btn_asymmetry.setText(f"Make {kind} map ({pair})" if pair != "pairs" else "Make dichroism map")
         if hasattr(self, "btn_sum_rule"):
             self.btn_sum_rule.setText(f"→ Sum Rule (corrected {pair})")
 
@@ -324,7 +332,7 @@ class PeemMapTools:
                                show_data=False)  # the data is the stack's A+B image, listed as a layer
         self._on_layer_changed()
         self._fill_show(name)
-        i = self.show_combo.findData((kind, var))
+        i = self.show_combo.findData(f"{kind}|{var}")
         if i >= 0:
             self.show_combo.setCurrentIndex(i)
         self._fill_compare_refs()
@@ -350,18 +358,25 @@ class PeemMapTools:
                 self.cmp_ref.setCurrentText(cur)
 
     def _fill_show(self, name: str):
-        items = [(f"stack: {label}", ("stack", v)) for label, v in self.service.stack_outputs(name)]
-        for kind in ("pcd", "pld"):
-            items += [(f"{kind}: {label}", (kind, v)) for label, v in self.service.asymmetry_outputs(name, "xmcd" if kind == "pcd" else "xld")]
-        if "domain_map" in self.service.list_products(name):
-            items.append(("domain map", ("domain_map", "data")))
-        if "nc" in self.service.list_products(name):
-            items += [(f"file: {label}", ("nc", v)) for label, v in self.service.nc_outputs(name)]
-        if "compare" in self.service.list_products(name):
-            items += [(f"compare: {label}", ("compare", v)) for label, v in self.service.compare_outputs(name)]
+        """The same short list as the Map view's Layer menu (PeemService.shown_layers), in words."""
+        self.show_combo.blockSignals(True)
         self.show_combo.clear()
-        for label, data in items:
-            self.show_combo.addItem(label, data)
+        for layer in self.service.shown_layers(name):
+            kind, var = self.service.parse_layer(layer)
+            self.show_combo.addItem(self._show_label(kind, var, layer), f"{kind}|{var}")  # Qt turns tuples into lists
+        self.show_combo.blockSignals(False)
+
+    @staticmethod
+    def _show_label(kind: str, var: str, layer: str) -> str:
+        if kind == "stack":
+            return layer.split(" · ", 1)[1].upper().replace("+", " + ") if var == "data" else \
+                f"{var.split('_', 1)[-1].upper()} (mean)"
+        if kind in ("pcd", "pld"):
+            what = "XMCD" if kind == "pcd" else "XLD"
+            return {"data": f"{what} map", "difference": f"{what} difference"}.get(var, f"{what} · {var}")
+        if kind == "domain_map":
+            return "domain map"
+        return layer.replace(" · ", ": ")
 
     def _select(self, kind: str, var: str = "data"):
         self.refresh(select=(kind, var))
@@ -376,6 +391,11 @@ class PeemMapTools:
         except ValueError:
             return
         self.viewer.configure_view(**hint, image_origin=True, aspect_equal=True, limits="auto")
+        i = self.show_combo.findData(f"{kind}|{var}")  # Show follows the Layer menu
+        if i >= 0 and i != self.show_combo.currentIndex():
+            self.show_combo.blockSignals(True)
+            self.show_combo.setCurrentIndex(i)
+            self.show_combo.blockSignals(False)
         self._sync_range()
         self._update_overlays()
         self._dock_profiles()  # the drawn line's profile follows the shown map
@@ -435,8 +455,12 @@ class PeemMapTools:
         if w is not None:
             w.setCurrentWidget(self.map_view)
 
-    # ------------------------------------------------------------------ 5. asymmetry
+    # ------------------------------------------------------------------ 4. dichroism map
     def _asymmetry(self):
+        """One button for the dichroism map. After Stack Pairs: the corrected pairs (energy window
+        optional), the second polarization refined onto the first if Register is on. Without Stack
+        Pairs: all frames by their polarization tags, every frame aligned if Register is on
+        (PeemService.make_pcd_map / make_pld_map, then map_to_tools)."""
         name = self._name()
         if not name:
             return
@@ -445,18 +469,36 @@ class PeemMapTools:
         except ValueError:
             self._err("Energy window: type numbers (eV) or leave empty for all.")
             return
-        st = self._call(self.service.channel_stack, name, lo, hi)
-        if st is None:
-            return
-        res = self._call(self.service.asymmetry, name)
-        if res is None:
-            return
-        win = st.get("energy_window_eV")
-        self.status.setText(f"{st['n_pairs']} pairs{f' at {win[0]:.2f}–{win[1]:.2f} eV' if win else ''}; "
-                            f"{res['formula']}: mean {res.get('mean', float('nan')):+.4f}, std {res.get('std', float('nan')):.4f}")
+        register = bool(self.map_register.currentData())
+        if self.service.get_meta(name).get("processed_is_paired"):
+            st = self._call(self.service.channel_stack, name, lo, hi, register)
+            if st is None:
+                return
+            res = self._call(self.service.asymmetry, name)
+            if res is None:
+                return
+            win = st.get("energy_window_eV")
+            src = f"{st['n_pairs']} pairs{f' at {win[0]:.2f}–{win[1]:.2f} eV' if win else ''}"
+        else:
+            if lo is not None or hi is not None:
+                self._err("An energy window needs 2. Stack Pairs first (each frame is then picked by its energy).")
+                return
+            kind = "pld" if self._pair_tags == ["LH", "LV"] else "pcd"
+            made = self._call(getattr(self.service, f"make_{kind}_map"), name, register=register)
+            if made is None:
+                return
+            res = self._call(self.service.map_to_tools, name, kind)
+            if res is None:
+                return
+            src = f"all frames ({made['source']})"
+        self.status.setText(f"{src}; {res['formula']}: mean {res.get('mean', float('nan')):+.4f}, "
+                            f"std {res.get('std', float('nan')):.4f}")
+        if self._on_map_made is not None:
+            self._on_map_made()
         self.refresh(select=(res["kind"], "data"))
+        self._show_map_tab()
 
-    # ------------------------------------------------------------------ 8. compare
+    # ------------------------------------------------------------------ 7. compare
     def _compare(self):
         name = self._name()
         if not name:
@@ -492,7 +534,7 @@ class PeemMapTools:
             if out:
                 self.status.setText(f"Saved {os.path.basename(out)}")
 
-    # ------------------------------------------------------------------ 6. analysis
+    # ------------------------------------------------------------------ 5. analysis
     def _on_line(self, sh: dict):
         self._line = (tuple(sh["a"]), tuple(sh["b"]))
         (y1, x1), (y2, x2) = self._line
@@ -643,7 +685,7 @@ class PeemMapTools:
                 self.status.setText(f"Mean domain width {w['domain_width_px']:.1f} px{um} in "
                                     f"{'the ROI' if self._roi() else 'the whole map'} ({kind} / {var}).")
 
-    # ------------------------------------------------------------------ 7. ROIs / domains
+    # ------------------------------------------------------------------ 6. ROIs / domains
     def _set_roi(self, roi: dict | None):
         name = self._name()
         if name:
@@ -692,7 +734,8 @@ class PeemMapTools:
             out["vmin"], out["vmax"] = lim
         view = self.viewer.primary_view()
         if view is not None:
-            out["cmap"] = view.combo_cmap.currentText()
+            from tensorspec.gui.components.data_viewer_panel import _mpl_cmap
+            out["cmap"] = _mpl_cmap(view.combo_cmap.currentText(), view.chk_invert.isChecked())  # as shown
         return out
 
     def _export(self):

@@ -102,8 +102,8 @@ tensorspec/
     │   ├── crystal_panel.py      # Crystal View tab body: Structure | Camera | Export sub-tabs
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
-    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + Make PCD/PLD (4, also feeds 6–8) + map tools (5–8); Frame=DataViewer
-    │   ├── peem_map_tools.py      # PEEM panel add-on: asymmetry map, image analysis, ROIs / domains,
+    │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + map tools (4–7); Frame=DataViewer
+    │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), image analysis, ROIs / domains,
     │   │                          #   compare with a reference, → Sum Rule
     │   ├── peem_sumrule_panel.py  # Sum Rule window, From PEEM: region spectra, BG, sum rule
     │   ├── peem_export_dialog.py / peem_map_common.py  # map export options; small widget helpers
