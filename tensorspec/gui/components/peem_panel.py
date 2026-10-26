@@ -145,34 +145,13 @@ class PeemPanel(QWidget):
         drift_form.addRow(self.btn_drift)
         control_layout.addWidget(drift_group)
 
-        map_group = QGroupBox("4. Dichroism map (Frame viewer)")
-        map_form = QFormLayout(map_group)
-        self.map_register = QComboBox()
-        self.map_register.addItem("Register polarizations (recommended)", True)
-        self.map_register.addItem("No extra registration", False)
-        map_form.addRow("Align:", self.map_register)
-        map_btns = QHBoxLayout()
-        self.btn_make_pcd = QPushButton("Make PCD (XMCD)")
-        self.btn_make_pcd.setToolTip(
-            "CP/CM → /analysis/pcd (LH/LV: Make PLD). Prefer Separate first, or beamline load with pol tags."
-        )
-        self.btn_make_pcd.clicked.connect(self._make_pcd)
-        self.btn_make_pld = QPushButton("Make PLD (XLD)")
-        self.btn_make_pld.clicked.connect(self._make_pld)
-        map_btns.addWidget(self.btn_make_pcd)
-        map_btns.addWidget(self.btn_make_pld)
-        map_form.addRow(map_btns)
-        self.btn_export_map = QPushButton("Export current map…")
-        self.btn_export_map.clicked.connect(self._export_map)
-        map_form.addRow(self.btn_export_map)
-        control_layout.addWidget(map_group)
 
 
-        # 5-8: calculate + analyse (asymmetry map, image analysis, ROIs / domains); background and
+        # 4-7: calculate + analyse (dichroism map, image analysis, ROIs / domains, compare); background and
         # sum rule are in the Sum Rule window (XAS suite), reached with "→ Sum Rule"
         from tensorspec.gui.components.peem_map_tools import PeemMapTools
         self.map_tools = PeemMapTools(self.service, lambda: self._dataset_name, self,
-                                      send_to_sum_rule=self._to_sum_rule)
+                                      send_to_sum_rule=self._to_sum_rule, on_map_made=self._refresh_meta)
         control_layout.addWidget(self.map_tools.controls)
 
         control_layout.addStretch()
@@ -616,72 +595,3 @@ class PeemPanel(QWidget):
                             view.combo_cmap.setCurrentIndex(idx)
         except Exception as exc:
             self.status_label.setText(f"View error: {exc}")
-
-    def _make_pcd(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            result = self.service.make_pcd_map(
-                name, register=bool(self.map_register.currentData())
-            )
-            self.service.map_to_tools(name, "pcd")  # also in the Map tab, for sections 6-8
-            self._refresh_meta()
-            self.map_tools.refresh(select=("pcd", "data"))
-            idx = self.node_combo.findData(result["display_node"])
-            if idx >= 0:
-                self.node_combo.setCurrentIndex(idx)
-            self.view_tabs.setCurrentIndex(0)
-            self.status_label.setText(
-                f"PCD map ({result['formula']}, source={result['source']}, "
-                f"mean={result['mean']:.4g}) | also in the Map tab for 6-8"
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "PCD map error", str(exc))
-
-    def _make_pld(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        try:
-            result = self.service.make_pld_map(
-                name, register=bool(self.map_register.currentData())
-            )
-            self.service.map_to_tools(name, "pld")  # also in the Map tab, for sections 6-8
-            self._refresh_meta()
-            self.map_tools.refresh(select=("pld", "data"))
-            idx = self.node_combo.findData(result["display_node"])
-            if idx >= 0:
-                self.node_combo.setCurrentIndex(idx)
-            self.view_tabs.setCurrentIndex(0)
-            self.status_label.setText(
-                f"PLD map ({result['formula']}, source={result['source']}, "
-                f"mean={result['mean']:.4g}) | also in the Map tab for 6-8"
-            )
-        except Exception as exc:
-            QMessageBox.critical(self, "PLD map error", str(exc))
-
-    def _export_map(self):
-        name = self._require_dataset()
-        if not name:
-            return
-        node = self.node_combo.currentData() or ""
-        kind = None
-        if isinstance(node, str) and node.startswith("analysis/"):
-            kind = node.split("/", 1)[1]
-        else:
-            maps = (self._meta or {}).get("analysis_maps") or []
-            if not maps:
-                QMessageBox.warning(self, "No map", "Make a PCD/PLD map first.")
-                return
-            kind = maps[-1]
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Export map TIFF", f"{name}_{kind}.tif", "TIFF (*.tif)"
-        )
-        if not path:
-            return
-        try:
-            out = self.service.export_analysis_map(name, kind, path, png=True)
-            self.status_label.setText(f"Exported {out} (+ .png)")
-        except Exception as exc:
-            QMessageBox.critical(self, "Export error", str(exc))
