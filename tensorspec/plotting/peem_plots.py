@@ -285,3 +285,118 @@ def save_three_panel(panels: list[tuple[str, np.ndarray]], path, um_per_px: floa
                                      color="black", lw=3, solid_capstyle="butt")
     fig.savefig(str(path))
     return str(path)
+
+
+# ------------------------------------------------------------------ spatial domain analysis
+UP_COLOR, DOWN_COLOR = "#b2182b", "#2166ac"
+
+
+def domain_step(ax, img: np.ndarray, step: str, um_per_px: float | None = None, title: str = ""):
+    """One step of the domain analysis (core/peem/domain_analysis.STEPS) with axes in um (px without a
+    pixel size). Returns the image artist (for a colour bar) or None for categorical steps."""
+    from matplotlib.colors import ListedColormap
+
+    a = np.asarray(img, float)
+    ny, nx = a.shape
+    s = um_per_px or 1.0
+    ext = [0, nx * s, ny * s, 0]
+    kw = {"extent": ext, "interpolation": "nearest"}
+    im = None
+    if step in ("three_states",):
+        ax.imshow(np.where(a == 0, np.nan, a), cmap=ListedColormap([DOWN_COLOR, UP_COLOR]), vmin=-1, vmax=1, **kw)
+    elif step in ("up_down", "skeleton"):
+        shown = np.where(a == 0, np.nan, a)
+        if step == "skeleton":
+            ax.set_facecolor("white")
+        ax.imshow(shown, cmap=ListedColormap([DOWN_COLOR, UP_COLOR]), vmin=-1, vmax=1, **kw)
+    elif step in ("flake", "walls"):
+        ax.imshow(a, cmap="gray", vmin=0, vmax=1, **kw)
+    elif step in ("asymmetry", "flattened"):
+        lim = float(np.nanpercentile(np.abs(a), 99)) or 1.0
+        im = ax.imshow(a, cmap="RdBu_r", vmin=-lim, vmax=lim, **kw)
+    elif step == "width_map":
+        im = ax.imshow(a, cmap="viridis", **kw)
+    elif step == "local_std":
+        im = ax.imshow(a, cmap="magma", **kw)
+    else:
+        im = ax.imshow(a, cmap="gray", **kw)
+    unit = "µm" if um_per_px else "px"
+    ax.set_xlabel(f"x ({unit})")
+    ax.set_ylabel(f"y ({unit})")
+    if title:
+        ax.set_title(title, fontsize=8)
+    return im
+
+
+def zoom_to_mask(ax, mask: np.ndarray, um_per_px: float | None = None, margin_um: float = 1.0) -> None:
+    """Limit the axes to a mask's bounding box plus a margin (top-left origin kept)."""
+    ys, xs = np.nonzero(np.asarray(mask, bool))
+    if not ys.size:
+        return
+    s = um_per_px or 1.0
+    pad = margin_um if um_per_px else 20
+    ny, nx = np.shape(mask)
+    ax.set_xlim(max(xs.min() * s - pad, 0), min((xs.max() + 1) * s + pad, nx * s))
+    ax.set_ylim(min((ys.max() + 1) * s + pad, ny * s), max(ys.min() * s - pad, 0))
+
+
+def domain_numbers_text(m: dict) -> str:
+    """Short caption of the main numbers of one analysed map."""
+    if not m:
+        return ""
+    u = m.get("width_unit", "px")
+    return (f"f_up {m.get('f_up', np.nan):.2f}   f_down {m.get('f_down', np.nan):.2f}   "
+            f"<m_z> {m.get('mz', np.nan):+.3f}\n"
+            f"width up / down {m.get(f'width_up_{u}', np.nan):.0f} / {m.get(f'width_down_{u}', np.nan):.0f} {u}   "
+            f"period {m.get(f'period_{u}', np.nan):.0f} {u}")
+
+
+def domain_sizes(ax, areas: dict) -> None:
+    """Domain-size distribution (areas of single up / down domains), log-spaced bins."""
+    up, dn = np.asarray(areas["up"], float), np.asarray(areas["down"], float)
+    allv = np.concatenate([up, dn])
+    allv = allv[allv > 0]
+    if not allv.size:
+        return
+    bins = np.logspace(np.log10(allv.min()), np.log10(allv.max()) + 1e-9, 24)
+    ax.hist(up, bins=bins, histtype="step", color=UP_COLOR, label=f"up ({up.size})")
+    ax.hist(dn, bins=bins, histtype="step", color=DOWN_COLOR, label=f"down ({dn.size})")
+    ax.set_xscale("log")
+    unit = "µm²" if areas.get("unit") == "um2" else "px²"
+    ax.set_xlabel(f"domain area ({unit})")
+    ax.set_ylabel("domains")
+    ax.legend(frameon=False, fontsize=7)
+
+
+def save_domain_step_pdf(path, img: np.ndarray, step: str, um_per_px: float | None, title: str,
+                         numbers: dict | None = None, flake: np.ndarray | None = None) -> None:
+    """Editable PDF (TrueType text, axes in um) of one domain-analysis step, 8.7 cm wide."""
+    import matplotlib
+    from matplotlib.figure import Figure
+
+    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
+                                "font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+                                "font.size": 7, "axes.linewidth": 0.6}):
+        fig = Figure(figsize=(3.42, 3.2), layout="constrained")
+        ax = fig.add_subplot(111)
+        im = domain_step(ax, img, step, um_per_px, title)
+        if flake is not None:
+            zoom_to_mask(ax, flake, um_per_px)
+        if im is not None:
+            fig.colorbar(im, ax=ax, fraction=0.04, pad=0.02).outline.set_linewidth(0.5)
+        if numbers:
+            ax.set_title((title + "\n" if title else "") + domain_numbers_text(numbers), fontsize=6)
+        fig.savefig(path)
+
+
+def save_domain_sizes_pdf(path, areas: dict, title: str = "") -> None:
+    import matplotlib
+    from matplotlib.figure import Figure
+
+    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "font.size": 7}):
+        fig = Figure(figsize=(3.42, 2.4), layout="constrained")
+        ax = fig.add_subplot(111)
+        domain_sizes(ax, areas)
+        if title:
+            ax.set_title(title, fontsize=7)
+        fig.savefig(path)
