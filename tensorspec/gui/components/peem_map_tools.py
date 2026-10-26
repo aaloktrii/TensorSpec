@@ -98,6 +98,13 @@ class PeemMapTools:
         self.show_combo.activated.connect(lambda *_: self._select(*self.show_combo.currentData().split("|", 1)))
         af.addRow("Show:", self.show_combo)
         lay.addWidget(asym)
+        if self._send_to_sum_rule is not None:
+            b = action_style(QPushButton("→ Sum Rule (corrected pairs)"), "handover")
+            b.setToolTip("Open the Sum Rule window with this dataset: ROI spectra, background, sum rule\n"
+                         "(the XMCD sum rule needs CP / CM; LH / LV give spectra and background)")
+            b.clicked.connect(self._send)
+            lay.addWidget(b)
+            self.btn_sum_rule = b
 
         an = QGroupBox("5. Image analysis")
         bold_titles(an)
@@ -214,13 +221,6 @@ class PeemMapTools:
         cf.addRow(row)
         lay.addWidget(cg)
 
-        if self._send_to_sum_rule is not None:
-            b = action_style(QPushButton("→ Sum Rule (corrected pairs)"), "handover")
-            b.setToolTip("Open the Sum Rule window with this dataset: ROI spectra, background, sum rule\n"
-                         "(the XMCD sum rule needs CP / CM; LH / LV give spectra and background)")
-            b.clicked.connect(self._send)
-            lay.addWidget(b)
-            self.btn_sum_rule = b
         self.status = QLabel("")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
