@@ -83,8 +83,10 @@ Grand App
 	- [x] DataViewer extras (off by default): cmap / symmetric limits / draw tools / Play (`stack_player`)
 	- [x] Beamtime batch scripts + library: `scripts/{ue49,esm,als}/…`, `core/peem/{dichroism,registration,domains,ue49/batch,esm/batch}`, `plotting/ue49_preview.py`
 	- [x] Frame tab uses DataViewer; **Make PCD/PLD** + export on same PEEM panel (no second suite tab)
-	- [x] Calculate + analyse in the PEEM panel (`gui/components/peem_map_tools.py`, service steps `gui/services/peem_steps/`): CP/CM pairs after Stack Pairs + Drift → asymmetry map ((CM−CP)/(CM+CP), (LV−LH)/(LV+LH)), line profiles (PDF), histogram, FFT, domain width, ROI statistics, SDA domain map, export (TIFF + colour PNG, options)
+	- [x] Calculate + analyse in the PEEM panel (`gui/components/peem_map_tools.py`, service steps `gui/services/peem_steps/`): CP/CM pairs after Stack Pairs + Drift → asymmetry map ((CM−CP)/(CM+CP), (LV−LH)/(LV+LH)), line profiles (PDF), histogram, FFT, ROI statistics (split at the background zero), export (TIFF + colour PNG, options)
 	- [x] **→ Sum Rule**: corrected CP/CM pairs → new dataset with an energy per pair → Sum Rule window (XAS suite, From PEEM)
+	- [x] Spatial domain analysis (`core/peem/domain_analysis.py`, `peem_steps/domain_analysis.py`, Analysis tab **Domains** in `gui/components/peem_domain_view.py`): maps pushed from the Map view (raw values or as shown, with ROI and background region) → TV denoise, flake (pushed / automatic), background (Gaussian / region / none), FFT filter, three states, up / down, width map, skeleton, walls → f_up, f_down, ⟨m_z⟩, counts, widths, period, walls, stripe direction and alignment; table for all pushed maps, CSV and editable PDF (µm axes); numbers checked against the SDA toolkit
+	- [ ] Domain analysis: noise floor / brightness-artifact checks (not now)
 	- [ ] More drift methods (sub-pixel, SPEEM Igor ports) and stack clean-up in the panel (back end present: `core/peem/drift.py`, `peem_steps/drift_stack.py`, `cleanup.py`)
 - [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/Raman/DFT/ARPES/Transport/ML (prevent drag-to-zero)
 - [x] XAS Suite (`core/io/xas_loaders.py`, `gui/services/xas_service.py`, `gui/components/xas_panel.py`)
