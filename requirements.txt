@@ -61,6 +61,7 @@ psutil==5.9.8
 
 # --- PEEM / imaging ---
 tifffile==2026.3.3
+scikit-image>=0.24   # PEEM spatial domain analysis (TV denoise, Otsu, skeleton, contours)
 
 # --- ML suite ---
 umap-learn>=0.5.12
