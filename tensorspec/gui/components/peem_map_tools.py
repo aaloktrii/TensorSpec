@@ -74,7 +74,6 @@ class PeemMapTools:
         self.controls = QWidget()
         lay = QVBoxLayout(self.controls)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(12)
 
         asym = QGroupBox("4. Dichroism map")
         bold_titles(asym)

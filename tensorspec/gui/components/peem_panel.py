@@ -89,7 +89,6 @@ class PeemPanel(QWidget):
         # --- LEFT: controls (forms only — plots live on right tabs) ---
         control_panel = QWidget()
         control_layout = QVBoxLayout(control_panel)
-        control_layout.setSpacing(12)
 
         load_group = QGroupBox("1. Load")
         bold_titles(load_group)
