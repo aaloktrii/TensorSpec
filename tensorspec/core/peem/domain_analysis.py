@@ -126,13 +126,44 @@ def local_std(img: np.ndarray, window: int = 9) -> np.ndarray:
     return np.sqrt(np.maximum(sq - m * m, 0.0))
 
 
-def auto_flake(texture: np.ndarray, min_px: int = 800, closing_px: int = 5) -> np.ndarray:
+def edge_strips(a: np.ndarray, k: float = 2.0, max_frac: float = 0.2, margin: int = 5) -> np.ndarray:
+    """Mask of the field without drift strips: rows / columns at an edge whose scatter is above k times the
+    median row / column scatter (the area left uncovered by the drift shift, filled from the edge).
+    At most max_frac of the field is cut on each side; margin px more are cut where a strip is found."""
+    a = np.asarray(a, float)
+    keep = np.isfinite(a)
+    ny, nx = a.shape
+    for axis, n in ((0, nx), (1, ny)):  # axis 0: scatter of each column; axis 1: of each row
+        sd = np.nanstd(a, axis=axis)
+        ref = float(np.nanmedian(sd))
+        hi = sd > k * ref
+        lim = int(max_frac * n)
+        for side in (0, 1):
+            idx = range(lim) if side == 0 else range(n - 1, n - 1 - lim, -1)
+            cut = 0
+            for i in idx:
+                if not hi[i]:
+                    break
+                cut += 1
+            if cut:
+                cut = min(cut + margin, lim)
+                sl = slice(0, cut) if side == 0 else slice(n - cut, n)
+                if axis == 0:
+                    keep[:, sl] = False
+                else:
+                    keep[sl, :] = False
+    return keep
+
+
+def auto_flake(texture: np.ndarray, min_px: int = 800, closing_px: int = 5,
+               valid: np.ndarray | None = None) -> np.ndarray:
     """(d) Otsu threshold of the texture map, closing (disk), hole filling, small blobs removed,
     largest kept."""
     from skimage import morphology
     from skimage.filters import threshold_otsu
 
-    roi = texture > threshold_otsu(texture)
+    valid = np.ones(texture.shape, bool) if valid is None else np.asarray(valid, bool)
+    roi = (texture > threshold_otsu(texture[valid])) & valid
     roi = morphology.closing(roi, morphology.disk(int(closing_px)))
     roi = ndi.binary_fill_holes(roi)
     roi = _remove_small(roi, int(min_px))
@@ -281,7 +312,7 @@ def analyze(a: np.ndarray, *, um_per_px: float | None = None, roi: np.ndarray | 
     tex = local_std(den, p["contrast_window"])
 
     if p["flake"] == "auto":
-        flake = auto_flake(tex, p["min_flake_px"])
+        flake = auto_flake(tex, p["min_flake_px"], valid=edge_strips(a))
     elif p["flake"] == "pushed" and roi is not None:
         flake = np.asarray(roi, bool)
     elif p["flake"] in ("pushed", "all"):

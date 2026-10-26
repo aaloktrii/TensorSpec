@@ -829,7 +829,7 @@ class PeemMapTools:
         view = self.viewer.primary_view()
         gamma = float(view.spin_gamma.value()) if view is not None else 1.0
         res = self._call(self.service.push_to_domains, name, kind, var, mode, lim[0], lim[1], gamma,
-                         True, self.use_bg.isChecked())
+                         True, self.use_bg.isChecked(), self._shown_look().get("cmap"))
         if res is None:
             return
         self.status.setText(f"Pushed {res['source']} ({mode}) of {name} to Analysis → Domains as {res['label']}.")
