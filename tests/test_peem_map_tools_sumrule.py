@@ -368,3 +368,26 @@ def test_draw_line_by_dragging_stays_on_and_snaps(qapp, tmp_path):
     QTest.keyClick(c, Qt.Key_Escape)
     pump()
     assert not t.btn_line.isChecked() and not view.tool_active
+
+
+def test_symmetric_colour_range_with_a_typed_range(qapp, tmp_path):
+    """Sym ± keeps a typed colour range symmetric about the centre (0 or the median); the edited box sets
+    the half-width; without Sym the boxes are free."""
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    v = t.viewer.primary_view()
+    v.chk_sym.setChecked(True)
+    v.combo_center.setCurrentText("0")
+    t.range_max.setValue(0.03)
+    lo, hi = t.viewer.color_limits()
+    assert (lo, hi) == pytest.approx((-0.03, 0.03))
+    t.range_min.setValue(-0.01)
+    assert t.viewer.color_limits() == pytest.approx((-0.01, 0.01))
+    v.chk_sym.setChecked(False)
+    t.range_max.setValue(0.05)
+    assert t.viewer.color_limits() == pytest.approx((-0.01, 0.05))
