@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from tensorspec.gui.components.peem_map_common import action_style, bold_titles
 from tensorspec.gui.services.peem_service import PeemService
 
 
@@ -51,6 +52,7 @@ class PeemSumRulePanel(QWidget):
         control_layout = QVBoxLayout(control_panel)
 
         data_group = QGroupBox("1. PEEM data")
+        bold_titles(data_group)
         data_form = QFormLayout(data_group)
         row = QHBoxLayout()
         self.dataset_combo = QComboBox()
@@ -66,6 +68,7 @@ class PeemSumRulePanel(QWidget):
         control_layout.addWidget(data_group)
 
         roi_group = QGroupBox("2. Region")
+        bold_titles(roi_group)
         roi_form = QFormLayout(roi_group)
         self.roi_mode = QComboBox()
         self.roi_mode.addItem("Whole image", "all")
@@ -83,6 +86,7 @@ class PeemSumRulePanel(QWidget):
 
         # --- sections moved unchanged from the PEEM panel (4. Background, 5. XMCD Sum Rule) ---
         bg_group = QGroupBox("3. Background")
+        bold_titles(bg_group)
         bg_form = QFormLayout(bg_group)
         self.bg_node = QComboBox()
         self.bg_node.addItem("Raw", "raw")
@@ -120,6 +124,7 @@ class PeemSumRulePanel(QWidget):
         self._sync_bg_method_ui()
 
         sum_group = QGroupBox("4. XMCD Sum Rule")
+        bold_titles(sum_group)
         sum_form = QFormLayout(sum_group)
         self.sum_nh = QDoubleSpinBox()
         self.sum_nh.setRange(0.0, 20.0)
@@ -147,7 +152,7 @@ class PeemSumRulePanel(QWidget):
         sum_btns = QHBoxLayout()
         self.btn_sum_preview = QPushButton("Preview Sum Rule")
         self.btn_sum_preview.clicked.connect(self._sumrule_preview)
-        self.btn_sum_apply = QPushButton("Apply Sum Rule")
+        self.btn_sum_apply = action_style(QPushButton("Apply Sum Rule"), "map")
         self.btn_sum_apply.clicked.connect(self._sumrule_apply)
         sum_btns.addWidget(self.btn_sum_preview)
         sum_btns.addWidget(self.btn_sum_apply)
