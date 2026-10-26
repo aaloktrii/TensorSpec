@@ -160,27 +160,41 @@ def test_mismatched_sweeps_are_regrouped_by_energy(tmp_path):
     assert np.abs(r + 0.04).max() < 0.025  # bins of 1.25 eV on a 4 eV-wide edge; pairing in order is up to 5 eV off
 
 
-def test_make_pcd_map_feeds_the_map_tools(qapp, tmp_path, monkeypatch):
-    """Section 4 (Make PCD) -> the same map in the Map tab, ready for sections 6-8."""
+def test_one_dichroism_map_button_with_and_without_stack_pairs(qapp, tmp_path, monkeypatch):
+    """Section 4: without Stack Pairs the map is made from all frames (make_pcd_map, every frame
+    registered) and handed to the tools; after Stack Pairs from the corrected pairs, with an energy window."""
     from PySide6.QtWidgets import QMessageBox
     from tensorspec.gui.components.peem_panel import PeemPanel
 
     errors = []
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: errors.append(a[2])))
     p = PeemPanel()
-    p._dataset_name = _images(tmp_path, p.service)
-    p.service.separate(p._dataset_name)
-    p._refresh_meta()
-    p._make_pcd()
-    assert not errors, errors
     t = p.map_tools
-    assert t._shown() == ("pcd", "data")
-    assert "stack" in p.service.list_products("img")
+    mz = synthetic.stripe_domains(64, 64, period_px=16)
+    cp, cm = synthetic.helicity_stacks(mz, a0=0.05, n_cp=3, n_cm=3, noise=1.0)
+    pos = synthetic.write_ue49_scan(tmp_path, "X_0002", cp, [f"Cr_pos_000{i}" for i in range(3)])
+    neg = synthetic.write_ue49_scan(tmp_path, "X_0003", cm, [f"Cr_neg_000{i}" for i in range(3)])
+    p.service.load_beamline([pos, neg], "img", tpx3=False)  # no Stack Pairs
+    p._dataset_name = "img"
+    p._refresh_meta()
+    assert t.btn_asymmetry.text() == "Make XMCD map (CP / CM)"
+    t.e_lo.setText("570")
+    t._asymmetry()
+    assert errors and "Stack Pairs" in errors[-1]  # an energy window needs the pairs
+    t.e_lo.clear()
+    t._asymmetry()
+    assert len(errors) == 1, errors
+    assert t._shown() == ("pcd", "data") and "all frames" in t.status.text()
     pcd = global_workspace.pull_analysis_data("img", "pcd")
     assert "difference" in pcd.data_vars and pcd.attrs["formula"] == "(CM-CP)/(CM+CP)"
+    assert p.view_tabs.currentWidget() is t.map_view
+    p.service.pair("img", "CP_CM")
+    p._refresh_meta()
+    t._asymmetry()
+    assert "3 pairs" in t.status.text() and t._shown() == ("pcd", "data")
     t._domain_width()
     assert "domain width" in t.status.text()
-
 
 def test_drift_uses_the_pairs_after_stack_pairs(qapp, tmp_path, monkeypatch):
     """After Stack Pairs, Drift works on the pairs (Source: Processed), so Separate still works;
@@ -226,7 +240,7 @@ def test_map_view_lists_only_useful_layers(qapp, tmp_path):
     p = PeemPanel()
     p._dataset_name = _images(tmp_path, p.service)
     p._refresh_meta()
-    assert p.map_tools.btn_asymmetry.text() == "Stack CP / CM → XMCD map"
+    assert p.map_tools.btn_asymmetry.text() == "Make XMCD map (CP / CM)"
     p.map_tools._asymmetry()
     p.map_tools._domain_map()
     v = p.map_tools.viewer.primary_view()
