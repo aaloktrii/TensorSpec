@@ -563,7 +563,10 @@ class PeemPanel(QWidget):
         n = int((self._meta or {}).get("n_frames", 1) or 1)
         self.drift_ref.setMaximum(max(0, n - 1))
         self._refresh_frame_view()
-        self.map_tools.set_pair((self._meta or {}).get("channel_tags"))
+        meta = self._meta or {}
+        pols = set(meta.get("pol") or [])  # no Stack Pairs yet: name the pair from the frames' polarizations
+        self.map_tools.set_pair(meta.get("channel_tags") or next(
+            (list(p) for p in (("CP", "CM"), ("LH", "LV")) if set(p) <= pols), None))
         if (self._meta or {}).get("processed_is_paired"):  # drift the pairs, not the raw frames
             self.drift_source.setCurrentIndex(self.drift_source.findData("processed"))
         self.map_tools.refresh()

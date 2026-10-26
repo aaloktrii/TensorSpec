@@ -19,6 +19,7 @@ from matplotlib.figure import Figure
 import matplotlib.patches as patches
 
 from tensorspec.core.data_models import TensorData
+from tensorspec.gui.components.flow_layout import FlowLayout, group
 from tensorspec.core.ml.ssl.reference import (
     FloorReference,
     build_roi_dict,
@@ -190,10 +191,7 @@ class SliceWidget(QFrame):
 
         # ROW display: profiles / contrast / sync (was crowding row1)
         self.row_display = QWidget()
-        row_disp = QHBoxLayout(self.row_display)
-        row_disp.setContentsMargins(0, 0, 0, 0)
-
-        row_disp.addWidget(QLabel("Colormap:"))
+        row_disp = FlowLayout(self.row_display)  # wraps to a new line when narrow (no overlapping widgets)
         self.combo_cmap = QComboBox()
         self.combo_cmap.addItems(["magma", "viridis", "plasma", "inferno", "cividis", "hot", "cool", "gray", "twilight",
                                   "bwr", "RdBu_r", "grey", "blue", "terrain"])
@@ -203,7 +201,6 @@ class SliceWidget(QFrame):
         )
         self.combo_cmap.setCurrentText("magma")
         self.combo_cmap.currentIndexChanged.connect(self.redraw)
-        row_disp.addWidget(self.combo_cmap)
 
         self.btn_export = QPushButton("Save EPS/PDF")
         self.btn_export.setToolTip(
@@ -211,18 +208,14 @@ class SliceWidget(QFrame):
             "axis letters stay editable text. Cursor lines are left out."
         )
         self.btn_export.clicked.connect(self.export_vector_figure)
-        row_disp.addWidget(self.btn_export)
 
         self.chk_profiles = QCheckBox("XY Profiles")
         self.chk_profiles.stateChanged.connect(self.toggle_profiles)
-        row_disp.addWidget(self.chk_profiles)
 
         self.combo_profile_mode = QComboBox()
         self.combo_profile_mode.addItems(["Raw (Sum)", "Mean", "Normalized to Max"])
         self.combo_profile_mode.currentIndexChanged.connect(self.redraw)
-        row_disp.addWidget(self.combo_profile_mode)
 
-        row_disp.addWidget(QLabel("Contrast %:"))
         self.sl_contrast = QSlider(Qt.Horizontal)
         self.sl_contrast.setRange(1, 100)
         self.sl_contrast.setValue(100)
@@ -232,9 +225,7 @@ class SliceWidget(QFrame):
             "Scale color limits from data min toward max (100% = full range)."
         )
         self.sl_contrast.valueChanged.connect(self.redraw)
-        row_disp.addWidget(self.sl_contrast)
 
-        row_disp.addWidget(QLabel("γ:"))
         self.spin_gamma = QDoubleSpinBox()
         self.spin_gamma.setRange(0.1, 5.0)
         self.spin_gamma.setValue(1.0)
@@ -243,9 +234,7 @@ class SliceWidget(QFrame):
         self.spin_gamma.setFixedWidth(60)
         self.spin_gamma.setToolTip("Gamma for intensity display (1 = linear).")
         self.spin_gamma.valueChanged.connect(self.redraw)
-        row_disp.addWidget(self.spin_gamma)
 
-        row_disp.addWidget(QLabel("Norm:"))
         self.combo_norm = QComboBox()
         self.combo_norm.setMinimumWidth(140)
         self.combo_norm.setToolTip(
@@ -255,21 +244,17 @@ class SliceWidget(QFrame):
             "Each snapped panel has its own Norm."
         )
         self.combo_norm.currentIndexChanged.connect(self.redraw)
-        row_disp.addWidget(self.combo_norm)
 
         self.chk_sym = QCheckBox("Sym ±")
         self.chk_sym.setToolTip("Symmetric colour limits c ± L (white = c with bwr); L = contrast % of the 99th percentile of |v - c|")
         self.chk_sym.toggled.connect(self.redraw)
-        row_disp.addWidget(self.chk_sym)
         self.combo_center = QComboBox()
         self.combo_center.addItems(["0", "median"])
         self.combo_center.setToolTip("Centre of the symmetric limits")
         self.combo_center.currentIndexChanged.connect(self.redraw)
-        row_disp.addWidget(self.combo_center)
         self.chk_image_origin = QCheckBox("Top-left origin")
         self.chk_image_origin.setToolTip("Image convention: first row at the top (PEEM / camera images)")
         self.chk_image_origin.toggled.connect(self.redraw)
-        row_disp.addWidget(self.chk_image_origin)
 
         self.chk_sync = QCheckBox("Sync")
         self.chk_sync.setChecked(False)
@@ -287,41 +272,39 @@ class SliceWidget(QFrame):
             "Only viewers with Sync ON and this same group number share crosshairs."
         )
         self.chk_sync.toggled.connect(self.spin_sync_group.setEnabled)
-        row_disp.addWidget(self.chk_sync)
-        row_disp.addWidget(self.spin_sync_group)
+        self._sync_group_box = group(self.chk_sync, self.spin_sync_group)
+        for widgets in ((QLabel("Colormap:"), self.combo_cmap), (self.btn_export,),
+                        (self.chk_profiles, self.combo_profile_mode), (QLabel("Contrast %:"), self.sl_contrast),
+                        (QLabel("γ:"), self.spin_gamma), (QLabel("Norm:"), self.combo_norm),
+                        (self.chk_sym, self.combo_center), (self.chk_image_origin,)):
+            row_disp.addWidget(group(*widgets))
+        row_disp.addWidget(self._sync_group_box)
         if getattr(self.parent_panel, "_compact", False):  # embedded single view: no sync / close
-            for w in (self.chk_sync, self.spin_sync_group, self.btn_close):
+            for w in (self._sync_group_box, self.btn_close):
                 w.setVisible(False)
-        row_disp.addStretch(1)
 
         # ROW 2 (collapsible via Toggle UI): Δ + ortho
         self.row2_widget = QWidget()
-        row2 = QHBoxLayout(self.row2_widget)
-        row2.setContentsMargins(0, 0, 0, 0)
-
-        row2.addWidget(QLabel("ΔX:"))
+        row2 = FlowLayout(self.row2_widget)
         self.spin_dx = QSpinBox(); self.spin_dx.setRange(0, 100); self.spin_dx.setSuffix(" px")
         self.slider_dx = QSlider(Qt.Horizontal); self.slider_dx.setRange(0, 100); self.slider_dx.setFixedWidth(50)
         self.spin_dx.valueChanged.connect(self.slider_dx.setValue)
         self.slider_dx.valueChanged.connect(self.spin_dx.setValue)
         self.spin_dx.valueChanged.connect(self._on_delta_changed)
-        row2.addWidget(self.spin_dx); row2.addWidget(self.slider_dx)
 
-        row2.addWidget(QLabel("ΔY:"))
         self.spin_dy = QSpinBox(); self.spin_dy.setRange(0, 100); self.spin_dy.setSuffix(" px")
         self.slider_dy = QSlider(Qt.Horizontal); self.slider_dy.setRange(0, 100); self.slider_dy.setFixedWidth(50)
         self.spin_dy.valueChanged.connect(self.slider_dy.setValue)
         self.slider_dy.valueChanged.connect(self.spin_dy.setValue)
         self.spin_dy.valueChanged.connect(self._on_delta_changed)
-        row2.addWidget(self.spin_dy); row2.addWidget(self.slider_dy)
 
-        row2.addWidget(QLabel("  |  "))
         self.chk_ortho = QCheckBox("Extract Orthogonal:")
         self.chk_ortho.stateChanged.connect(self.toggle_profiles)
         self.combo_ortho = QComboBox()
         self.combo_ortho.currentIndexChanged.connect(self.redraw)
-        row2.addWidget(self.chk_ortho)
-        row2.addWidget(self.combo_ortho)
+        for widgets in ((QLabel("ΔX:"), self.spin_dx, self.slider_dx), (QLabel("ΔY:"), self.spin_dy, self.slider_dy),
+                        (self.chk_ortho, self.combo_ortho)):
+            row2.addWidget(group(*widgets))
 
         ctrl_layout_v.addLayout(row1)
         ctrl_layout_v.addWidget(self.row_display)
@@ -1827,9 +1810,10 @@ class DataViewerPanel(QWidget):
         self.coordsChanged.emit()
 
     # ------------------------------------------------------------- host-panel API
-    def set_layers(self, layers: dict, select: str | None = None) -> None:
+    def set_layers(self, layers: dict, select: str | None = None, show_data: bool = True) -> None:
         """Replace the extra layers (name -> array; 2-D (y, x) maps work for any N-D data) and
-        refresh the layer menus; ``select`` shows that layer ('Intensity' = the data)."""
+        refresh the layer menus; ``select`` shows that layer ('Intensity' = the data). show_data=False
+        leaves 'Intensity' out of the menu (when one of the layers already is the data)."""
         if self.tensor_data is None:
             return
         meta = dict(self.tensor_data.metadata or {})
@@ -1839,7 +1823,8 @@ class DataViewerPanel(QWidget):
             current = select or view.combo_layer.currentText()
             view.combo_layer.blockSignals(True)
             view.combo_layer.clear()
-            view.combo_layer.addItem("Intensity")
+            if show_data:
+                view.combo_layer.addItem("Intensity")
             for name in layers:
                 view.combo_layer.addItem(name)
             i = view.combo_layer.findText(current)

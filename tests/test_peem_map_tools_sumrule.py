@@ -217,3 +217,18 @@ def test_draw_buttons_bring_up_the_map_view(qapp, tmp_path):
     assert p.map_tools.viewer.primary_view().tool_active and "click the start" in p.map_tools.status.text()
     p.map_tools.viewer.primary_view()._finish_tool({"kind": "line", "a": (10, 5), "b": (10, 50)})
     assert p.map_tools.line_edit.text() == "5, 10, 50, 10" and "Line (5, 10)" in p.map_tools.status.text()
+
+
+def test_map_view_lists_only_useful_layers(qapp, tmp_path):
+    """No sums, no copies of the stacked means under the map, no working arrays, no 'Intensity'."""
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    assert p.map_tools.btn_asymmetry.text() == "Stack CP / CM → XMCD map"
+    p.map_tools._asymmetry()
+    p.map_tools._domain_map()
+    v = p.map_tools.viewer.primary_view()
+    assert [v.combo_layer.itemText(i) for i in range(v.combo_layer.count())] == [
+        "stack · cp+cm", "stack · mean_cp", "stack · mean_cm", "pcd", "pcd · difference", "domain_map"]
