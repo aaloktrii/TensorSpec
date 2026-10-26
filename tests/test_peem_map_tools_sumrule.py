@@ -100,13 +100,13 @@ def test_peem_panel_sections_and_sum_rule_window(qapp, tmp_path, monkeypatch):
     t._add_profile()
     t._histogram()
     assert len(p.service.list_profiles("img")) == 1 and t.plot_title.text().startswith("histogram")
-    t._domain_width()
-    assert "domain width" in t.status.text()
     t._on_roi({"kind": "rect", "x0": 4, "x1": 60, "y0": 4, "y1": 60})
     t._roi_stats()
-    assert "up 0.5" in t.status.text() or "up 0.4" in t.status.text()
-    t._domain_map()
-    assert t._shown() == ("domain_map", "data")
+    assert "f_up 0.5" in t.status.text() or "f_up 0.4" in t.status.text()
+    t._push()  # -> Analysis / Domains
+    assert t.analysis_view.currentWidget() is t.domain_view and t.domain_view.items.count() == 1
+    t.domain_view._run(all_items=True)
+    assert t.domain_view.table.rowCount() == 1 and "width up / down" in t.domain_view.caption.text()
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "m.tif"), "")))
     t._select("pcd")
     t._export()
@@ -193,8 +193,6 @@ def test_one_dichroism_map_button_with_and_without_stack_pairs(qapp, tmp_path, m
     p._refresh_meta()
     t._asymmetry()
     assert "3 pairs" in t.status.text() and t._shown() == ("pcd", "data")
-    t._domain_width()
-    assert "domain width" in t.status.text()
 
 def test_drift_uses_the_pairs_after_stack_pairs(qapp, tmp_path, monkeypatch):
     """After Stack Pairs, Drift works on the pairs (Source: Processed), so Separate still works;
@@ -242,7 +240,60 @@ def test_map_view_lists_only_useful_layers(qapp, tmp_path):
     p._refresh_meta()
     assert p.map_tools.btn_asymmetry.text() == "Make XMCD map (CP / CM)"
     p.map_tools._asymmetry()
-    p.map_tools._domain_map()
+    p.map_tools._push()  # a pushed map is not a Map layer
     v = p.map_tools.viewer.primary_view()
     assert [v.combo_layer.itemText(i) for i in range(v.combo_layer.count())] == [
-        "stack · cp+cm", "stack · mean_cp", "stack · mean_cm", "pcd", "pcd · difference", "domain_map"]
+        "stack · cp+cm", "stack · mean_cp", "stack · mean_cm", "pcd", "pcd · difference"]
+
+
+def test_push_raw_or_as_shown_with_roi_and_background(qapp, tmp_path, monkeypatch):
+    """Section 6 -> Analysis / Domains: both push modes, the ROI (auto outline, saved and reloaded) and the
+    background region (only while ticked) go along; ROI statistics split at the background mean."""
+    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    errors = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: errors.append(a[2])))
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
+    p = PeemPanel()
+    t, s = p.map_tools, p.service
+    p._dataset_name = _images(tmp_path, s)
+    p._refresh_meta()
+    t._asymmetry()
+    t._on_roi({"kind": "rect", "x0": 4, "x1": 59, "y0": 4, "y1": 59})
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "r.json"), "")))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(tmp_path / "r.json"), "")))
+    t._save_outline()
+    t._set_roi(None)
+    t._load_outline()
+    assert s.get_rois("img")["roi"]["x1"] == 59
+    t.use_bg.setChecked(True)
+    t._roi_stats()
+    assert errors and "none is drawn" in errors[-1]
+    t._on_bg({"kind": "rect", "x0": 0, "x1": 3, "y0": 0, "y1": 63})
+    t._roi_stats()
+    assert "zero = background mean" in t.status.text()
+    t.push_mode.setCurrentIndex(1)  # as shown
+    t._push()
+    t.use_bg.setChecked(False)
+    t.push_mode.setCurrentIndex(0)
+    t._push()
+    ins = s.domain_inputs()
+    assert [i["mode"] for i in ins] == ["shown", "raw"]
+    dv = t.domain_view
+    dv.background.setCurrentIndex(dv.background.findData("region"))
+    dv.items.clearSelection()
+    dv.items.item(0).setSelected(True)
+    dv._run(all_items=False)  # shown + its background region
+    assert s.domain_result("img", ins[0]["label"])["split"] == "zero"
+    dv.items.clearSelection()
+    dv.items.item(1).setSelected(True)
+    n = len(errors)
+    dv._run(all_items=False)  # raw, pushed without a background region
+    assert len(errors) == n + 1 and "background region" in errors[-1]
+    dv.step.setCurrentIndex(dv.step.findData("width_map"))
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "d.pdf"), "")))
+    dv.items.clearSelection()
+    dv.items.item(0).setSelected(True)
+    dv._export_pdf()
+    assert (tmp_path / "d.pdf").stat().st_size > 1000
