@@ -905,15 +905,21 @@ class SliceWidget(QFrame):
             return float(a[0]) if a.size else 0.0
         return float(a[0] + idx * (a[-1] - a[0]) / (a.size - 1))
 
-    def start_tool(self, kind: str, callback, color: str = "magenta") -> None:
+    def start_tool(self, kind: str, callback, color: str = "magenta", sticky: bool = False,
+                   on_cancel=None) -> None:
         """Draw a shape on this view: kind 'rect' | 'polygon' | 'line'. ``callback(shape)``
         receives a dict in pixel-index coordinates of the displayed dims:
         rect {kind, x0, x1, y0, y1}; polygon {kind, points: [[x, y], ...]};
-        line {kind, a: (y, x), b: (y, x)}. The crosshair is paused while the tool is active."""
+        line {kind, a: (y, x), b: (y, x)}. The crosshair is paused while the tool is active.
+
+        line: press-drag-release with a rubber band (or click, click); Shift snaps to 0 / 45 / 90 deg;
+        with ``sticky`` the tool stays on: drag again for a new line, drag an end to move it, Esc to stop
+        (``on_cancel()`` is called then)."""
         from matplotlib.widgets import PolygonSelector, RectangleSelector
 
         self.cancel_tool()
         self._tool_cb = callback
+        self._tool_on_cancel = on_cancel
         if kind == "rect":
             def done(press, release):
                 xs = sorted((self._axis_to_index(press.xdata, self.x_idx), self._axis_to_index(release.xdata, self.x_idx)))
@@ -928,18 +934,108 @@ class SliceWidget(QFrame):
                 self._finish_tool({"kind": "polygon", "points": pts})
             self._tool = PolygonSelector(self.ax_main, done, useblit=True)
         elif kind == "line":
-            self._tool_pts = []
-
-            def click(ev):
-                if ev.inaxes is not self.ax_main or ev.xdata is None:
-                    return
-                self._tool_pts.append((self._axis_to_index(ev.ydata, self.y_idx), self._axis_to_index(ev.xdata, self.x_idx)))
-                if len(self._tool_pts) == 2:
-                    a, b = self._tool_pts
-                    self._finish_tool({"kind": "line", "a": a, "b": b})
-            self._tool = ("cid", self.canvas.mpl_connect("button_press_event", click))
+            self._start_line_tool(color, sticky)
         else:
             raise ValueError("tool must be 'rect', 'polygon' or 'line'")
+
+    def _start_line_tool(self, color: str, sticky: bool) -> None:
+        """Rubber-band line: press-drag-release (or click, click); Shift snaps the angle to 45 deg steps;
+        sticky: stays on, a drag near an end moves that end, Esc stops."""
+        from matplotlib.lines import Line2D
+
+        st = {"a": None, "b": None, "grab": None, "press_px": None, "two_click": False}
+        band = Line2D([], [], color=color, lw=1.4, marker="o", ms=4, zorder=20)
+        self.ax_main.add_line(band)
+        prev = getattr(self, "_line_ends", None)  # the last line, so its ends can be dragged
+        if sticky and prev:
+            st["a"], st["b"] = prev
+
+        def to_shape(a, b):
+            ya, xa = self._axis_to_index(a[1], self.y_idx), self._axis_to_index(a[0], self.x_idx)
+            yb, xb = self._axis_to_index(b[1], self.y_idx), self._axis_to_index(b[0], self.x_idx)
+            return {"kind": "line", "a": (ya, xa), "b": (yb, xb)}
+
+        def snap(a, b, ev):
+            mods = getattr(ev, "modifiers", None) or set()  # keys held during the mouse event
+            gui = getattr(ev, "guiEvent", None)
+            held = bool(gui is not None and hasattr(gui, "modifiers") and gui.modifiers() & Qt.ShiftModifier)
+            if not held and "shift" not in mods and "shift" not in str(getattr(ev, "key", None) or ""):
+                return b
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            r = float(np.hypot(dx, dy))
+            ang = np.round(np.arctan2(dy, dx) / (np.pi / 4)) * (np.pi / 4)
+            return (a[0] + r * np.cos(ang), a[1] + r * np.sin(ang))
+
+        def show(a, b):
+            band.set_data([a[0], b[0]], [a[1], b[1]])
+            self.canvas.draw_idle()
+
+        def near(ev, pt):
+            px = self.ax_main.transData.transform(pt)
+            return float(np.hypot(px[0] - ev.x, px[1] - ev.y)) < 10
+
+        def press(ev):
+            if ev.inaxes is not self.ax_main or ev.xdata is None or getattr(ev, "button", 1) not in (1, None):
+                return
+            p = (ev.xdata, ev.ydata)
+            if st["two_click"] or (st["grab"] is not None and st["a"] == st["b"]):  # second click of click-click
+                st["b"], st["two_click"], st["grab"] = snap(st["a"], p, ev), False, None
+                return finish()
+            st["press_px"] = (getattr(ev, "x", None), getattr(ev, "y", None))
+            if sticky and st["a"] is not None and st["b"] is not None and (near(ev, st["a"]) or near(ev, st["b"])):
+                st["grab"] = "a" if near(ev, st["a"]) else "b"  # move this end
+            else:
+                st["a"], st["b"], st["grab"] = p, p, "b"
+            show(st["a"], st["b"])
+
+        def move(ev):
+            if st["grab"] is None or ev.inaxes is not self.ax_main or ev.xdata is None:
+                if st["two_click"] and ev.inaxes is self.ax_main and ev.xdata is not None:
+                    show(st["a"], snap(st["a"], (ev.xdata, ev.ydata), ev))
+                return
+            other = st["b"] if st["grab"] == "a" else st["a"]
+            st[st["grab"]] = snap(other, (ev.xdata, ev.ydata), ev)
+            show(st["a"], st["b"])
+
+        def release(ev):
+            if st["grab"] is None:
+                return
+            if ev.inaxes is self.ax_main and ev.xdata is not None:  # end where released (snapped with Shift)
+                other = st["b"] if st["grab"] == "a" else st["a"]
+                st[st["grab"]] = snap(other, (ev.xdata, ev.ydata), ev)
+            st["grab"] = None
+            moved = st["press_px"] is not None and st["press_px"][0] is not None and ev.x is not None and \
+                np.hypot(ev.x - st["press_px"][0], ev.y - st["press_px"][1]) > 3
+            if not moved and st["a"] == st["b"]:
+                st["two_click"] = True  # a click: the next click ends the line
+                return
+            finish()
+
+        def finish():
+            a, b = st["a"], st["b"]
+            if a is None or b is None or a == b:
+                return
+            self._line_ends = (a, b)
+            cb = getattr(self, "_tool_cb", None)
+            if not sticky:
+                self.cancel_tool()
+            else:
+                band.set_data([], [])
+                self.canvas.draw_idle()
+            if cb is not None:
+                cb(to_shape(a, b))
+
+        def key(ev):
+            if ev.key == "escape":
+                on_cancel = getattr(self, "_tool_on_cancel", None)
+                self.cancel_tool()
+                if on_cancel is not None:
+                    on_cancel()
+
+        cids = [self.canvas.mpl_connect(e, f) for e, f in (("button_press_event", press), ("motion_notify_event", move),
+                                                          ("button_release_event", release), ("key_press_event", key))]
+        self.canvas.setFocus()
+        self._tool = ("cids", cids, band)
 
     def _finish_tool(self, shape: dict) -> None:
         cb = getattr(self, "_tool_cb", None)
@@ -949,7 +1045,15 @@ class SliceWidget(QFrame):
 
     def cancel_tool(self) -> None:
         tool = getattr(self, "_tool", None)
-        if isinstance(tool, tuple):
+        if isinstance(tool, tuple) and tool[0] == "cids":
+            for cid in tool[1]:
+                self.canvas.mpl_disconnect(cid)
+            try:
+                tool[2].remove()
+            except (ValueError, NotImplementedError):
+                pass
+            self.canvas.draw_idle()
+        elif isinstance(tool, tuple):
             self.canvas.mpl_disconnect(tool[1])
         elif tool is not None:
             try:
@@ -1841,12 +1945,17 @@ class DataViewerPanel(QWidget):
     def primary_view(self) -> "SliceWidget | None":
         return self.views[0] if self.views else None
 
-    def start_tool(self, kind: str, callback, color: str = "magenta") -> None:
+    def start_tool(self, kind: str, callback, color: str = "magenta", sticky: bool = False,
+                   on_cancel=None) -> None:
         """Draw a shape on the first view (see SliceWidget.start_tool)."""
         view = self.primary_view()
         if view is None:
             raise ValueError("no data shown")
-        view.start_tool(kind, callback, color)
+        view.start_tool(kind, callback, color, sticky=sticky, on_cancel=on_cancel)
+
+    def cancel_tool(self) -> None:
+        for view in self._iter_slice_widgets():
+            view.cancel_tool()
 
     def set_line_profiles(self, bottom: list[dict], side: list[dict]) -> None:
         """Line profiles docked to the first view's map (SliceWidget.set_line_profiles)."""

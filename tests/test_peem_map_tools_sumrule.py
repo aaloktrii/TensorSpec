@@ -318,3 +318,53 @@ def test_domains_tab_hides_the_left_column_and_shows_the_pushed_look(qapp, tmp_p
     assert look["cmap"] == "bwr_r" and look["vmin"] < 0 < look["vmax"]
     t.analysis_view.setCurrentWidget(t.plot_view)
     assert p._controls_scroll.isVisibleTo(p)
+
+
+def test_draw_line_by_dragging_stays_on_and_snaps(qapp, tmp_path):
+    """5. Line profile: Draw line is a toggle; press-drag-release draws (Shift snaps to 0 / 45 / 90 deg),
+    the tool stays on for the next line, Esc ends it. Histogram and FFT sit on Analysis -> Plots."""
+    import time
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QGroupBox, QPushButton
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    p.resize(1200, 900)
+    p.show()
+    t = p.map_tools
+    assert any(g.title() == "5. Line profile" for g in p.findChildren(QGroupBox))
+    assert {b.text() for b in t.plot_view.findChildren(QPushButton)} >= {"Histogram", "FFT"}
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    t.btn_line.setChecked(True)
+    view = t.viewer.primary_view()
+    c = view.canvas
+
+    def pump():
+        for _ in range(5):
+            qapp.processEvents()
+            time.sleep(0.01)
+
+    def px(x, y):
+        d = view.ax_main.transData.transform((x, y))
+        return QPoint(int(d[0] / c.device_pixel_ratio), int(c.height() - d[1] / c.device_pixel_ratio))
+
+    def drag(a, b, mod=Qt.NoModifier):
+        QTest.mousePress(c, Qt.LeftButton, mod, px(*a))
+        for k in range(1, 6):
+            QTest.mouseMove(c, px(a[0] + (b[0] - a[0]) * k / 5, a[1] + (b[1] - a[1]) * k / 5))
+            pump()
+        QTest.mouseRelease(c, Qt.LeftButton, mod, px(*b))
+        pump()
+
+    drag((8, 10), (50, 14))
+    (ya, xa), (yb, xb) = t._line
+    assert abs(xa - 8) < 2 and abs(xb - 50) < 2 and abs(yb - 14) < 2
+    drag((8, 40), (50, 44), Qt.ShiftModifier)  # a new line, snapped horizontal
+    (ya, xa), (yb, xb) = t._line
+    assert abs(ya - yb) < 0.5 and t.btn_line.isChecked()
+    QTest.keyClick(c, Qt.Key_Escape)
+    pump()
+    assert not t.btn_line.isChecked() and not view.tool_active
