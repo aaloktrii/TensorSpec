@@ -257,7 +257,7 @@ def test_push_raw_or_as_shown_with_roi_and_background(qapp, tmp_path, monkeypatc
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
     p = PeemPanel()
     t, s = p.map_tools, p.service
-    assert [g.title() for g in p.findChildren(QGroupBox) if g.title().startswith("7.")] == ["7. Push and export"]
+    assert [g.title() for g in p.findChildren(QGroupBox) if g.title().startswith("6.")] == ["6. Push and export"]
     p._dataset_name = _images(tmp_path, s)
     p._refresh_meta()
     t._asymmetry()
@@ -428,7 +428,8 @@ def test_flatten_along_the_line_in_the_map_tab(qapp, tmp_path):
 
     p = PeemPanel()
     t = p.map_tools
-    assert any(g.title() == "6. Flatten" for g in p.findChildren(QGroupBox))
+    assert [g.title() for g in p.findChildren(QGroupBox) if g.title()[:2] in ("5.", "6.", "7.")] == [
+        "5. Line profile", "6. Push and export", "7. Compare with a reference"]  # flatten is inside 5
     p._dataset_name = _images(tmp_path, p.service)
     p._refresh_meta()
     t._asymmetry()

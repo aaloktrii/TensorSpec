@@ -42,7 +42,8 @@ from PySide6.QtWidgets import (
 
 from tensorspec.core.data_models import TensorData
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
-from tensorspec.gui.components.peem_map_common import _coords_row, _dspin, _numbers, action_style, bold_titles
+from tensorspec.gui.components.peem_map_common import (
+    _coords_row, _dspin, _numbers, _subtitle, action_style, bold_titles, tidy_forms)
 from tensorspec.plotting import peem_plots
 
 
@@ -73,12 +74,14 @@ class PeemMapTools:
         self.controls = QWidget()
         lay = QVBoxLayout(self.controls)
         lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(12)
 
         asym = QGroupBox("4. Dichroism map")
         bold_titles(asym)
         af = QFormLayout(asym)
         self.map_register = QComboBox()
-        self.map_register.addItem("Register polarizations (recommended)", True)
+        self.map_register.addItem("Register polarizations", True)
+        self.map_register.setToolTip("Recommended: align the two polarizations (and every frame without Stack Pairs)")
         self.map_register.addItem("No extra registration", False)
         af.addRow("Align:", self.map_register)
         row = QHBoxLayout()
@@ -109,20 +112,50 @@ class PeemMapTools:
         an = QGroupBox("5. Line profile")
         bold_titles(an)
         nf = QFormLayout(an)
-        row = QHBoxLayout()
+        # the line
         b = QPushButton("Draw line")
         b.setCheckable(True)
         b.setToolTip("On the Map view: press, drag, release (Shift: 0 / 45 / 90°); drag an end to move it;\n"
                      "drag again for a new line. Stays on until clicked again or Esc.")
         b.toggled.connect(self._line_tool_toggled)
         self.btn_line = b
-        row.addWidget(b)
+        nf.addRow("Line:", b)
         r2, self.line_edit = _coords_row("x0, y0, x1, y1 (px)", self._set_line)
-        row.addLayout(r2, 1)
-        nf.addRow("Line:", row)
+        nf.addRow("Coordinates:", r2)
+        # flatten along it (Igor Flatten)
+        nf.addRow(_subtitle("Flatten along the line"))
+        self.flat_hw = QSpinBox()
+        self.flat_hw.setRange(0, 500)
+        self.flat_hw.setValue(30)
+        self.flat_hw.setToolTip("Profile averaged over ± this many px across the line (Igor Flatten width)")
+        nf.addRow("Width (px):", self.flat_hw)
+        row = QHBoxLayout()
+        self.flat_points = QCheckBox("Points only")
+        self.flat_points.setToolTip("Use only the mean of a box at each end of the line (A and B), not the whole profile")
+        row.addWidget(self.flat_points)
+        self.flat_offset = QCheckBox("Subtract offset")
+        self.flat_offset.setToolTip("Also remove the fitted level (centred on the image), not only the tilt")
+        row.addWidget(self.flat_offset)
+        row.addStretch(1)
+        nf.addRow(row)
+        row = QHBoxLayout()
+        b = QPushButton("Flatten")
+        b.setToolTip("Igor Flatten: fit a straight line to the profile along the drawn line and subtract that\n"
+                     "tilt from the shown map -> new layer '… · flattened'; the map is kept")
+        b.clicked.connect(self._flatten)
+        row.addWidget(b)
+        b = QPushButton("Use as map data")
+        b.setToolTip("Make the shown variant (e.g. flattened) the map's data for later steps;\n"
+                     "the original is kept as '… · data_original'")
+        b.clicked.connect(self._use_as_map_data)
+        row.addWidget(b)
+        nf.addRow(row)
+        # profiles along it
+        nf.addRow(_subtitle("Profiles"))
         self.line_hw = QSpinBox()
         self.line_hw.setRange(0, 50)
-        nf.addRow("Half width (px):", self.line_hw)
+        self.line_hw.setToolTip("Profile averaged over ± this many px across the line")
+        nf.addRow("Width (px):", self.line_hw)
         row = QHBoxLayout()
         for label, fn in (("Add profile", self._add_profile), ("Clear profiles", self._clear_profiles)):
             b = QPushButton(label)
@@ -131,12 +164,12 @@ class PeemMapTools:
         nf.addRow(row)
         self.prof_list = QListWidget()
         self.prof_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.prof_list.setMaximumHeight(110)
+        self.prof_list.setMaximumHeight(100)
         self.prof_list.setToolTip("Tick = shown in the plot and on the map; select and Remove to delete")
         self.prof_list.itemChanged.connect(self._profile_toggled)
-        nf.addRow("Profiles:", self.prof_list)
+        nf.addRow(self.prof_list)
         row = QHBoxLayout()
-        for label, fn in (("Remove selected", self._remove_profiles), ("Show all", lambda: self._show_all_profiles(True)),
+        for label, fn in (("Remove", self._remove_profiles), ("Show all", lambda: self._show_all_profiles(True)),
                           ("Hide all", lambda: self._show_all_profiles(False))):
             b = QPushButton(label)
             b.clicked.connect(fn)
@@ -150,40 +183,10 @@ class PeemMapTools:
         nf.addRow(self.prof_dock)
         self.prof_offset = _dspin(0, 1e6, 0.0, 0.01, 4)
         self.prof_offset.valueChanged.connect(lambda *_: self._draw_profiles())
-        nf.addRow("Offset between profiles:", self.prof_offset)
+        nf.addRow("Offset:", self.prof_offset)
         lay.addWidget(an)
 
-        fl = QGroupBox("6. Flatten")
-        bold_titles(fl)
-        ff = QFormLayout(fl)
-        self.flat_hw = QSpinBox()
-        self.flat_hw.setRange(0, 500)
-        self.flat_hw.setValue(30)
-        self.flat_hw.setToolTip("Profile averaged over ± this many px across the line (Igor Flatten width)")
-        ff.addRow("Half width (px):", self.flat_hw)
-        row = QHBoxLayout()
-        self.flat_points = QCheckBox("Points only")
-        self.flat_points.setToolTip("Use only the mean of a box at each end of the line (A and B), not the whole profile")
-        row.addWidget(self.flat_points)
-        self.flat_offset = QCheckBox("Subtract offset")
-        self.flat_offset.setToolTip("Also remove the fitted level (centred on the image), not only the tilt")
-        row.addWidget(self.flat_offset)
-        ff.addRow(row)
-        row = QHBoxLayout()
-        b = QPushButton("Flatten along the line")
-        b.setToolTip("Igor Flatten: fit a straight line to the profile along the drawn line (5. Line profile) and\n"
-                     "subtract that tilt from the shown map -> new layer '… · flattened'; the map is kept")
-        b.clicked.connect(self._flatten)
-        row.addWidget(b, 1)
-        b = QPushButton("Use as map data")
-        b.setToolTip("Make the shown variant (e.g. flattened) the map's data for later steps;\n"
-                     "the original is kept as '… · data_original'")
-        b.clicked.connect(self._use_as_map_data)
-        row.addWidget(b)
-        ff.addRow(row)
-        lay.addWidget(fl)
-
-        rd = QGroupBox("7. Push and export")
+        rd = QGroupBox("6. Push and export")
         bold_titles(rd)
         rf = QFormLayout(rd)
         row = QHBoxLayout()
@@ -209,7 +212,7 @@ class PeemMapTools:
         rf.addRow(row)
         lay.addWidget(rd)
 
-        cg = QGroupBox("8. Compare with a reference")
+        cg = QGroupBox("7. Compare with a reference")
         bold_titles(cg)
         cf = QFormLayout(cg)
         row = QHBoxLayout()
@@ -250,6 +253,7 @@ class PeemMapTools:
         self.status = QLabel("")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
+        tidy_forms(self.controls)
 
     def _build_map_view(self):
         self.map_view = QWidget()
@@ -606,13 +610,13 @@ class PeemMapTools:
         self.status.setText(f"Line ({x1:.0f}, {y1:.0f}) → ({x2:.0f}, {y2:.0f}) px, {size}, {angle:.0f}°. "
                             "Add profile keeps it.")
 
-    # ------------------------------------------------------------------ 6. flatten (Igor Flatten)
+    # ------------------------------------------------------------------ 5. flatten along the line (Igor Flatten)
     def _flatten(self):
         name = self._name()
         if not name:
             return
         if not self._line:
-            self._err("Draw a line first (5. Line profile): Flatten fits the tilt along it.")
+            self._err("Draw a line first (5. Line profile → Draw line): Flatten fits the tilt along it.")
             return
         kind, var = self._shown()
         res = self._call(self.service.flatten, name, kind, var, 0, self._line[0], self._line[1],

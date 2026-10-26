@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtWidgets import QDoubleSpinBox, QHBoxLayout, QLineEdit, QPushButton
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
 
 
 def _dspin(lo, hi, val, step=0.01, dec=3):
@@ -33,7 +34,6 @@ def _coords_row(placeholder: str, on_set) -> tuple[QHBoxLayout, QLineEdit]:
     edit = QLineEdit()
     edit.setPlaceholderText(placeholder)
     btn = QPushButton("Set")
-    btn.setFixedWidth(48)
     edit.returnPressed.connect(on_set)
     btn.clicked.connect(on_set)
     row.addWidget(edit, 1)
@@ -54,7 +54,8 @@ ACTION = {
 def action_style(button: QPushButton, kind: str) -> QPushButton:
     """Colour a step's main button like the other suites (bold, light shade, greyed when disabled)."""
     bg, fg, off = ACTION[kind]
-    button.setStyleSheet(f"QPushButton {{ background-color: {bg}; color: {fg}; font-weight: bold; padding: 5px; }}"
+    button.setStyleSheet(f"QPushButton {{ background-color: {bg}; color: {fg}; font-weight: bold; padding: 5px 10px;"
+                         f" border: none; border-radius: 6px; }}"
                          f"QPushButton:hover {{ border: 1px solid {fg}; }}"
                          f"QPushButton:disabled {{ background-color: {off}; color: #999999; }}")
     return button
@@ -63,3 +64,22 @@ def action_style(button: QPushButton, kind: str) -> QPushButton:
 def bold_titles(group) -> None:
     """Bold section title, as the QE / Wannier90 groups."""
     group.setStyleSheet("QGroupBox { font-weight: bold; }")
+
+
+def _subtitle(text: str) -> QLabel:
+    """A small heading inside a section (e.g. 'Flatten along the line', 'Profiles')."""
+    lab = QLabel(text)
+    lab.setStyleSheet("font-weight: bold; padding-top: 6px;")
+    return lab
+
+
+def tidy_forms(widget) -> None:
+    """Same form look on every platform (macOS otherwise keeps fields at their size hint, right-aligns
+    labels and clips combo texts): labels left, fields grow to the full width, rows top-aligned."""
+    for form in widget.findChildren(QFormLayout):
+        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
+        form.setRowWrapPolicy(QFormLayout.DontWrapRows)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
