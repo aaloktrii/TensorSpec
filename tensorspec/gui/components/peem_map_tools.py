@@ -1,6 +1,6 @@
-"""PEEM panel add-on: calculate (asymmetry map) and analyse (profiles, domain width, histogram, FFT,
-ROI statistics, domain map, export, compare with a reference dataset) on the PEEM tab's own
-corrected CP / CM channels.
+"""PEEM panel add-on: calculate (dichroism map) and analyse (profiles, histogram, FFT, ROI and background
+region, ROI statistics, push to the domain analysis, export, compare with a reference dataset) on the
+PEEM tab's own corrected CP / CM channels.
 
 Front end only; every step is a ``PeemService`` call (contract: gui/services/peem_steps/__init__.py).
 The PEEM panel plugs it in with a few lines:
@@ -8,7 +8,7 @@ The PEEM panel plugs it in with a few lines:
     tools = PeemMapTools(service, get_name=lambda: panel._dataset_name, send_to_sum_rule=...)
     left_layout.addWidget(tools.controls)           # sections 4-7
     view_tabs.addTab(tools.map_view, "Map")         # maps with ROI / profile overlays
-    view_tabs.addTab(tools.plot_view, "Analysis")   # profiles, histogram, FFT (PDF export)
+    view_tabs.addTab(tools.analysis_view, "Analysis")  # Plots (profiles, histogram, FFT) | Domains
 """
 from __future__ import annotations
 
@@ -142,8 +142,7 @@ class PeemMapTools:
         nf.addRow("Offset between profiles:", self.prof_offset)
         row = QHBoxLayout()
         for label, fn, tip in (("Histogram", self._histogram, "of the shown map, inside the ROI if set"),
-                               ("FFT", self._fft, "2-D FFT and dominant spatial period"),
-                               ("Domain width", self._domain_width, "area / domain-wall length, inside the ROI if set")):
+                               ("FFT", self._fft, "2-D FFT and dominant spatial period")):
             b = QPushButton(label)
             b.setToolTip(tip)
             b.clicked.connect(fn)
@@ -151,7 +150,7 @@ class PeemMapTools:
         nf.addRow(row)
         lay.addWidget(an)
 
-        rd = QGroupBox("6. ROIs and domains")
+        rd = QGroupBox("6. ROI and background")
         bold_titles(rd)
         rf = QFormLayout(rd)
         row = QHBoxLayout()
@@ -165,13 +164,43 @@ class PeemMapTools:
         rf.addRow("ROI:", row)
         r2, self.roi_edit = _coords_row("x0, x1, y0, y1 (px)", self._set_roi_typed)
         rf.addRow("Type ROI:", r2)
-        self.thr = _dspin(0, 1, 0.15, 0.01, 3)
-        rf.addRow("Domain threshold:", self.thr)
         row = QHBoxLayout()
-        for label, fn in (("ROI statistics", self._roi_stats), ("Domain map", self._domain_map)):
-            b = action_style(QPushButton(label), "domains") if label == "Domain map" else QPushButton(label)
+        self.auto_flake = QCheckBox("Auto flake outline")
+        self.auto_flake.setToolTip("Find the flake on the shown map (denoise, local contrast, Otsu, largest region)\n"
+                                   "and use its outline as the ROI; untick to clear it")
+        self.auto_flake.toggled.connect(self._auto_flake_toggled)
+        row.addWidget(self.auto_flake)
+        for label, fn in (("Save outline…", self._save_outline), ("Load outline…", self._load_outline)):
+            b = QPushButton(label)
             b.clicked.connect(fn)
             row.addWidget(b)
+        rf.addRow(row)
+        row = QHBoxLayout()
+        self.use_bg = QCheckBox("Background region")
+        self.use_bg.setToolTip("A non-magnetic area: its mean is the zero for ROI statistics and the domain\n"
+                               "analysis. Used only while ticked.")
+        self.use_bg.toggled.connect(lambda *_: self._update_overlays())
+        row.addWidget(self.use_bg)
+        for label, kind in (("Draw rect", "rect"), ("Draw polygon", "polygon")):
+            b = QPushButton(label)
+            b.clicked.connect(lambda _=False, k=kind: self._start_tool(k, self._on_bg, "cyan"))
+            row.addWidget(b)
+        rf.addRow(row)
+        b = QPushButton("ROI statistics")
+        b.setToolTip("Of the shown map in the ROI: f_up / f_down split at zero (the background mean if ticked)")
+        b.clicked.connect(self._roi_stats)
+        rf.addRow(b)
+        row = QHBoxLayout()
+        self.push_mode = QComboBox()
+        self.push_mode.addItem("Raw values", "raw")
+        self.push_mode.addItem("As shown", "shown")
+        self.push_mode.setToolTip("Raw values: the map's numbers. As shown: with the colour range and gamma of the\n"
+                                  "Map view. The ROI and (if ticked) the background region go along.")
+        row.addWidget(self.push_mode)
+        b = action_style(QPushButton("Push to analysis"), "domains")
+        b.setToolTip("Send the shown map to Analysis → Domains (several maps can be pushed)")
+        b.clicked.connect(self._push)
+        row.addWidget(b, 1)
         rf.addRow(row)
         row = QHBoxLayout()
         b = QPushButton("Export shown map…")
@@ -255,7 +284,14 @@ class PeemMapTools:
         v.addLayout(rng)
 
     def _build_plot_view(self):
+        from PySide6.QtWidgets import QTabWidget
+
+        from tensorspec.gui.components.peem_domain_view import PeemDomainView
+
         self.plot_view = QWidget()
+        self.domain_view = PeemDomainView(self.service, self._parent)
+        self.analysis_view = QTabWidget()
+        self.analysis_view.setDocumentMode(True)
         v = QVBoxLayout(self.plot_view)
         h = QHBoxLayout()
         self.plot_title = QLabel("")
@@ -269,6 +305,8 @@ class PeemMapTools:
         self.pcanvas = FigureCanvas(self.pfig)
         v.addWidget(self.pcanvas, 1)
         self._plot_kind = None
+        self.analysis_view.addTab(self.plot_view, "Plots")
+        self.analysis_view.addTab(self.domain_view, "Domains")
 
     # ------------------------------------------------------------------ helpers
     def _name(self) -> str | None:
@@ -293,6 +331,10 @@ class PeemMapTools:
         if layer in ("", "Intensity"):
             return "stack", "data"
         return self.service.parse_layer(layer)
+
+    def _bg(self) -> dict | None:
+        name = self._get_name()
+        return self.service.get_rois(name)["bg"] if name else None
 
     def _roi(self) -> dict | None:
         name = self._get_name()
@@ -412,6 +454,9 @@ class PeemMapTools:
         roi = self._roi()
         if roi:
             ov.append({**roi, "color": "yellow"})
+        bg = self._bg()
+        if bg and self.use_bg.isChecked():
+            ov.append({**bg, "color": "cyan"})
         for i, pr in enumerate(self.service.list_profiles(name)):
             if pr.get("visible", True):
                 ov.append({"kind": "line", "a": pr["line"][0], "b": pr["line"][1], "color": peem_plots.profile_color(i)})
@@ -451,13 +496,20 @@ class PeemMapTools:
                                         "again to close."}.get(kind, "Draw on the Map view."))
 
     def _show_map_tab(self):
+        self._show_view(self.map_view)
+
+    @staticmethod
+    def _show_view(page: QWidget, sub: QWidget | None = None):
+        """Bring a view tab (and a sub-tab of it) to the front."""
         from PySide6.QtWidgets import QTabWidget
 
-        w = self.map_view.parentWidget()
+        w = page.parentWidget()
         while w is not None and not isinstance(w, QTabWidget):
             w = w.parentWidget()
         if w is not None:
-            w.setCurrentWidget(self.map_view)
+            w.setCurrentWidget(page)
+        if sub is not None and isinstance(page, QTabWidget):
+            page.setCurrentWidget(sub)
 
     # ------------------------------------------------------------------ 4. dichroism map
     def _asymmetry(self):
@@ -557,6 +609,7 @@ class PeemMapTools:
         self._on_line({"a": (y1, x1), "b": (y2, x2)})
 
     def _plot(self, kind: str, title: str):
+        self._show_view(self.analysis_view, self.plot_view)
         self._plot_kind = kind
         self.plot_title.setText(title)
         self.pfig.clear()
@@ -671,25 +724,14 @@ class PeemMapTools:
             kind, var = self._shown()
             f = self._call(self.service.image_fft, name, kind, var, 0)
             if f is not None:
+                self._show_view(self.analysis_view, self.plot_view)
                 self._plot_kind = "fft"
                 self.plot_title.setText(f"FFT of {kind} / {var}")
                 self.pfig.clear()
                 peem_plots.image_fft(self.pfig, f)
                 self.pcanvas.draw_idle()
 
-    def _domain_width(self):
-        name = self._name()
-        if name:
-            kind, var = self._shown()
-            if kind == "stack":
-                kind, var = "pcd" if "pcd" in self.service.list_products(name) else "pld", "data"
-            w = self._call(self.service.domain_width, name, kind, var, self._roi())
-            if w is not None:
-                um = f" = {w['domain_width_um']:.3f} µm (period {w['period_um']:.3f} µm)" if "domain_width_um" in w else ""
-                self.status.setText(f"Mean domain width {w['domain_width_px']:.1f} px{um} in "
-                                    f"{'the ROI' if self._roi() else 'the whole map'} ({kind} / {var}).")
-
-    # ------------------------------------------------------------------ 6. ROIs / domains
+    # ------------------------------------------------------------------ 6. ROI and background
     def _set_roi(self, roi: dict | None):
         name = self._name()
         if name:
@@ -700,7 +742,7 @@ class PeemMapTools:
         self._set_roi(sh)
         if sh.get("kind") == "rect":
             self.roi_edit.setText(f"{sh['x0']}, {sh['x1']}, {sh['y0']}, {sh['y1']}")
-        self.status.setText("ROI set: ROI statistics, Domain map and Domain width use it.")
+        self.status.setText("ROI set: ROI statistics and Push to analysis use it.")
 
     def _set_roi_typed(self):
         try:
@@ -711,25 +753,88 @@ class PeemMapTools:
         self._set_roi({"kind": "rect", "x0": min(x0, x1), "x1": max(x0, x1), "y0": min(y0, y1), "y1": max(y0, y1)})
 
     def _roi_stats(self):
+        """Of the shown map in the ROI: f_up / f_down split at zero, the zero being the background
+        region's mean when ticked; <m_z> = f_up - f_down."""
         name = self._name()
-        if name:
-            kind = "pcd" if "pcd" in self.service.list_products(name) else "pld"
-            st = self._call(self.service.roi_statistics, name, kind, roi=self._roi())  # split at the ROI mean
-            if st is not None:
-                fr, avg = st["fractions"], st["average"]
-                mean = avg.get("mean") if isinstance(avg, dict) else avg
-                where = "the ROI" if self._roi() else "the whole map"
-                self.status.setText(f"{kind} in {where}: mean {float(mean):+.4f}; up {fr['f_up']:.2f}, "
-                                    f"down {fr['f_down']:.2f}, wall {fr['f_wall']:.2f} (split at the mean)")
+        if not name:
+            return
+        kind, var = self._shown()
+        bg = self._bg() if self.use_bg.isChecked() else None
+        if self.use_bg.isChecked() and bg is None:
+            self._err("Background region is ticked but none is drawn.")
+            return
+        st = self._call(self.service.roi_statistics, name, kind, roi=self._roi(), bg_roi=bg, threshold=0.0, var=var)
+        if st is not None:
+            fr, avg = st["fractions"], st["average"]
+            mean = avg.get("mean") if isinstance(avg, dict) else avg
+            where = "the ROI" if self._roi() else "the whole map"
+            zero = f"background mean {st['bg']:+.4f}" if bg is not None else "0 (tick Background region for the map's own zero)"
+            self.status.setText(f"{self.service.layer_for(name, kind, var)} in {where}: f_up {fr['f_up']:.3f}, "
+                                f"f_down {fr['f_down']:.3f}, <m_z> {fr['f_up'] - fr['f_down']:+.3f}; "
+                                f"mean {float(mean):+.4f} (zero = {zero})")
 
-    def _domain_map(self):
+    def _on_bg(self, sh: dict):
         name = self._name()
-        if name:
-            kind = "pcd" if "pcd" in self.service.list_products(name) else "pld"
-            r = self._call(self.service.compute_domain_map, name, kind, roi=self._roi(), threshold=self.thr.value())
-            if r is not None:
-                self.status.setText("Domain map: " + ", ".join(f"{k} {float(r[k]):.2f}" for k in ("f_up", "f_down", "f_zero") if k in r))
-                self.refresh(select=("domain_map", "data"))
+        if name and self._call(self.service.set_roi, name, "bg", sh) is not None:
+            self.use_bg.setChecked(True)
+            self._update_overlays()
+            self.status.setText("Background region set (cyan): its mean is the zero while ticked.")
+
+    def _auto_flake_toggled(self, on: bool):
+        name = self._get_name()
+        if not name:
+            return
+        if not on:
+            self._set_roi(None)
+            return
+        kind, var = self._shown()
+        if kind == "stack":
+            kind, var = ("pcd" if "pcd" in self.service.list_products(name) else "pld"), "data"
+        roi = self._call(self.service.auto_flake_roi, name, kind, var)
+        if roi is None:
+            self.auto_flake.blockSignals(True)
+            self.auto_flake.setChecked(False)
+            self.auto_flake.blockSignals(False)
+            return
+        self._update_overlays()
+        self.status.setText(f"Flake outline found on {kind} / {var} ({len(roi['points'])} points): it is the ROI now.")
+
+    def _save_outline(self):
+        name = self._name()
+        if not name:
+            return
+        path, _ = QFileDialog.getSaveFileName(self._parent, "Save ROI outline", f"{name}_roi.json", "ROI (*.json)")
+        if path:
+            out = self._call(self.service.save_roi, name, path, "roi")
+            if out:
+                self.status.setText(f"Saved {out}")
+
+    def _load_outline(self):
+        name = self._name()
+        if not name:
+            return
+        path, _ = QFileDialog.getOpenFileName(self._parent, "Load ROI outline", "", "ROI (*.json)")
+        if path and self._call(self.service.load_roi, name, path, "roi") is not None:
+            self._update_overlays()
+            self.status.setText(f"ROI loaded from {os.path.basename(path)}")
+
+    def _push(self):
+        """Send the shown map (raw values or as shown) with its ROI / background to Analysis → Domains."""
+        name = self._name()
+        if not name or self.viewer.tensor_data is None:
+            return
+        kind, var = self._shown()
+        mode = self.push_mode.currentData()
+        lim = self.viewer.color_limits() or (None, None)
+        view = self.viewer.primary_view()
+        gamma = float(view.spin_gamma.value()) if view is not None else 1.0
+        res = self._call(self.service.push_to_domains, name, kind, var, mode, lim[0], lim[1], gamma,
+                         True, self.use_bg.isChecked())
+        if res is None:
+            return
+        self.status.setText(f"Pushed {res['source']} ({mode}) of {name} to Analysis → Domains as {res['label']}.")
+        self.domain_view.refresh(select=(name, res["label"]))
+        self._show_view(self.analysis_view, self.domain_view)
 
     def _shown_look(self) -> dict:
         out = {}

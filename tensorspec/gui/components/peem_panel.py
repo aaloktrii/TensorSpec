@@ -187,7 +187,7 @@ class PeemPanel(QWidget):
         self.view_tabs.addTab(view_panel, "Frame")
 
         self.view_tabs.addTab(self.map_tools.map_view, "Map")
-        self.view_tabs.addTab(self.map_tools.plot_view, "Analysis")
+        self.view_tabs.addTab(self.map_tools.analysis_view, "Analysis")
 
         splitter.addWidget(self.view_tabs)
         splitter.setStretchFactor(0, 0)

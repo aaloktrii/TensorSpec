@@ -63,6 +63,8 @@ tensorspec/
 │   │   ├── drift.py / igor_drift.py / stack_edits.py      # drift router, SPEEM Igor ports, stack clean-up
 │   │   ├── image_analysis.py / roi_stats.py / products.py # profiles, histogram, FFT; ROI stats; /analysis maps
 │   │   ├── map_align.py      # register one map onto another: shift + rotation + scale (re-imaged fields)
+│   │   ├── domain_analysis.py # spatial domain analysis (SDA toolkit pipeline): denoise, flake, background,
+│   │   │                     #   three states, widths, period, walls, stripe direction (scikit-image)
 │   │   ├── ue49/             # detector.py (TPX3/I0) + batch.py (beamtime scripts)
 │   │   └── esm/              # BNL ESM batch.py (uses uview loaders + ue49.batch helpers)
 │   ├── raman_engine.py       # MAIN ROUTER: voigt / lorentz_n / lorentz_auto / g_2d → core/raman/*
@@ -93,7 +95,8 @@ tensorspec/
     │   ├── peem_service.py   # PEEM service: load / pair / drift / BG / sum rule + steps in peem_steps/
     │   ├── peem_steps/       # service mixins: channels (maps + Sum Rule hand-over from the panel's pairs),
     │   │                     #   drift_stack, image_analysis, maps_domains, annotations, load, cleanup,
-    │   │                     #   compare (map minus a registered reference dataset, e.g. XMLD)
+    │   │                     #   compare (map minus a registered reference dataset, e.g. XMLD),
+    │   │                     #   domain_analysis (pushed maps -> /analysis/domains_<n>)
     │   │                     #   Back-end contract (every call, no Qt): peem_steps/__init__.py
     │   ├── xas_service.py    # XAS uses shared peem BG/sum-rule (no core/xas_engine.py yet)
     │   └── raman_service.py  # Qt-free Raman back-end API (all state; one method per action)
@@ -103,8 +106,9 @@ tensorspec/
     │   ├── dft_panels.py / qe_generator_panel.py / sprkkr_panels.py
     │   ├── arpes_panel.py
     │   ├── peem_panel.py / xas_panel.py  # PEEM: Load TIF/folder + Pair/Drift + map tools (4–7); Frame=DataViewer
-    │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), image analysis, ROIs / domains,
-    │   │                          #   compare with a reference, → Sum Rule
+    │   ├── peem_map_tools.py      # PEEM panel add-on: dichroism map (one button), image analysis, ROI and
+    │   │                          #   background (auto outline, save / load), push to analysis, compare, → Sum Rule
+    │   ├── peem_domain_view.py    # Analysis tab, Domains: pushed maps, pipeline steps, numbers table, export
     │   ├── peem_sumrule_panel.py  # Sum Rule window, From PEEM: region spectra, BG, sum rule
     │   ├── peem_export_dialog.py / peem_map_common.py  # map export options; small widget helpers
     │   ├── raman_panel.py / raman_tabs/  # Spectra | Map | Analysis (widgets only → RamanService)
