@@ -100,11 +100,11 @@ def test_peem_panel_sections_and_sum_rule_window(qapp, tmp_path, monkeypatch):
     t._add_profile()
     t._histogram()
     assert len(p.service.list_profiles("img")) == 1 and t.plot_title.text().startswith("histogram")
-    t._on_roi({"kind": "rect", "x0": 4, "x1": 60, "y0": 4, "y1": 60})
-    t._roi_stats()
-    assert "f_up 0.5" in t.status.text() or "f_up 0.4" in t.status.text()
     t._push()  # -> Analysis / Domains
     assert t.analysis_view.currentWidget() is t.domain_view and t.domain_view.items.count() == 1
+    t.domain_view._set_region("roi", {"kind": "rect", "x0": 4, "x1": 60, "y0": 4, "y1": 60})
+    t.domain_view._roi_stats()
+    assert "f_up 0.5" in t.domain_view.status.text() or "f_up 0.4" in t.domain_view.status.text()
     t.domain_view._run(all_items=True)
     assert t.domain_view.table.rowCount() == 1 and "width up / down" in t.domain_view.caption.text()
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "m.tif"), "")))
@@ -247,9 +247,9 @@ def test_map_view_lists_only_useful_layers(qapp, tmp_path):
 
 
 def test_push_raw_or_as_shown_with_roi_and_background(qapp, tmp_path, monkeypatch):
-    """Section 6 -> Analysis / Domains: both push modes, the ROI (auto outline, saved and reloaded) and the
-    background region (only while ticked) go along; ROI statistics split at the background mean."""
-    from PySide6.QtWidgets import QFileDialog, QMessageBox
+    """Map view pushes (raw values or as shown); Analysis / Domains sets each pushed map's ROI (drawn,
+    typed, auto outline, saved and reloaded) and background region (used only while ticked)."""
+    from PySide6.QtWidgets import QFileDialog, QGroupBox, QMessageBox
     from tensorspec.gui.components.peem_panel import PeemPanel
 
     errors = []
@@ -257,47 +257,51 @@ def test_push_raw_or_as_shown_with_roi_and_background(qapp, tmp_path, monkeypatc
     monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
     p = PeemPanel()
     t, s = p.map_tools, p.service
+    assert [g.title() for g in p.findChildren(QGroupBox) if g.title().startswith("6.")] == ["6. Push and export"]
     p._dataset_name = _images(tmp_path, s)
     p._refresh_meta()
     t._asymmetry()
-    t._on_roi({"kind": "rect", "x0": 4, "x1": 59, "y0": 4, "y1": 59})
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "r.json"), "")))
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(tmp_path / "r.json"), "")))
-    t._save_outline()
-    t._set_roi(None)
-    t._load_outline()
-    assert s.get_rois("img")["roi"]["x1"] == 59
-    t.use_bg.setChecked(True)
-    t._roi_stats()
-    assert errors and "none is drawn" in errors[-1]
-    t._on_bg({"kind": "rect", "x0": 0, "x1": 3, "y0": 0, "y1": 63})
-    t._roi_stats()
-    assert "zero = background mean" in t.status.text()
     t.push_mode.setCurrentIndex(1)  # as shown
     t._push()
-    t.use_bg.setChecked(False)
     t.push_mode.setCurrentIndex(0)
     t._push()
     ins = s.domain_inputs()
     assert [i["mode"] for i in ins] == ["shown", "raw"]
     dv = t.domain_view
-    dv.background.setCurrentIndex(dv.background.findData("region"))
     dv.items.clearSelection()
     dv.items.item(0).setSelected(True)
+    dv.roi_edit.setText("4, 59, 4, 59")
+    dv._set_roi_typed()
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "r.json"), "")))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(tmp_path / "r.json"), "")))
+    dv._save_outline()
+    dv._set_region("roi", None)
+    dv._load_outline()
+    assert s.domain_regions("img", ins[0]["label"])["roi"]["x1"] == 59
+    dv.use_bg.setChecked(True)
+    dv._roi_stats()
+    assert errors and "none is drawn" in errors[-1]
+    dv._set_region("bg", {"kind": "rect", "x0": 0, "x1": 3, "y0": 0, "y1": 63})
+    dv._roi_stats()
+    assert "zero = background mean" in dv.status.text()
+    dv.background.setCurrentIndex(dv.background.findData("region"))
     dv._run(all_items=False)  # shown + its background region
     assert s.domain_result("img", ins[0]["label"])["split"] == "zero"
     dv.items.clearSelection()
     dv.items.item(1).setSelected(True)
     n = len(errors)
-    dv._run(all_items=False)  # raw, pushed without a background region
+    dv._run(all_items=False)  # raw, no background region
     assert len(errors) == n + 1 and "background region" in errors[-1]
+    dv.auto_flake.setChecked(True)  # auto outline on the second pushed map
+    assert s.domain_regions("img", ins[1]["label"])["roi"]["kind"] == "polygon"
+    dv._start_draw("roi", "rect")  # drawing shows the pushed map
+    assert dv.step.currentData() == "input" and dv._tool is not None
     dv.step.setCurrentIndex(dv.step.findData("width_map"))
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "d.pdf"), "")))
     dv.items.clearSelection()
     dv.items.item(0).setSelected(True)
     dv._export_pdf()
     assert (tmp_path / "d.pdf").stat().st_size > 1000
-
 
 def test_domains_tab_hides_the_left_column_and_shows_the_pushed_look(qapp, tmp_path):
     from tensorspec.gui.components.peem_panel import PeemPanel

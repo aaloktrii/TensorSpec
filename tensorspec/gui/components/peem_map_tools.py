@@ -150,52 +150,15 @@ class PeemMapTools:
         nf.addRow(row)
         lay.addWidget(an)
 
-        rd = QGroupBox("6. ROI and background")
+        rd = QGroupBox("6. Push and export")
         bold_titles(rd)
         rf = QFormLayout(rd)
-        row = QHBoxLayout()
-        for label, kind in (("Draw rectangle", "rect"), ("Draw polygon", "polygon")):
-            b = QPushButton(label)
-            b.clicked.connect(lambda _=False, k=kind: self._start_tool(k, self._on_roi, "yellow"))
-            row.addWidget(b)
-        b = QPushButton("Clear")
-        b.clicked.connect(lambda: self._set_roi(None))
-        row.addWidget(b)
-        rf.addRow("ROI:", row)
-        r2, self.roi_edit = _coords_row("x0, x1, y0, y1 (px)", self._set_roi_typed)
-        rf.addRow("Type ROI:", r2)
-        row = QHBoxLayout()
-        self.auto_flake = QCheckBox("Auto flake outline")
-        self.auto_flake.setToolTip("Find the flake on the shown map (denoise, local contrast, Otsu, largest region)\n"
-                                   "and use its outline as the ROI; untick to clear it")
-        self.auto_flake.toggled.connect(self._auto_flake_toggled)
-        row.addWidget(self.auto_flake)
-        for label, fn in (("Save outline…", self._save_outline), ("Load outline…", self._load_outline)):
-            b = QPushButton(label)
-            b.clicked.connect(fn)
-            row.addWidget(b)
-        rf.addRow(row)
-        row = QHBoxLayout()
-        self.use_bg = QCheckBox("Background region")
-        self.use_bg.setToolTip("A non-magnetic area: its mean is the zero for ROI statistics and the domain\n"
-                               "analysis. Used only while ticked.")
-        self.use_bg.toggled.connect(lambda *_: self._update_overlays())
-        row.addWidget(self.use_bg)
-        for label, kind in (("Draw rect", "rect"), ("Draw polygon", "polygon")):
-            b = QPushButton(label)
-            b.clicked.connect(lambda _=False, k=kind: self._start_tool(k, self._on_bg, "cyan"))
-            row.addWidget(b)
-        rf.addRow(row)
-        b = QPushButton("ROI statistics")
-        b.setToolTip("Of the shown map in the ROI: f_up / f_down split at zero (the background mean if ticked)")
-        b.clicked.connect(self._roi_stats)
-        rf.addRow(b)
         row = QHBoxLayout()
         self.push_mode = QComboBox()
         self.push_mode.addItem("Raw values", "raw")
         self.push_mode.addItem("As shown", "shown")
         self.push_mode.setToolTip("Raw values: the map's numbers. As shown: with the colour range and gamma of the\n"
-                                  "Map view. The ROI and (if ticked) the background region go along.")
+                                  "Map view. ROI, background region and the analysis are in Analysis → Domains.")
         row.addWidget(self.push_mode)
         b = action_style(QPushButton("Push to analysis"), "domains")
         b.setToolTip("Send the shown map to Analysis → Domains (several maps can be pushed)")
@@ -454,9 +417,6 @@ class PeemMapTools:
         roi = self._roi()
         if roi:
             ov.append({**roi, "color": "yellow"})
-        bg = self._bg()
-        if bg and self.use_bg.isChecked():
-            ov.append({**bg, "color": "cyan"})
         for i, pr in enumerate(self.service.list_profiles(name)):
             if pr.get("visible", True):
                 ov.append({"kind": "line", "a": pr["line"][0], "b": pr["line"][1], "color": peem_plots.profile_color(i)})
@@ -731,7 +691,7 @@ class PeemMapTools:
                 peem_plots.image_fft(self.pfig, f)
                 self.pcanvas.draw_idle()
 
-    # ------------------------------------------------------------------ 6. ROI and background
+    # ------------------------------------------------------------------ 6. push and export (ROI: Analysis -> Domains)
     def _set_roi(self, roi: dict | None):
         name = self._name()
         if name:
@@ -740,83 +700,6 @@ class PeemMapTools:
 
     def _on_roi(self, sh: dict):
         self._set_roi(sh)
-        if sh.get("kind") == "rect":
-            self.roi_edit.setText(f"{sh['x0']}, {sh['x1']}, {sh['y0']}, {sh['y1']}")
-        self.status.setText("ROI set: ROI statistics and Push to analysis use it.")
-
-    def _set_roi_typed(self):
-        try:
-            x0, x1, y0, y1 = (int(round(v)) for v in _numbers(self.roi_edit.text(), 4))
-        except ValueError as exc:
-            self._err(str(exc))
-            return
-        self._set_roi({"kind": "rect", "x0": min(x0, x1), "x1": max(x0, x1), "y0": min(y0, y1), "y1": max(y0, y1)})
-
-    def _roi_stats(self):
-        """Of the shown map in the ROI: f_up / f_down split at zero, the zero being the background
-        region's mean when ticked; <m_z> = f_up - f_down."""
-        name = self._name()
-        if not name:
-            return
-        kind, var = self._shown()
-        bg = self._bg() if self.use_bg.isChecked() else None
-        if self.use_bg.isChecked() and bg is None:
-            self._err("Background region is ticked but none is drawn.")
-            return
-        st = self._call(self.service.roi_statistics, name, kind, roi=self._roi(), bg_roi=bg, threshold=0.0, var=var)
-        if st is not None:
-            fr, avg = st["fractions"], st["average"]
-            mean = avg.get("mean") if isinstance(avg, dict) else avg
-            where = "the ROI" if self._roi() else "the whole map"
-            zero = f"background mean {st['bg']:+.4f}" if bg is not None else "0 (tick Background region for the map's own zero)"
-            self.status.setText(f"{self.service.layer_for(name, kind, var)} in {where}: f_up {fr['f_up']:.3f}, "
-                                f"f_down {fr['f_down']:.3f}, <m_z> {fr['f_up'] - fr['f_down']:+.3f}; "
-                                f"mean {float(mean):+.4f} (zero = {zero})")
-
-    def _on_bg(self, sh: dict):
-        name = self._name()
-        if name and self._call(self.service.set_roi, name, "bg", sh) is not None:
-            self.use_bg.setChecked(True)
-            self._update_overlays()
-            self.status.setText("Background region set (cyan): its mean is the zero while ticked.")
-
-    def _auto_flake_toggled(self, on: bool):
-        name = self._get_name()
-        if not name:
-            return
-        if not on:
-            self._set_roi(None)
-            return
-        kind, var = self._shown()
-        if kind == "stack":
-            kind, var = ("pcd" if "pcd" in self.service.list_products(name) else "pld"), "data"
-        roi = self._call(self.service.auto_flake_roi, name, kind, var)
-        if roi is None:
-            self.auto_flake.blockSignals(True)
-            self.auto_flake.setChecked(False)
-            self.auto_flake.blockSignals(False)
-            return
-        self._update_overlays()
-        self.status.setText(f"Flake outline found on {kind} / {var} ({len(roi['points'])} points): it is the ROI now.")
-
-    def _save_outline(self):
-        name = self._name()
-        if not name:
-            return
-        path, _ = QFileDialog.getSaveFileName(self._parent, "Save ROI outline", f"{name}_roi.json", "ROI (*.json)")
-        if path:
-            out = self._call(self.service.save_roi, name, path, "roi")
-            if out:
-                self.status.setText(f"Saved {out}")
-
-    def _load_outline(self):
-        name = self._name()
-        if not name:
-            return
-        path, _ = QFileDialog.getOpenFileName(self._parent, "Load ROI outline", "", "ROI (*.json)")
-        if path and self._call(self.service.load_roi, name, path, "roi") is not None:
-            self._update_overlays()
-            self.status.setText(f"ROI loaded from {os.path.basename(path)}")
 
     def _push(self):
         """Send the shown map (raw values or as shown) with its ROI / background to Analysis → Domains."""
@@ -829,7 +712,7 @@ class PeemMapTools:
         view = self.viewer.primary_view()
         gamma = float(view.spin_gamma.value()) if view is not None else 1.0
         res = self._call(self.service.push_to_domains, name, kind, var, mode, lim[0], lim[1], gamma,
-                         True, self.use_bg.isChecked(), self._shown_look().get("cmap"))
+                         True, False, self._shown_look().get("cmap"))
         if res is None:
             return
         self.status.setText(f"Pushed {res['source']} ({mode}) of {name} to Analysis → Domains as {res['label']}.")
