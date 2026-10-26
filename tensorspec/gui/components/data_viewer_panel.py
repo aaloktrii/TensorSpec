@@ -256,12 +256,16 @@ class SliceWidget(QFrame):
         self.chk_sym.setToolTip("Symmetric colour limits c ± L (white = c with bwr); L = contrast % of the 99th percentile of |v - c|")
         self.chk_sym.toggled.connect(self.redraw)
         self.combo_center = QComboBox()
-        self.combo_center.addItems(["0", "median", "mean", "background"])
-        self.combo_center.setToolTip("Centre (white) of the symmetric limits: 0, the median or mean of the shown map,\n"
-                                     "or the mean of a background region (choose it, then drag a rectangle on the map)")
+        self.combo_center.addItems(["0", "median", "mean"])
+        self.combo_center.setToolTip("Centre (white) of the symmetric limits: 0, or the median / mean of the shown map\n"
+                                     "(inside the Region when one is drawn)")
         self.combo_center.currentIndexChanged.connect(self.redraw)
-        self.combo_center.activated.connect(self._on_center_chosen)
-        self.sym_bg_box: dict | None = None  # background region for the 'background' centre (pixel indices)
+        self.btn_center_region = QPushButton("Region")
+        self.btn_center_region.setCheckable(True)
+        self.btn_center_region.setToolTip("Drag a rectangle on the map: the median / mean is taken there (outlined in cyan).\n"
+                                          "Click again to use the whole map.")
+        self.btn_center_region.toggled.connect(self._center_region_toggled)
+        self.sym_bg_box: dict | None = None  # region for the median / mean centre (pixel indices)
         self.lbl_center = QLabel("")
         self.lbl_center.setToolTip("Value at the centre (white) of the symmetric colour scale")
         self.chk_image_origin = QCheckBox("Top-left origin")
@@ -288,7 +292,7 @@ class SliceWidget(QFrame):
         for widgets in ((QLabel("Colormap:"), self.combo_cmap, self.chk_invert), (self.btn_export,),
                         (self.chk_profiles, self.combo_profile_mode), (QLabel("Contrast:"), self.sl_contrast),
                         (QLabel("γ:"), self.spin_gamma), (QLabel("Norm:"), self.combo_norm),
-                        (self.chk_sym, self.combo_center, self.lbl_center), (self.chk_image_origin,)):
+                        (self.chk_sym, self.combo_center, self.btn_center_region, self.lbl_center), (self.chk_image_origin,)):
             row_disp.addWidget(group(*widgets))
         row_disp.addWidget(self._sync_group_box)
         if getattr(self.parent_panel, "_compact", False):  # embedded single view: no sync / close
@@ -944,22 +948,27 @@ class SliceWidget(QFrame):
         mode = self.combo_center.currentText()
         if mode == "0" or not fin.size:
             return 0.0
-        if mode == "mean":
-            return float(fin.mean())
-        if mode == "background" and self.sym_bg_box and a.ndim == 2:
+        if self.sym_bg_box and a.ndim == 2:  # the drawn region
             b = self.sym_bg_box
             sub = a[max(int(b["y0"]), 0):int(b["y1"]) + 1, max(int(b["x0"]), 0):int(b["x1"]) + 1]
             sub = sub[np.isfinite(sub)]
             if sub.size:
-                return float(sub.mean())
-        return float(np.median(fin))
+                fin = sub
+        return float(fin.mean()) if mode == "mean" else float(np.median(fin))
 
-    def _on_center_chosen(self, *_):
-        """'background' chosen: drag a rectangle on the map; its mean becomes the white point."""
-        if self.combo_center.currentText() != "background":
+    def _center_region_toggled(self, on: bool):
+        """Region on: drag a rectangle; the median / mean centre is taken there. Off: the whole map."""
+        if not on:
+            self.cancel_tool()
+            self.sym_bg_box = None
+            self.redraw()
+            self._draw_overlays()
+            self.canvas.draw_idle()
             return
         if not self.chk_sym.isChecked():
             self.chk_sym.setChecked(True)
+        if self.combo_center.currentText() == "0":
+            self.combo_center.setCurrentText("median")
 
         def done(box):
             self.sym_bg_box = box
@@ -1108,7 +1117,7 @@ class SliceWidget(QFrame):
                 pass
         self._overlay_artists = []
         overlays = list(getattr(self.parent_panel, "overlays", []) or [])
-        if self.sym_bg_box and self.combo_center.currentText() == "background":  # the white-point region
+        if self.sym_bg_box and self.combo_center.currentText() != "0":  # the region of the median / mean
             overlays.append({**self.sym_bg_box, "kind": "rect", "color": "cyan"})
         for ov in overlays:
             if tuple(ov.get("dims", (self.y_idx, self.x_idx))) != (self.y_idx, self.x_idx):
