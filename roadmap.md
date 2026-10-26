@@ -86,7 +86,7 @@ Grand App
 	- [x] Calculate + analyse in the PEEM panel (`gui/components/peem_map_tools.py`, service steps `gui/services/peem_steps/`): CP/CM pairs after Stack Pairs + Drift → asymmetry map ((CM−CP)/(CM+CP), (LV−LH)/(LV+LH)), line profiles (PDF), histogram, FFT, ROI statistics (split at the background zero), export (TIFF + colour PNG, options)
 	- [x] **→ Sum Rule**: corrected CP/CM pairs → new dataset with an energy per pair → Sum Rule window (XAS suite, From PEEM)
 	- [x] Spatial domain analysis (`core/peem/domain_analysis.py`, service in `peem_service.py`, Analysis tab **Domains** in `peem_panel.py`): maps pushed from the Map view (raw values or as shown); ROI / background region drawn on the pushed map in Domains (auto flake outline, save / load, ROI statistics) → TV denoise, flake (pushed / automatic), background (Gaussian / region / none), FFT filter, three states, up / down, width map, skeleton, walls → f_up, f_down, ⟨m_z⟩, counts, widths, period, walls, stripe direction and alignment; table for all pushed maps, CSV and editable PDF (µm axes); numbers checked against the SDA toolkit
-	- [x] Map tab **6. Flatten** (Igor Flatten along the drawn line → '… · flattened' layer; Use as map data)
+	- [x] Map tab **5. Line profile**: draw the line → **Flatten** (Igor Flatten along it → '… · flattened' layer; Use as map data) → profiles
 	- [ ] Domain analysis: noise floor / brightness-artifact checks (not now)
 	- [ ] More drift methods (sub-pixel, SPEEM Igor ports) and stack clean-up in the panel (back end present: `core/peem/drift.py`, `peem_steps/drift_stack.py`, `cleanup.py`)
 - [x] GUI splitters: non-collapsible panes + stretch on Crystal/PEEM/XAS/Raman/DFT/ARPES/Transport/ML (prevent drag-to-zero)
