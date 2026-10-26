@@ -192,7 +192,9 @@ class PeemChannelSteps:
         if counts:
             out["frames_per_energy"] = {ta: [c[0] for c in counts], tb: [c[1] for c in counts]}
         notes = [x for x in (note, None if points else
-                             "no photon-energy axis: background and sum rule will run on the pair index") if x]
+                             "no photon-energy axis: background and sum rule will run on the pair index",
+                             f"a single photon energy ({points[0]:.2f} eV): no spectrum; the sum rule needs an energy scan "
+                             "across the edge" if points and len(points) == 1 else None) if x]
         if notes:
             out["note"] = "; ".join(notes)
         _record(name, "to sum rule", {k: v for k, v in out.items() if k not in ("name", "frames_per_energy")}

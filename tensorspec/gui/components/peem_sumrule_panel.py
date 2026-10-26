@@ -239,8 +239,9 @@ class PeemSumRulePanel(QWidget):
         for child in meta.get("processed_children", []):
             if not str(child).endswith("_bg"):
                 self.bg_node.addItem(f"Processed / {child}", f"processed/{child}")
-        self.status_label.setText(f"'{name}': {meta.get('n_pairs') or meta.get('n_frames')} pairs, "
-                                  f"channels {', '.join(meta.get('channel_tags') or []) or '?'}")
+        n = int(meta.get("n_pairs") or meta.get("n_frames") or 0)
+        self.status_label.setText(f"'{name}': {n} {'energy' if n == 1 else 'energies'} (one {' / '.join(meta.get('channel_tags') or ['?'])} "
+                                  f"image each)" + ("; a single photon energy: no spectrum to fit (see Spectra)" if n == 1 else ""))
         self._draw_image()
         self._show_spectra()
 
@@ -303,12 +304,13 @@ class PeemSumRulePanel(QWidget):
         ax.clear()
         e = sp["energy"]
         ta, tb = sp["channels"]
-        ax.plot(e, sp[ta], label=ta, color="#60a5fa")
-        ax.plot(e, sp[tb], label=tb, color="#f87171")
+        mk = "o" if len(e) < 30 else None  # few energies (or one): show the points
+        ax.plot(e, sp[ta], label=ta, color="#60a5fa", marker=mk)
+        ax.plot(e, sp[tb], label=tb, color="#f87171", marker=mk)
         ax2 = ax.twinx() if not hasattr(self, "_spec_ax2") else self._spec_ax2
         self._spec_ax2 = ax2
         ax2.clear()
-        ax2.plot(e, sp["dichroism"], label=f"{tb} − {ta}", color="#a78bfa")
+        ax2.plot(e, sp["dichroism"], label=f"{tb} − {ta}", color="#a78bfa", marker=mk)
         ax2.yaxis.tick_right()
         ax2.yaxis.set_label_position("right")
         ax2.set_ylabel(f"{tb} − {ta}")
@@ -319,6 +321,11 @@ class PeemSumRulePanel(QWidget):
         ax.set_title(f"{'region' if self._roi else 'whole image'}: {sp['n_pixels']} px")
         if sp.get("note"):
             self.status_label.setText(sp["note"])
+        if len(e) == 1:  # one photon energy: values, not a spectrum
+            ax.set_title(f"one photon energy ({float(e[0]):.2f} eV): {ta} {float(sp[ta][0]):.4g}, {tb} {float(sp[tb][0]):.4g}, "
+                         f"{tb} − {ta} {float(sp['dichroism'][0]):+.4g}", fontsize=9)
+            self.status_label.setText("This acquisition is at a single photon energy: spectra, background and the sum "
+                                      "rule need an energy scan across the edge (L3 and L2).")
         self.spec_canvas.draw_idle()
         self.view_tabs.setCurrentIndex(1)
 
