@@ -106,8 +106,7 @@ class PeemMapTools:
             b.setToolTip("Open the Sum Rule window with this dataset: ROI spectra, background, sum rule\n"
                          "(the XMCD sum rule needs CP / CM; LH / LV give spectra and background)")
             b.clicked.connect(self._send)
-            lay.addWidget(b)
-            self.btn_sum_rule = b
+            self.btn_sum_rule = b  # placed by the panel, right after 3. Drift
 
         an = QGroupBox("5. Line profile")
         bold_titles(an)

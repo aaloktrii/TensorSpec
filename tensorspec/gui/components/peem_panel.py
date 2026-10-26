@@ -167,6 +167,8 @@ class PeemPanel(QWidget):
         from tensorspec.gui.components.peem_map_tools import PeemMapTools
         self.map_tools = PeemMapTools(self.service, lambda: self._dataset_name, self,
                                       send_to_sum_rule=self._to_sum_rule, on_map_made=self._refresh_meta)
+        if hasattr(self.map_tools, "btn_sum_rule"):  # the corrected pairs go to the Sum Rule window after Drift
+            control_layout.insertWidget(control_layout.indexOf(drift_group) + 1, self.map_tools.btn_sum_rule)
         control_layout.addWidget(self.map_tools.controls)
 
         control_layout.addStretch()
