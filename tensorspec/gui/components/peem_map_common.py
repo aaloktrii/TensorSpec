@@ -41,21 +41,22 @@ def _coords_row(placeholder: str, on_set) -> tuple[QHBoxLayout, QLineEdit]:
     return row, edit
 
 
-# Colours of the other suites' main buttons (QE / Wannier90: Load W90 #5cb85c, Run #c82333, Fetch
-# #17a2b8; ARPES: Push #E67E22). Kept to the few main steps so the panel stays clean.
+# Lighter shades of the other suites' main-button colours (QE / Wannier90: Load W90 green, Run red,
+# Fetch teal; ARPES: Push orange), with dark text. Kept to the few main steps so the panel stays clean.
 ACTION = {
-    "load": ("#5cb85c", "white", "#2d5c2d"),
-    "map": ("#c82333", "white", "#5c161b"),
-    "domains": ("#E67E22", "white", "#6b3a10"),  # ARPES "Push" orange
-    "handover": ("#17a2b8", "white", "#0c5460"),
+    "load": ("#a9dcab", "#1d3d1f", "#d6e6d6"),
+    "map": ("#f2a9ae", "#5a1418", "#ead3d5"),
+    "domains": ("#f7c896", "#5a3208", "#eadccd"),  # ARPES "Push" orange
+    "handover": ("#a3dbe5", "#0c3f48", "#d2e5e8"),
 }
 
 
 def action_style(button: QPushButton, kind: str) -> QPushButton:
-    """Colour a step's main button like the other suites (bold, coloured, darker when disabled)."""
+    """Colour a step's main button like the other suites (bold, light shade, greyed when disabled)."""
     bg, fg, off = ACTION[kind]
     button.setStyleSheet(f"QPushButton {{ background-color: {bg}; color: {fg}; font-weight: bold; padding: 5px; }}"
-                         f"QPushButton:disabled {{ background-color: {off}; color: #888888; }}")
+                         f"QPushButton:hover {{ border: 1px solid {fg}; }}"
+                         f"QPushButton:disabled {{ background-color: {off}; color: #999999; }}")
     return button
 
 
