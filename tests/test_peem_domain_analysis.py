@@ -80,3 +80,15 @@ def test_auto_flake_and_outline():
     back = roi_to_mask(200, 200, {"kind": "polygon", "points": pts})
     assert (back == flake).mean() > 0.98
     assert set(r["layers"]) == set(da.STEPS)
+
+
+def test_auto_flake_ignores_a_drift_strip_at_the_edge():
+    """The area left uncovered by the drift shift (a noisy strip at an edge) is not taken as the flake."""
+    rng = np.random.default_rng(1)
+    a = rng.normal(0, 0.002, (200, 200))
+    a[60:140, 70:170] += _stripes(n=200)[60:140, 70:170]
+    a[:, :25] = rng.normal(0, 0.05, (200, 25))  # drift strip on the left
+    keep = da.edge_strips(a)
+    assert not keep[:, :25].any() and keep[:, 40:].all()
+    flake = da.analyze(a, flake="auto")["layers"]["flake"].astype(bool)
+    assert not flake[:, :30].any() and flake[60:140, 70:170].mean() > 0.8

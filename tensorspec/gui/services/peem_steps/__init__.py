@@ -99,6 +99,7 @@ checks every public call is listed here and runs the workflow without Qt):
                                           background region; mode 'raw' (values) or 'shown' (colour range
                                           and gamma of the Map view); several maps of several datasets
     domain_inputs, remove_domain_input    the pushed maps
+    domain_look(name, label)              how it looked in the Map view (cmap, range, gamma, ROI / background)
     run_domain_analysis(name, label, **params)
                                           core/peem/domain_analysis (the SDA toolkit's pipeline): normalize,
                                           denoise (TV), local std, flake, background (Gaussian / region /

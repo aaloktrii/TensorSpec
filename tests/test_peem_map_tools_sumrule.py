@@ -297,3 +297,20 @@ def test_push_raw_or_as_shown_with_roi_and_background(qapp, tmp_path, monkeypatc
     dv.items.item(0).setSelected(True)
     dv._export_pdf()
     assert (tmp_path / "d.pdf").stat().st_size > 1000
+
+
+def test_domains_tab_hides_the_left_column_and_shows_the_pushed_look(qapp, tmp_path):
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    t.viewer.primary_view().chk_invert.setChecked(True)
+    t._push()
+    assert p.view_tabs.currentWidget() is t.analysis_view and not p._controls_scroll.isVisibleTo(p)
+    look = p.service.domain_look("img", "domains_1")
+    assert look["cmap"] == "bwr_r" and look["vmin"] < 0 < look["vmax"]
+    t.analysis_view.setCurrentWidget(t.plot_view)
+    assert p._controls_scroll.isVisibleTo(p)
