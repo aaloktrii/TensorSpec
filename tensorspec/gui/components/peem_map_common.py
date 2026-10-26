@@ -54,10 +54,8 @@ ACTION = {
 def action_style(button: QPushButton, kind: str) -> QPushButton:
     """Colour a step's main button like the other suites (bold, light shade, greyed when disabled)."""
     bg, fg, off = ACTION[kind]
-    button.setStyleSheet(f"QPushButton {{ background-color: {bg}; color: {fg}; font-weight: bold; padding: 5px 10px;"
-                         f" border: none; border-radius: 6px; }}"
-                         f"QPushButton:hover {{ border: 1px solid {fg}; }}"
-                         f"QPushButton:disabled {{ background-color: {off}; color: #999999; }}")
+    button.setStyleSheet(f"QPushButton {{ background-color: {bg}; color: {fg}; font-weight: bold; padding: 5px; }}"
+                         f"QPushButton:disabled {{ background-color: {off}; color: #999999; }}")  # as the DFT panel
     return button
 
 
@@ -74,12 +72,11 @@ def _subtitle(text: str) -> QLabel:
 
 
 def tidy_forms(widget) -> None:
-    """Same form look on every platform (macOS otherwise keeps fields at their size hint, right-aligns
-    labels and clips combo texts): labels left, fields grow to the full width, rows top-aligned."""
+    """The TensorSpec form look of the DFT panel on every platform (macOS otherwise keeps fields at their
+    size hint, right-aligns labels and clips combo texts): labels left, fields grow to the full width.
+    Spacing stays the style's default, as in the other suites."""
     for form in widget.findChildren(QFormLayout):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         form.setRowWrapPolicy(QFormLayout.DontWrapRows)
-        form.setHorizontalSpacing(10)
-        form.setVerticalSpacing(6)
