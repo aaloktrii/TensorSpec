@@ -49,7 +49,8 @@ checks every public call is listed here and runs the workflow without Qt):
     compute_pcd, compute_pld, compute_pmld, compute_l2_ld, split_ld_by_reference
 
 6. Viewing and image analysis  [image_analysis]
-    view_frames, view_image, map_layers, map_variables, layer_name, layer_for, parse_layer
+    view_frames, view_image, map_layers, shown_layers, map_variables, layer_name, layer_for, parse_layer
+                                          (shown_layers: map_layers less sums, copies, working arrays)
                                           (the stack's CP + CM image is the layer 'stack · cp+cm')
     display_hint                          colour scale for a shown image (cmap, symmetric, centre)
     line_profile, stack_line_profiles, histogram, image_fft

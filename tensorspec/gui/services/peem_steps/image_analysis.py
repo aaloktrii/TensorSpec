@@ -78,6 +78,22 @@ class PeemImageAnalysisSteps:
                     out[self.layer_for(name, kind, var)] = a.astype(float)
         return out
 
+    # variables a viewer does not need to list: sums (= mean x frames), the asymmetry map's copies of the
+    # stacked means, and the domain map's working arrays
+    _HIDDEN_LAYERS = {"stack": ("sum_",), "pcd": ("mean_",), "pld": ("mean_",), "domain_map": ("m", "roi")}
+
+    def shown_layers(self, name: str) -> dict[str, np.ndarray]:
+        """map_layers without duplicates or working arrays: the stacked images (A+B, A, B), each map
+        and its difference, the domain map, comparisons. What the Map view lists."""
+        out = {}
+        for layer, a in self.map_layers(name).items():
+            kind, var = self.parse_layer(layer)
+            hide = self._HIDDEN_LAYERS.get(kind, ())
+            if var != "data" and any(var == h or (h.endswith("_") and var.startswith(h)) for h in hide):
+                continue
+            out[layer] = a
+        return out
+
     def map_variables(self, name: str, kind: str) -> list[str]:
         ds = global_workspace.pull_analysis_data(name, kind)
         return [] if ds is None else [str(v) for v in ds.data_vars]

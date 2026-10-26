@@ -320,7 +320,8 @@ class PeemMapTools:
             self._loaded_name = name
         kind, var = select or (self._shown() if base == "stack" or name == self._shown_name else ("nc", "data"))
         self._shown_name = name
-        self.viewer.set_layers(self.service.map_layers(name), select=self.service.layer_for(name, kind, var))
+        self.viewer.set_layers(self.service.shown_layers(name), select=self.service.layer_for(name, kind, var),
+                               show_data=False)  # the data is the stack's A+B image, listed as a layer
         self._on_layer_changed()
         self._fill_show(name)
         i = self.show_combo.findData((kind, var))
