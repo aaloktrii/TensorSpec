@@ -262,6 +262,8 @@ class SliceWidget(QFrame):
         self.combo_center.currentIndexChanged.connect(self.redraw)
         self.combo_center.activated.connect(self._on_center_chosen)
         self.sym_bg_box: dict | None = None  # background region for the 'background' centre (pixel indices)
+        self.lbl_center = QLabel("")
+        self.lbl_center.setToolTip("Value at the centre (white) of the symmetric colour scale")
         self.chk_image_origin = QCheckBox("Top-left origin")
         self.chk_image_origin.setToolTip("Image convention: first row at the top (PEEM / camera images)")
         self.chk_image_origin.toggled.connect(self.redraw)
@@ -286,7 +288,7 @@ class SliceWidget(QFrame):
         for widgets in ((QLabel("Colormap:"), self.combo_cmap, self.chk_invert), (self.btn_export,),
                         (self.chk_profiles, self.combo_profile_mode), (QLabel("Contrast:"), self.sl_contrast),
                         (QLabel("γ:"), self.spin_gamma), (QLabel("Norm:"), self.combo_norm),
-                        (self.chk_sym, self.combo_center), (self.chk_image_origin,)):
+                        (self.chk_sym, self.combo_center, self.lbl_center), (self.chk_image_origin,)):
             row_disp.addWidget(group(*widgets))
         row_disp.addWidget(self._sync_group_box)
         if getattr(self.parent_panel, "_compact", False):  # embedded single view: no sync / close
@@ -774,6 +776,7 @@ class SliceWidget(QFrame):
                     half = max(abs(vmax_adj - c), abs(vmin - c)) or 1.0
                     vmin, vmax_adj = c - half, c + half
             self.shown_limits = (float(vmin), float(vmax_adj))
+            self.lbl_center.setText(f"white at {(vmin + vmax_adj) / 2:+.4g}" if self.chk_sym.isChecked() else "")
             gamma = float(self.spin_gamma.value())
             cmap_name = _mpl_cmap(self.combo_cmap.currentText(), self.chk_invert.isChecked())
             self.im_main.set_cmap(cmap_name)
