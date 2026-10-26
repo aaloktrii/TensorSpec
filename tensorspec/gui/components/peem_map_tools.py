@@ -445,9 +445,7 @@ class PeemMapTools:
         lo, hi = self.range_min.value(), self.range_max.value()
         view = self.viewer.primary_view()
         if which and view is not None and view.chk_sym.isChecked():
-            img = self.viewer.current_image()
-            fin = np.asarray(img, float)[np.isfinite(img)] if img is not None else np.array([])
-            c = float(np.median(fin)) if (view.combo_center.currentText() == "median" and fin.size) else 0.0
+            c = view.sym_center()  # 0, median, mean or the background region's mean
             half = abs((hi if which == "max" else lo) - c)
             lo, hi = c - half, c + half
         if hi > lo:
