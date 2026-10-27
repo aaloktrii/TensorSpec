@@ -607,3 +607,29 @@ def test_export_to_folder_is_shared_by_every_save_dialog(qapp, tmp_path, monkeyp
     finally:
         for k, v in saved.items():
             st.remove(k) if v is None else st.setValue(k, v)
+
+
+def test_sym_keeps_every_display_control_visible(qapp, tmp_path):
+    """Ticking Sym ± adds the 'white at …' label; when the row then wraps onto another line the row grows,
+    so no control is pushed out of sight (Frame and Map viewers, narrow and wide windows)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QWidget
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    p.show()
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    p.map_tools._asymmetry()
+    for tab, viewer in ((0, p.frame_viewer), (1, p.map_tools.viewer)):
+        p.view_tabs.setCurrentIndex(tab)
+        v = viewer.views[0] if getattr(viewer, "views", None) else viewer
+        for width in (650, 800, 950, 1400):
+            p.resize(width, 800)
+            for state in (False, True, False, True):
+                v.chk_sym.setChecked(state)
+                qapp.processEvents()
+                row = v.row_display
+                shown = [g for g in row.findChildren(QWidget, options=Qt.FindDirectChildrenOnly) if g.isVisibleTo(row)]
+                assert all(g.geometry().bottom() < row.height() for g in shown), (tab, width, state)
+    p.close()
