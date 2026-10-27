@@ -620,6 +620,7 @@ class PeemPanel(QWidget):
                         idx = view.combo_cmap.findText("bwr")
                         if idx >= 0:
                             view.combo_cmap.setCurrentIndex(idx)
+                            view.chk_invert.setChecked(True)  # positive blue, negative red
         except Exception as exc:
             self.status_label.setText(f"View error: {exc}")
 

@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from tensorspec.gui.components.peem_map_common import _dspin, _numbers
 
-CMAPS = ("bwr", "RdBu_r", "seismic", "coolwarm", "gray", "viridis", "magma", "inferno", "cividis")
+CMAPS = ("bwr_r", "RdBu", "seismic_r", "coolwarm_r", "bwr", "gray", "viridis", "magma", "inferno", "cividis")  # *_r: positive blue
 
 
 def _ispin(lo: int, hi: int, val: int) -> QSpinBox:

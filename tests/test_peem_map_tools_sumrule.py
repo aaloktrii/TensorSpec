@@ -95,7 +95,8 @@ def test_peem_panel_sections_and_sum_rule_window(qapp, tmp_path, monkeypatch):
     p._dataset_name = _images(tmp_path, p.service)
     p._refresh_meta()
     t._asymmetry()
-    assert t._shown() == ("pcd", "data") and t.viewer.primary_view().combo_cmap.currentText() == "bwr"
+    v0 = t.viewer.primary_view()
+    assert t._shown() == ("pcd", "data") and v0.combo_cmap.currentText() == "bwr" and v0.chk_invert.isChecked()  # positive blue
     t._on_line({"a": (32, 4), "b": (32, 60)})
     t._add_profile()
     t._histogram()
