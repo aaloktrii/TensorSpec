@@ -57,6 +57,8 @@ class PeemLoadThread(QThread):
     def run(self):
         summaries, errors = [], []
         for kind, source, name in self.jobs:
+            if self.isInterruptionRequested():  # the window is closing: stop after the current job
+                break
             try:
                 if kind == "beamline":
                     summary = self.service.load_beamline(source, name=name)
@@ -391,6 +393,18 @@ class PeemPanel(QWidget):
         self._load_thread = PeemLoadThread(self.service, jobs)
         self._load_thread.finished_signal.connect(self._on_load_finished)
         self._load_thread.start()
+        from PySide6.QtWidgets import QApplication
+        if QApplication.instance() is not None and not getattr(self, "_quit_hooked", False):
+            QApplication.instance().aboutToQuit.connect(self._stop_load_thread)
+            self._quit_hooked = True
+
+    def _stop_load_thread(self):
+        """Closing during a load: finish the current folder, skip the rest, then quit (Qt aborts the whole
+        app if a running QThread is destroyed)."""
+        th = self._load_thread
+        if th is not None and th.isRunning():
+            th.requestInterruption()
+            th.wait()
 
     def _set_load_buttons_enabled(self, enabled: bool):
         self.btn_load_stack.setEnabled(enabled)
