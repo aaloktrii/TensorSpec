@@ -36,7 +36,8 @@ from PySide6.QtWidgets import (
 
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.core.peem import domain_analysis as da
-from tensorspec.gui.components.peem_map_common import _dspin, action_style, bold_titles, tidy_forms
+from tensorspec.gui.components.peem_map_common import (_dspin, action_style, bold_titles, export_dir,
+                                                         export_dir_row, export_path, tidy_forms)
 from tensorspec.gui.services.peem_service import PeemService
 from tensorspec.plotting import peem_plots
 
@@ -115,6 +116,8 @@ class PeemPanel(QWidget):
         self.dataset_combo.setToolTip("Loaded datasets (e.g. several .nc map files); pick one to work on")
         self.dataset_combo.activated.connect(lambda *_: self.select_dataset(self.dataset_combo.currentText()))
         load_form.addRow("Dataset:", self.dataset_combo)
+        self.export_row = export_dir_row()
+        load_form.addRow("Export to:", self.export_row)
         self.status_label = QLabel("No PEEM data loaded")
         self.status_label.setWordWrap(True)
         load_form.addRow(self.status_label)
@@ -798,6 +801,8 @@ class PeemDomainView(QWidget):
             b.setToolTip(tip)
             b.clicked.connect(fn)
             row.addWidget(b)
+        self.export_row = export_dir_row()
+        f.addRow("Export to:", self.export_row)
         f.addRow("Export:", row)
         row = QHBoxLayout()
         for label, fn in (("Table CSV…", self._export_table), ("Sizes CSV…", self._export_sizes)):
@@ -1182,7 +1187,7 @@ class PeemDomainView(QWidget):
         cur = self._current()
         if cur is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Save ROI outline", f"{cur[0]}_roi.json", "ROI (*.json)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save ROI outline", export_path(f"{cur[0]}_roi.json"), "ROI (*.json)")
         if path:
             try:
                 self.status.setText(f"Saved {self.service.save_domain_region(cur[0], cur[1], path, 'roi')}")
@@ -1193,7 +1198,7 @@ class PeemDomainView(QWidget):
         cur = self._current()
         if cur is None:
             return
-        path, _ = QFileDialog.getOpenFileName(self, "Load ROI outline", "", "ROI (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load ROI outline", export_dir(), "ROI (*.json)")
         if path:
             try:
                 self.service.load_domain_region(cur[0], cur[1], path, "roi")
@@ -1223,7 +1228,7 @@ class PeemDomainView(QWidget):
         if not sel:
             return
         name, label = sel[0]
-        path, _ = QFileDialog.getSaveFileName(self, "Export pushed map", f"{name}_{label}_pushed.pdf", "PDF (*.pdf)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export pushed map", export_path(f"{name}_{label}_pushed.pdf"), "PDF (*.pdf)")
         if path:
             try:
                 self.service.export_domain_figure(path, name, label, "input")
@@ -1237,7 +1242,7 @@ class PeemDomainView(QWidget):
             return
         name, label = sel[0]
         step = self.step.currentData()
-        path, _ = QFileDialog.getSaveFileName(self, "Export PDF", f"{name}_{label}_{step}.pdf", "PDF (*.pdf)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export PDF", export_path(f"{name}_{label}_{step}.pdf"), "PDF (*.pdf)")
         if path:
             try:
                 self.service.export_domain_figure(path, name, label, step)
@@ -1252,7 +1257,7 @@ class PeemDomainView(QWidget):
         cur = self._current()
         if cur is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Save analysis", f"{cur[0]}_{cur[1]}.nc", "Domain analysis (*.nc)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save analysis", export_path(f"{cur[0]}_{cur[1]}.nc"), "Domain analysis (*.nc)")
         if path:
             try:
                 self.status.setText(f"Saved {self.service.save_domain_analysis(cur[0], cur[1], path)}")
@@ -1260,7 +1265,7 @@ class PeemDomainView(QWidget):
                 self._err(str(exc))
 
     def _load_analysis(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load analysis", "", "Domain analysis (*.nc)")
+        path, _ = QFileDialog.getOpenFileName(self, "Load analysis", export_dir(), "Domain analysis (*.nc)")
         if not path:
             return
         try:
@@ -1293,7 +1298,7 @@ class PeemDomainView(QWidget):
             self.fft.setChecked(bool(int(params["fft_filter"])))
 
     def _export_table(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export table", "domain_analysis.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export table", export_path("domain_analysis.csv"), "CSV (*.csv)")
         if path:
             try:
                 self.status.setText(f"Saved {self.service.export_domain_table(path)}")
@@ -1305,7 +1310,7 @@ class PeemDomainView(QWidget):
         if not sel:
             return
         name, label = sel[0]
-        path, _ = QFileDialog.getSaveFileName(self, "Export domain sizes", f"{name}_{label}_sizes.csv", "CSV (*.csv)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export domain sizes", export_path(f"{name}_{label}_sizes.csv"), "CSV (*.csv)")
         if path:
             try:
                 self.status.setText(f"Saved {self.service.export_domain_areas(path, name, label)}")
