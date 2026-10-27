@@ -481,3 +481,37 @@ def test_subtract_offset_and_white_point_label(qapp, tmp_path):
     v = t.viewer.primary_view()
     lo, hi = t.viewer.color_limits()
     assert lo == pytest.approx(-hi) and v.combo_cmap.currentText() == "bwr" and v.lbl_center.text() == "white at +0"
+
+
+def test_move_outline_and_export_the_pushed_map(qapp, tmp_path, monkeypatch):
+    """Domains: Move outline shifts the ROI (rect or polygon) by a drag or the arrow keys; the left panel
+    (pushed map with outlines) exports as PDF."""
+    from PySide6.QtWidgets import QFileDialog
+    from tensorspec.gui.components.peem_panel import PeemDomainView, PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    t._push()
+    dv = t.domain_view
+    dv._set_region("roi", {"kind": "rect", "x0": 10, "x1": 30, "y0": 10, "y1": 30})
+    poly = PeemDomainView._shift_region({"kind": "polygon", "points": [[1, 1], [5, 1], [5, 4]]}, 2, -1)
+    assert poly["points"][0] == [3.0, 0.0]
+    from types import SimpleNamespace as NS
+    dv._move_key(NS(key="right"))  # nothing selected: nothing moves
+    assert p.service.domain_regions("img", "domains_1")["roi"]["x0"] == 10
+    s_ = dv._scale
+    dv._move_press(NS(inaxes=dv._ax, xdata=20 * s_, ydata=20 * s_, button=1))  # click inside the ROI: selected
+    dv._move_release(NS(inaxes=dv._ax, xdata=20 * s_, ydata=20 * s_))
+    assert dv._move["selected"] == "roi"
+    dv._move_key(NS(key="right"))
+    dv._move_key(NS(key="shift+down"))
+    roi = p.service.domain_regions("img", "domains_1")["roi"]
+    assert (roi["x0"], roi["y0"]) == (11, 20)
+    dv._move_press(NS(inaxes=dv._ax, xdata=60 * s_, ydata=2 * s_, button=1))  # click outside: deselected
+    assert dv._move["selected"] is None
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "pushed.pdf"), "")))
+    dv._export_pushed_pdf()
+    assert (tmp_path / "pushed.pdf").stat().st_size > 1000
