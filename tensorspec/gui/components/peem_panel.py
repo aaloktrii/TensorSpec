@@ -790,11 +790,20 @@ class PeemDomainView(QWidget):
         self.sizes.toggled.connect(self._show)
         f.addRow(self.sizes)
         row = QHBoxLayout()
-        for label, fn in (("PDF…", self._export_pdf), ("Table CSV…", self._export_table), ("Sizes CSV…", self._export_sizes)):
+        for label, fn, tip in (("Pushed map PDF…", self._export_pushed_pdf,
+                                "Left panel: the pushed map as in the Map view, with the ROI / background outlines"),
+                               ("Step PDF…", self._export_pdf, "Right panel: the step chosen under Show (right)")):
             b = QPushButton(label)
+            b.setToolTip(tip)
             b.clicked.connect(fn)
             row.addWidget(b)
         f.addRow("Export:", row)
+        row = QHBoxLayout()
+        for label, fn in (("Table CSV…", self._export_table), ("Sizes CSV…", self._export_sizes)):
+            b = QPushButton(label)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        f.addRow(row)
         lay.addWidget(g)
         self.status = QLabel("")  # shown under the image (see _build_results)
         self.status.setWordWrap(True)
@@ -809,7 +818,11 @@ class PeemDomainView(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         self.fig = Figure(figsize=(6, 4.5), layout="constrained")
         self.canvas = FigureCanvas(self.fig)
-        v.addWidget(self.canvas, 1)
+        self.canvas.setFocusPolicy(Qt.StrongFocus)  # arrow keys move the selected outline
+        self._move = {"selected": None, "start": None, "region": None, "preview": None}
+        for e, fn in (("button_press_event", self._move_press), ("motion_notify_event", self._move_motion),
+                      ("button_release_event", self._move_release), ("key_press_event", self._move_key)):
+            self.canvas.mpl_connect(e, fn)  # click an outline on the pushed map to select it        v.addWidget(self.canvas, 1)
         self.caption = QLabel("")
         self.caption.setWordWrap(True)
         v.addWidget(self.caption)
@@ -870,6 +883,7 @@ class PeemDomainView(QWidget):
 
     # ------------------------------------------------------------------ actions
     def _on_item_changed(self):
+        self._move["selected"] = None
         self.auto_flake.blockSignals(True)  # the tick belongs to the map it was ticked on
         self.auto_flake.setChecked(False)
         self.auto_flake.blockSignals(False)
@@ -924,6 +938,15 @@ class PeemDomainView(QWidget):
         im0 = peem_plots.pushed_map(ax0, self.service.domain_layer(name, label, "input"), look, f"{name} · pushed map")
         self.fig.colorbar(im0, ax=ax0, fraction=0.04, pad=0.02)
         self._ax, self._scale = ax0, (um or 1.0)  # drawing happens on the pushed map
+        sel_w = self._move.get("selected")
+        region = self.service.domain_regions(name, label).get(sel_w) if sel_w else None
+        if region is not None:  # the selected outline, thicker (axes limits unchanged)
+            xs, ys = self._region_xy(region)
+            lims = ax0.get_xlim(), ax0.get_ylim()
+            ax0.plot([v * self._scale for v in xs], [v * self._scale for v in ys],
+                     color="yellow" if sel_w == "roi" else "cyan", lw=2.6, zorder=15, scalex=False, scaley=False)
+            ax0.set_xlim(*lims[0])
+            ax0.set_ylim(*lims[1])
         ax1 = self.fig.add_subplot(1, n, 2)
         if result:
             im1 = peem_plots.domain_step(ax1, self.service.domain_layer(name, label, step), step, um,
@@ -991,6 +1014,108 @@ class PeemDomainView(QWidget):
         self.status.setText({"roi": "ROI", "bg": "Background region"}[which] + (" set." if region else " cleared."))
         self.refresh(select=cur)
 
+    # ---- move an outline (drawn, typed, auto or loaded)
+    @staticmethod
+    def _shift_region(region: dict, dx: float, dy: float) -> dict:
+        r = dict(region)
+        if r["kind"] == "rect":
+            dx, dy = int(round(dx)), int(round(dy))
+            r.update(x0=r["x0"] + dx, x1=r["x1"] + dx, y0=r["y0"] + dy, y1=r["y1"] + dy)
+        elif r["kind"] == "polygon":
+            r["points"] = [[float(x) + dx, float(y) + dy] for x, y in r["points"]]
+        elif r["kind"] == "ellipse":
+            r.update(cx=r["cx"] + dx, cy=r["cy"] + dy)
+        return r
+
+    @staticmethod
+    def _region_xy(region: dict) -> tuple[list[float], list[float]]:
+        """Outline of a region in px (closed), for the move preview."""
+        if region["kind"] == "rect":
+            xs = [region["x0"], region["x1"], region["x1"], region["x0"], region["x0"]]
+            ys = [region["y0"], region["y0"], region["y1"], region["y1"], region["y0"]]
+        elif region["kind"] == "polygon":
+            xs = [p[0] for p in region["points"]] + [region["points"][0][0]]
+            ys = [p[1] for p in region["points"]] + [region["points"][0][1]]
+        else:
+            t = np.linspace(0, 2 * np.pi, 64)
+            xs = list(region["cx"] + region["rx"] * np.cos(t))
+            ys = list(region["cy"] + region["ry"] * np.sin(t))
+        return xs, ys
+
+    def _move_press(self, ev):
+        """Click inside the ROI / background region on the pushed map: select it (arrows move it, a drag too);
+        click elsewhere: deselect. Ignored while a rectangle / polygon is being drawn."""
+        cur = self._selected()[0] if self._selected() else None
+        if cur is None or self._tool is not None or ev.inaxes is not getattr(self, "_ax", None) or ev.xdata is None:
+            return
+        self.canvas.setFocus()
+        s = self._scale
+        x, y = ev.xdata / s, ev.ydata / s
+        regions = self.service.domain_regions(*cur)
+        look = self.service.domain_look(*cur)
+        which = None
+        for w in ("roi", "bg"):  # the region under the mouse
+            m = look.get(w)
+            if m is not None and 0 <= int(y) < m.shape[0] and 0 <= int(x) < m.shape[1] and m[int(y), int(x)]:
+                which = w
+                break
+        if which != self._move["selected"]:  # this click only selects (or deselects)
+            self._move["selected"] = which
+            self._show()
+            self.status.setText(f"{'ROI' if which == 'roi' else 'Background region'} selected: arrow keys move it "
+                                "(Shift + arrow: 10 px), or drag it; click elsewhere to deselect." if which else "")
+            return
+        if which is None or regions.get(which) is None:
+            return
+        from matplotlib.lines import Line2D
+
+        line = Line2D([], [], color="yellow" if which == "roi" else "cyan", lw=1.2, ls="--", zorder=20)
+        self._ax.add_line(line)
+        self._move.update(start=(x, y), region=regions[which], preview=line)
+
+    def _move_motion(self, ev):
+        mv = self._move
+        if mv["start"] is None or ev.inaxes is not self._ax or ev.xdata is None:
+            return
+        s = self._scale
+        dx, dy = ev.xdata / s - mv["start"][0], ev.ydata / s - mv["start"][1]
+        xs, ys = self._region_xy(self._shift_region(mv["region"], dx, dy))
+        mv["preview"].set_data([v * s for v in xs], [v * s for v in ys])
+        self.canvas.draw_idle()
+
+    def _move_release(self, ev):
+        mv = self._move
+        if mv["start"] is None:
+            return
+        s = self._scale
+        if ev.xdata is not None and ev.inaxes is self._ax:
+            dx, dy = ev.xdata / s - mv["start"][0], ev.ydata / s - mv["start"][1]
+        else:
+            dx = dy = 0.0
+        region, which = mv["region"], mv["selected"]
+        mv.update(start=None, region=None, preview=None)
+        if abs(dx) < 0.5 and abs(dy) < 0.5:  # a click: selection only
+            return
+        self._set_region(which, self._shift_region(region, dx, dy))
+        self.status.setText(f"{'ROI' if which == 'roi' else 'Background region'} moved by ({dx:+.0f}, {dy:+.0f}) px.")
+
+    def _move_key(self, ev):
+        steps = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
+        key = str(ev.key or "")
+        base = key.replace("shift+", "")
+        if base not in steps or not self._selected():
+            return
+        k = 10 if "shift" in key else 1
+        which = self._move.get("selected")
+        if which is None:
+            return
+        region = self.service.domain_regions(*self._selected()[0]).get(which)
+        if region is None:
+            return
+        dx, dy = steps[base]
+        self._set_region(which, self._shift_region(region, dx * k, dy * k))
+        self.canvas.setFocus()
+
     def _set_roi_typed(self):
         from tensorspec.gui.components.peem_map_common import _numbers
 
@@ -1057,6 +1182,20 @@ class PeemDomainView(QWidget):
         zero = f"background mean {st['zero']:+.4g}" if st["zero_from"] != "0" else "0 (tick Background region for the map's own zero)"
         self.status.setText(f"{where}: f_up {st['f_up']:.3f}, f_down {st['f_down']:.3f}, <m_z> {st['mz']:+.3f}; "
                             f"mean {st['mean']:+.4g} (zero = {zero})")
+
+    def _export_pushed_pdf(self):
+        """The left panel as an editable PDF: pushed map (Map-view look), ROI / background outlines, um axes."""
+        sel = self._selected()
+        if not sel:
+            return
+        name, label = sel[0]
+        path, _ = QFileDialog.getSaveFileName(self, "Export pushed map", f"{name}_{label}_pushed.pdf", "PDF (*.pdf)")
+        if path:
+            try:
+                self.service.export_domain_figure(path, name, label, "input")
+                self.status.setText(f"Saved {path}")
+            except ValueError as exc:
+                self._err(str(exc))
 
     def _export_pdf(self):
         sel = self._selected()
