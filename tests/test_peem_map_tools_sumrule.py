@@ -636,7 +636,8 @@ def test_sym_keeps_every_display_control_visible(qapp, tmp_path):
 
 
 def test_size_fits_only_on_click_and_export(qapp, tmp_path, monkeypatch):
-    """Domains: Log-normal vs Gaussian is computed and drawn only on click (2 x 2 next to the pushed map),
+    """Domains: Log-normal vs Gaussian is computed and drawn only on click (widths over periods, up blue and
+    down red on the same axes, next to the pushed map),
     goes away when Show (right) changes or the map runs again; PDF + CSV… writes both files."""
     import csv as _csv
     from PySide6.QtWidgets import QFileDialog
@@ -658,9 +659,14 @@ def test_size_fits_only_on_click_and_export(qapp, tmp_path, monkeypatch):
     assert calls == [] and len(dv.fig.axes) <= 4  # Run does not fit
     dv._show_fits()
     assert len(calls) == 1 and "ΔAIC" in dv.caption.text() or "too few" in dv.caption.text()
-    assert sum(1 for a in dv.fig.axes if a.get_title().startswith(("width ·", "period ·"))) == 4
+    fit_axes = [a for a in dv.fig.axes if a.get_title().startswith("domain ")]
+    assert [a.get_title().split(":")[0] for a in fit_axes] == ["domain width", "domain period"]
+    for a in fit_axes:  # up and down on the same axes: blue and red
+        colours = {tuple(round(c, 2) for c in ln.get_color()) if not isinstance(ln.get_color(), str) else ln.get_color()
+                   for ln in a.get_lines()}
+        assert {"#0000ff", "#ff0000"} <= colours
     dv.step.setCurrentIndex((dv.step.currentIndex() + 1) % dv.step.count())
-    assert not any(a.get_title().startswith("width ·") for a in dv.fig.axes)
+    assert not any(a.get_title().startswith("domain width") for a in dv.fig.axes)
     out = tmp_path / "fits.pdf"
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(out), "")))
     dv._export_fits()

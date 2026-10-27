@@ -866,7 +866,7 @@ class PeemDomainView(QWidget):
         b.clicked.connect(self._show_fits)
         row.addWidget(b)
         b = QPushButton("PDF + CSV…")
-        b.setToolTip("The four fits as an editable PDF, and their numbers (medians, σ_ln, AIC, BIC, KS, ΔAIC)\n"
+        b.setToolTip("The fits as an editable PDF (widths | periods, up blue, down red), and their numbers (medians, σ_ln, AIC, BIC, KS, ΔAIC)\n"
                      "as <name>_fits.csv next to it")
         b.clicked.connect(self._export_fits)
         row.addWidget(b)
@@ -1068,8 +1068,8 @@ class PeemDomainView(QWidget):
         fits = fits[1] if fits and fits[0] == (name, label) and result else None
         sizes = self.sizes.isChecked() and bool(result) and fits is None
         n = 3 if sizes else 2
-        if fits is not None:  # left: pushed map; right: the 2 x 2 log-normal vs Gaussian fits
-            gs = self.fig.add_gridspec(2, 3, width_ratios=[1.4, 1, 1])
+        if fits is not None:  # left: pushed map; right: widths over periods, up and down on each
+            gs = self.fig.add_gridspec(2, 2, width_ratios=[1.2, 1])
             ax0 = self.fig.add_subplot(gs[:, 0])
         else:
             ax0 = self.fig.add_subplot(1, n, 1)
@@ -1086,7 +1086,7 @@ class PeemDomainView(QWidget):
             ax0.set_xlim(*lims[0])
             ax0.set_ylim(*lims[1])
         if fits is not None:
-            peem_plots.size_fits([[self.fig.add_subplot(gs[r, c]) for c in (1, 2)] for r in (0, 1)], fits)
+            peem_plots.size_fits([self.fig.add_subplot(gs[r, 1]) for r in (0, 1)], fits)
             self.caption.setText(peem_plots.size_fits_text(fits))
             self.canvas.draw_idle()
             return
