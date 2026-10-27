@@ -2031,10 +2031,14 @@ class DataViewerPanel(QWidget):
         for v in self._iter_slice_widgets():
             if limits is not None:
                 v.fixed_limits = None if limits == "auto" else (float(limits[0]), float(limits[1]))
-            for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect):
+            for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect, v.chk_invert):
                 w.blockSignals(True)
             if cmap is not None and v.combo_cmap.findText(cmap) >= 0:
                 v.combo_cmap.setCurrentText(cmap)
+                v.chk_invert.setChecked(False)
+            elif cmap is not None and cmap.endswith("_r") and v.combo_cmap.findText(cmap[:-2]) >= 0:
+                v.combo_cmap.setCurrentText(cmap[:-2])  # e.g. bwr_r = bwr with Invert ticked
+                v.chk_invert.setChecked(True)
             if symmetric is not None:
                 v.chk_sym.setChecked(symmetric)
             if center is not None:
@@ -2043,7 +2047,7 @@ class DataViewerPanel(QWidget):
                 v.chk_image_origin.setChecked(image_origin)
             if aspect_equal is not None:
                 v.combo_aspect.setCurrentIndex(1 if aspect_equal else 0)
-            for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect):
+            for w in (v.combo_cmap, v.chk_sym, v.combo_center, v.chk_image_origin, v.combo_aspect, v.chk_invert):
                 w.blockSignals(False)
             v.update_aspect()
             v.redraw()
