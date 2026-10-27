@@ -19,9 +19,10 @@ panel, step by step:
     k  skeleton         medial axis of each state (+1 up, -1 down)
     l  walls            the m = 0 contour inside the flake
 
-Numbers: f_up, f_down, <m_z> = (A_up - A_down) / (A_up + A_down), three-state fractions, domain counts
-and mean area, widths (2 A / P and skeleton mean / median per state), period, wall length and density,
-stripe direction and alignment. Defaults are the toolkit's ``defaults.py``.
+Numbers: pixel counts of the flake, up and down without a threshold (two states) and up / neutral / down
+with the threshold m0 (three states); <m_z> = (N_up - N_down) / N for each; domain counts and mean area,
+widths (2 A / P and skeleton mean / median per state), period, wall length and density, stripe direction
+and alignment. Defaults are the toolkit's ``defaults.py``.
 """
 from __future__ import annotations
 
@@ -383,13 +384,13 @@ def analyze(a: np.ndarray, *, um_per_px: float | None = None, roi: np.ndarray | 
     metrics: dict[str, Any] = {
         "um_per_px": s or float("nan"), "width_unit": unit,
         "flake_area_px": n, "flake_area_um2": n * s * s if s else float("nan"),
-        "f_up": area_up / area if area else float("nan"),
-        "f_down": area_dn / area if area else float("nan"),
         "mz": (area_up - area_dn) / area if area else float("nan"),
         "split": split_from,
-        "p_up": float((mz[flake] == 1).mean()), "p_neutral": float((mz[flake] == 0).mean()),
-        "p_down": float((mz[flake] == -1).mean()),
         "mz_three_state": float(mz[flake].mean()),
+        # pixel counts: two-state split (no threshold) and three states (threshold m0)
+        "n_px": n, "n_up_px": area_up, "n_down_px": area_dn,
+        "n_up_px_m0": int((mz[flake] == 1).sum()), "n_neutral_px_m0": int((mz[flake] == 0).sum()),
+        "n_down_px_m0": int((mz[flake] == -1).sum()), "m0": float(p["m_threshold"]),
         "n_domains_up": int(n_up), "n_domains_down": int(n_dn),
         "mean_domain_area_px": float(all_areas.mean()) if all_areas.size else float("nan"),
         "mean_domain_area_um2": float(all_areas.mean() * s * s) if (s and all_areas.size) else float("nan"),
