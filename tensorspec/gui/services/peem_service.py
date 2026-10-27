@@ -1760,7 +1760,9 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
             if vmax <= 0:
                 vmax = 1.0
             fig, ax = plt.subplots(figsize=(4, 4), dpi=120)
-            im = ax.imshow(arr, cmap="bwr_r", vmin=-vmax, vmax=vmax, origin="upper")  # positive blue
+            from tensorspec.plotting.peem_plots import SIGNED_CMAP
+
+            im = ax.imshow(arr, cmap=SIGNED_CMAP, vmin=-vmax, vmax=vmax, origin="upper")  # positive blue
             ax.set_title(f"{name} / {kind}")
             ax.axis("off")
             fig.colorbar(im, ax=ax, fraction=0.046)

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import numpy as np
 
+from tensorspec.plotting.peem_plots import SIGNED_CMAP  # positive blue, negative red
+
 
 def _plt():
     import matplotlib
@@ -19,7 +21,7 @@ def _div(ax, img, title, plt):
     v = img[np.isfinite(img)]
     c = float(np.median(v)) if v.size else 0.0
     lim = float(np.percentile(np.abs(v - c), 99)) if v.size else 1.0
-    im = ax.imshow(img, cmap="RdBu_r", vmin=c - lim, vmax=c + lim)
+    im = ax.imshow(img, cmap=SIGNED_CMAP, vmin=c - lim, vmax=c + lim)
     ax.set_title(title, fontsize=9)
     ax.axis("off")
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
@@ -47,7 +49,7 @@ class Preview:
         _gray(ax[0], res["mean_a"], "mean (channel A)", plt)
         _div(ax[1], res["map"], res["kind"], plt)
         if dom is not None:
-            ax[2].imshow(np.where(res["mask"], dom["mz"], np.nan), cmap="bwr", vmin=-1, vmax=1)
+            ax[2].imshow(np.where(res["mask"], dom["mz"], np.nan), cmap=SIGNED_CMAP, vmin=-1, vmax=1)
             s = dom["stats"]
             ax[2].set_title(f"domain_map f+={s['f_up']:.2f} f-={s['f_down']:.2f} (no BG ROI)", fontsize=9)
             ax[2].axis("off")
@@ -125,7 +127,7 @@ def session_overview(root: Path, session: str, rows: list[dict], out_path: Path,
         v = img[np.isfinite(img)]
         c = float(np.median(v)) if v.size else 0.0
         lim = float(np.percentile(np.abs(v - c), 99)) if v.size else 1.0
-        ax.imshow(img, cmap="RdBu_r", vmin=c - lim, vmax=c + lim)
+        ax.imshow(img, cmap=SIGNED_CMAP, vmin=c - lim, vmax=c + lim)
         ax.set_title(title, fontsize=6.5)
     fig.suptitle(f"{session}: merged cluster maps in scan order (each panel scaled to its own median ± p99)", fontsize=10)
     fig.tight_layout()
