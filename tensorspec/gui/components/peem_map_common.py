@@ -1,10 +1,12 @@
 """Small widget helpers shared by the PEEM map tools (gui/components/peem_map_tools.py)."""
 from __future__ import annotations
 
+import os
 import re
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton
+from PySide6.QtCore import QObject, QSettings, Qt, Signal
+from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QWidget)
 
 
 def _dspin(lo, hi, val, step=0.01, dec=3):
@@ -80,3 +82,79 @@ def tidy_forms(widget) -> None:
         form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
         form.setRowWrapPolicy(QFormLayout.DontWrapRows)
+
+
+# --- Export location: one folder for every PEEM save dialog (maps, profiles, Domains PDFs / CSV / .nc) ---
+class _ExportDirHub(QObject):
+    changed = Signal(str)
+
+
+_hub: _ExportDirHub | None = None
+
+
+def _export_hub() -> _ExportDirHub:
+    global _hub
+    if _hub is None:
+        _hub = _ExportDirHub()
+    return _hub
+
+
+def _peem_settings() -> QSettings:
+    return QSettings("TensorSpec", "PEEM")
+
+
+def chosen_export_dir() -> str:
+    """The folder picked under 'Export to' ('' = none picked, or it no longer exists)."""
+    d = str(_peem_settings().value("export_dir", "") or "")
+    return d if d and os.path.isdir(d) else ""
+
+
+def export_dir() -> str:
+    """Where save dialogs open: the 'Export to' folder, else next to the last loaded data, else home."""
+    last = str(_peem_settings().value("last_dir", "") or "")
+    return chosen_export_dir() or (last if last and os.path.isdir(last) else os.path.expanduser("~"))
+
+
+def set_export_dir(folder: str) -> None:
+    """Set (or clear with '') the export folder; every 'Export to' row shows the change."""
+    folder = os.path.expanduser(folder.strip()) if folder else ""
+    _peem_settings().setValue("export_dir", folder)
+    _export_hub().changed.emit(folder)
+
+
+def export_path(filename: str) -> str:
+    """Default path for a save dialog: the file name in the export folder."""
+    return os.path.join(export_dir(), filename)
+
+
+def export_dir_row(parent: QWidget | None = None) -> QWidget:
+    """'Export to' field + Browse…: type or pick a folder (empty = next to the loaded data)."""
+    w = QWidget(parent)
+    row = QHBoxLayout(w)
+    row.setContentsMargins(0, 0, 0, 0)
+    edit = QLineEdit(chosen_export_dir())
+    edit.setPlaceholderText("next to the loaded data")
+    edit.setToolTip("Every PEEM export / save dialog opens in this folder. Leave empty to use the folder\n"
+                    "the data was loaded from.")
+    btn = QPushButton("Browse…")
+
+    def typed():
+        text = edit.text().strip()
+        if text and not os.path.isdir(os.path.expanduser(text)):
+            edit.setText(chosen_export_dir())  # not a folder: keep the old one
+            return
+        if text != chosen_export_dir():
+            set_export_dir(text)
+
+    def browse():
+        folder = QFileDialog.getExistingDirectory(w, "Export to folder", export_dir())
+        if folder:
+            set_export_dir(folder)
+
+    edit.editingFinished.connect(typed)
+    btn.clicked.connect(browse)
+    _export_hub().changed.connect(edit.setText)  # bound slot: dropped when the row is closed
+    row.addWidget(edit, 1)
+    row.addWidget(btn)
+    w.edit, w.browse = edit, btn  # tests
+    return w

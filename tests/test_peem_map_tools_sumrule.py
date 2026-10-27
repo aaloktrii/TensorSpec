@@ -564,3 +564,46 @@ def test_domain_counts_and_save_load_analysis(qapp, tmp_path, monkeypatch):
     dv.m0.setValue(0.3)
     dv._run(all_items=False)
     assert p.service.domain_result(name, label)["m0"] == pytest.approx(0.3)
+
+
+def test_export_to_folder_is_shared_by_every_save_dialog(qapp, tmp_path, monkeypatch):
+    """'Export to' (section 1 and Domains) is one folder: both rows follow it, save / load dialogs open there;
+    empty = next to the loaded data."""
+    from PySide6.QtWidgets import QFileDialog
+    from tensorspec.gui.components import peem_map_common as pmc
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    st = pmc._peem_settings()
+    saved = {k: st.value(k) for k in ("export_dir", "last_dir")}  # keep the user's own settings
+    try:
+        st.setValue("last_dir", str(tmp_path))
+        pmc.set_export_dir("")
+        assert pmc.export_dir() == str(tmp_path)  # nothing picked: next to the loaded data
+        p = PeemPanel()
+        t, dv = p.map_tools, p.map_tools.domain_view
+        out = tmp_path / "exports"
+        out.mkdir()
+        p.export_row.edit.setText(str(out))
+        p.export_row.edit.editingFinished.emit()
+        assert pmc.export_dir() == str(out) and dv.export_row.edit.text() == str(out)
+        dv.export_row.edit.setText(str(tmp_path / "missing"))  # not a folder: keeps the old one
+        dv.export_row.edit.editingFinished.emit()
+        assert dv.export_row.edit.text() == str(out) and pmc.export_dir() == str(out)
+
+        p._dataset_name = _images(tmp_path, p.service)
+        p._refresh_meta()
+        t._asymmetry()
+        t._push()
+        asked = []
+        monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (asked.append(a[2]), ("", ""))[1]))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (asked.append(a[2]), ("", ""))[1]))
+        t._export()
+        t._export_plot_pdf()
+        dv._export_pushed_pdf()
+        dv._export_table()
+        dv._save_analysis()
+        dv._load_analysis()
+        assert len(asked) == 6 and all(a.startswith(str(out)) for a in asked), asked
+    finally:
+        for k, v in saved.items():
+            st.remove(k) if v is None else st.setValue(k, v)
