@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 from tensorspec.core.data_models import TensorData
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.gui.components.peem_map_common import (
-    _coords_row, _dspin, _numbers, _subtitle, action_style, bold_titles, tidy_forms)
+    _coords_row, _dspin, _numbers, _subtitle, action_style, bold_titles, export_path, tidy_forms)
 from tensorspec.plotting import peem_plots
 
 
@@ -592,7 +592,7 @@ class PeemMapTools:
         if "compare" not in self.service.list_products(name):
             self._err("Run Register + subtract first.")
             return
-        path, _ = QFileDialog.getSaveFileName(self._parent, "Save figure", f"{name}_compare.pdf",
+        path, _ = QFileDialog.getSaveFileName(self._parent, "Save figure", export_path(f"{name}_compare.pdf"),
                                               "PDF (*.pdf);;PNG (*.png);;SVG (*.svg)")
         if path:
             out = self._call(self.service.export_compare_figure, name, path)
@@ -848,7 +848,7 @@ class PeemMapTools:
         if not name or self.viewer.tensor_data is None:
             return
         kind, var = self._shown()
-        path, _ = QFileDialog.getSaveFileName(self._parent, "Export map", f"{name}_{kind}_{var}.tif", "TIFF (*.tif)")
+        path, _ = QFileDialog.getSaveFileName(self._parent, "Export map", export_path(f"{name}_{kind}_{var}.tif"), "TIFF (*.tif)")
         if path:
             files = self._call(self.service.export_map, name, kind, path, var, pictures=("png",), **self._shown_look())
             if files:
@@ -871,14 +871,15 @@ class PeemMapTools:
         dlg = ExportMapDialog(self._parent, {**self.service.export_options(name, kind, var), **self._shown_look()}, box)
         if not dlg.exec():
             return
-        path, _ = QFileDialog.getSaveFileName(self._parent, "Export map (file name without extension)", f"{name}_{kind}_{var}")
+        path, _ = QFileDialog.getSaveFileName(self._parent, "Export map (file name without extension)",
+                                              export_path(f"{name}_{kind}_{var}"))
         if path:
             files = self._call(self.service.export_map, name, kind, path, var, **dlg.options())
             if files:
                 self.status.setText("Saved " + ", ".join(os.path.basename(f) for f in files))
 
     def _export_plot_pdf(self):
-        path, _ = QFileDialog.getSaveFileName(self._parent, "Export plot as PDF", os.path.expanduser("~/profile.pdf"), "PDF (*.pdf)")
+        path, _ = QFileDialog.getSaveFileName(self._parent, "Export plot as PDF", export_path(f"{self._get_name() or 'profile'}_profile.pdf"), "PDF (*.pdf)")
         if not path:
             return
         path = path if path.lower().endswith(".pdf") else path + ".pdf"
