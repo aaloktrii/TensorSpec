@@ -158,3 +158,24 @@ def test_combined_dataset_named_after_all_folders():
     name = PeemPanel._group_name(["/d/XPEEM_20um_579eV_Cr2p_LH_-15deg", "/d/XPEEM_20um_579eV_Cr2p_LV_-15deg"])
     assert name == "XPEEM_20um_579eV_Cr2p_LH_LV_-15deg"
     assert PeemPanel._group_name(["/d/Cr2p_CL_0deg", "/d/Cr2p_CR_0deg_2"]) == "Cr2p_CL_0deg_CR_0deg_2"
+
+
+def test_closing_during_a_load_stops_the_thread_cleanly(qapp, tmp_path, monkeypatch):
+    """Quitting while folders load must not destroy a running QThread (Qt aborts the app): the thread
+    finishes the current job, skips the rest and is waited for."""
+    import time
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    done = []
+
+    def slow(path, name=None):
+        time.sleep(0.3)
+        done.append(name)
+        raise ValueError("test")
+
+    monkeypatch.setattr(p.service, "load_path", slow)
+    p._start_jobs([("path", str(tmp_path), f"j{i}") for i in range(5)])
+    time.sleep(0.05)
+    p._stop_load_thread()
+    assert not p._load_thread.isRunning() and len(done) == 1
