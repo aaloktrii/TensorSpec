@@ -822,7 +822,8 @@ class PeemDomainView(QWidget):
         self._move = {"selected": None, "start": None, "region": None, "preview": None}
         for e, fn in (("button_press_event", self._move_press), ("motion_notify_event", self._move_motion),
                       ("button_release_event", self._move_release), ("key_press_event", self._move_key)):
-            self.canvas.mpl_connect(e, fn)  # click an outline on the pushed map to select it        v.addWidget(self.canvas, 1)
+            self.canvas.mpl_connect(e, fn)  # click an outline on the pushed map to select it
+        v.addWidget(self.canvas, 1)
         self.caption = QLabel("")
         self.caption.setWordWrap(True)
         v.addWidget(self.caption)
