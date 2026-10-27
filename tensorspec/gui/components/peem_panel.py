@@ -804,6 +804,16 @@ class PeemDomainView(QWidget):
             b.clicked.connect(fn)
             row.addWidget(b)
         f.addRow(row)
+        row = QHBoxLayout()
+        for label, fn, tip in (("Save analysis…", self._save_analysis,
+                                "The selected pushed map with its ROI / background, look, settings and results (.nc)"),
+                               ("Load analysis…", self._load_analysis,
+                                "A saved analysis as a pushed map, with its settings: run it again or change them")):
+            b = QPushButton(label)
+            b.setToolTip(tip)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        f.addRow("Analysis file:", row)
         lay.addWidget(g)
         self.status = QLabel("")  # shown under the image (see _build_results)
         self.status.setWordWrap(True)
@@ -1201,10 +1211,10 @@ class PeemDomainView(QWidget):
         except ValueError as exc:
             self._err(str(exc))
             return
-        where = "in the ROI" if st["in_roi"] else "in the whole map"
+        where = "In the ROI" if st["in_roi"] else "In the whole map"
         zero = f"background mean {st['zero']:+.4g}" if st["zero_from"] != "0" else "0 (tick Background region for the map's own zero)"
-        self.status.setText(f"{where}: f_up {st['f_up']:.3f}, f_down {st['f_down']:.3f}, <m_z> {st['mz']:+.3f}; "
-                            f"mean {st['mean']:+.4g} (zero = {zero})")
+        self.status.setText(f"{where}: {st['n_px']} px, up {st['n_up_px']}, down {st['n_down_px']}, "
+                            f"<m_z> {st['mz']:+.3f}; mean {st['mean']:+.4g} (zero = {zero})")
 
     def _export_pushed_pdf(self):
         """The left panel as an editable PDF: pushed map (Map-view look), ROI / background outlines, um axes."""
@@ -1236,6 +1246,50 @@ class PeemDomainView(QWidget):
                 self.status.setText(f"Saved {path}")
             except ValueError as exc:
                 self._err(str(exc))
+
+    def _save_analysis(self):
+        cur = self._current()
+        if cur is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save analysis", f"{cur[0]}_{cur[1]}.nc", "Domain analysis (*.nc)")
+        if path:
+            try:
+                self.status.setText(f"Saved {self.service.save_domain_analysis(cur[0], cur[1], path)}")
+            except (ValueError, OSError) as exc:
+                self._err(str(exc))
+
+    def _load_analysis(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load analysis", "", "Domain analysis (*.nc)")
+        if not path:
+            return
+        try:
+            res = self.service.load_domain_analysis(path)
+        except (ValueError, OSError) as exc:
+            self._err(str(exc))
+            return
+        self._apply_params(res["params"])
+        self.refresh(select=(res["name"], res["label"]))
+        self.status.setText(f"Loaded {os.path.basename(path)} as {res['name']} · {res['label']}, with its settings; "
+                            "change them and Run selected to analyse again.")
+
+    def _apply_params(self, params: dict):
+        """Set the step controls from saved settings (missing ones keep their value)."""
+        for combo, key in ((self.denoise, "denoise"), (self.flake, "flake"), (self.background, "background"),
+                           (self.fft_mode, "fft_mode"), (self.conn, "connectivity")):
+            if key in params:
+                i = combo.findData(params[key])
+                if i < 0 and isinstance(params[key], (int, float, np.integer, np.floating)):
+                    i = combo.findData(int(params[key]))
+                if i >= 0:
+                    combo.setCurrentIndex(i)
+        for spin, key in ((self.tv_weight, "tv_weight"), (self.sigma, "flatten_sigma"), (self.m0, "m_threshold")):
+            if key in params:
+                spin.setValue(float(params[key]))
+        for spin, key in ((self.fft_cut, "fft_cutoff"), (self.min_px, "min_px")):
+            if key in params:
+                spin.setValue(int(params[key]))
+        if "fft_filter" in params:
+            self.fft.setChecked(bool(int(params["fft_filter"])))
 
     def _export_table(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export table", "domain_analysis.csv", "CSV (*.csv)")

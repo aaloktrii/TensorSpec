@@ -104,7 +104,8 @@ def test_peem_panel_sections_and_sum_rule_window(qapp, tmp_path, monkeypatch):
     assert t.analysis_view.currentWidget() is t.domain_view and t.domain_view.items.count() == 1
     t.domain_view._set_region("roi", {"kind": "rect", "x0": 4, "x1": 60, "y0": 4, "y1": 60})
     t.domain_view._roi_stats()
-    assert "f_up 0.5" in t.domain_view.status.text() or "f_up 0.4" in t.domain_view.status.text()
+    st = t.domain_view.status.text()
+    assert "px, up " in st and ", down " in st and "<m_z>" in st  # pixel counts, no fractions
     t.domain_view._run(all_items=True)
     assert t.domain_view.table.rowCount() == 1 and "width up / down" in t.domain_view.caption.text()
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "m.tif"), "")))
@@ -524,3 +525,41 @@ def test_move_outline_and_export_the_pushed_map(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "pushed.pdf"), "")))
     dv._export_pushed_pdf()
     assert (tmp_path / "pushed.pdf").stat().st_size > 1000
+
+
+def test_domain_counts_and_save_load_analysis(qapp, tmp_path, monkeypatch):
+    """Domains: the table shows pixel counts (no fractions); Save analysis / Load analysis (.nc) bring the map,
+    outlines, settings and results back, even without its dataset; it can run again with new settings."""
+    from PySide6.QtWidgets import QFileDialog
+    from tensorspec.core.workspace import global_workspace as gw
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    t._push()
+    dv = t.domain_view
+    dv._set_region("roi", {"kind": "rect", "x0": 4, "x1": 59, "y0": 4, "y1": 59})
+    dv.flake.setCurrentIndex(dv.flake.findData("pushed"))
+    dv.m0.setValue(0.1)
+    dv._run(all_items=False)
+    cols = [dv.table.horizontalHeaderItem(i).text() for i in range(dv.table.columnCount())]
+    assert "up_px" in cols and "neutral_px (m0)" in cols and not any(c.startswith(("f_", "p_")) for c in cols)
+    r = p.service.domain_result("img", "domains_1")
+    assert r["n_up_px"] + r["n_down_px"] == r["n_px"] == 56 * 56
+    path = tmp_path / "a.nc"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(path), "")))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(path), "")))
+    dv._save_analysis()
+    gw.remove("img")
+    dv.m0.setValue(0.0)
+    dv._load_analysis()
+    assert dv.m0.value() == pytest.approx(0.1) and dv.items.count() == 1
+    name, label = dv._selected()[0]
+    assert p.service.domain_result(name, label)["n_px"] == 56 * 56
+    assert p.service.domain_regions(name, label)["roi"]["x1"] == 59
+    dv.m0.setValue(0.3)
+    dv._run(all_items=False)
+    assert p.service.domain_result(name, label)["m0"] == pytest.approx(0.3)

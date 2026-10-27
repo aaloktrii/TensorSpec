@@ -375,8 +375,13 @@ def domain_numbers_text(m: dict) -> str:
     if not m:
         return ""
     u = m.get("width_unit", "px")
-    return (f"f_up {m.get('f_up', np.nan):.2f}   f_down {m.get('f_down', np.nan):.2f}   "
-            f"<m_z> {m.get('mz', np.nan):+.3f}\n"
+    if "n_px" not in m:  # results from before the pixel counts
+        return (f"<m_z> {m.get('mz', np.nan):+.3f}\n"
+                f"width up / down {m.get(f'width_up_{u}', np.nan):.0f} / {m.get(f'width_down_{u}', np.nan):.0f} {u}   "
+                f"period {m.get(f'period_{u}', np.nan):.0f} {u}")
+    return (f"{m['n_px']} px: up {m['n_up_px']}, down {m['n_down_px']}, <m_z> {m.get('mz', np.nan):+.3f}   |   "
+            f"m0 = {m['m0']:g}: up {m['n_up_px_m0']}, neutral {m['n_neutral_px_m0']}, down {m['n_down_px_m0']}, "
+            f"<m_z> {m.get('mz_three_state', np.nan):+.3f}\n"
             f"width up / down {m.get(f'width_up_{u}', np.nan):.0f} / {m.get(f'width_down_{u}', np.nan):.0f} {u}   "
             f"period {m.get(f'period_{u}', np.nan):.0f} {u}")
 
