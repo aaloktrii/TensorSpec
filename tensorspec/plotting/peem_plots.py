@@ -9,6 +9,7 @@ import numpy as np
 
 
 SIGNED_KINDS = {"pcd", "pld", "pmld", "pmnld", "domain_map", "compare"}
+SIGNED_CMAP = "bwr_r"  # PEEM convention: positive blue, negative red (white at the centre)
 SIGNED_VARS = ("", "data", "difference", "flattened", "bg_removed", "fft_filtered", "data_original",
                "map", "reference", "offset_removed")
 
@@ -25,7 +26,7 @@ def display_hint(kind: str, var: str, image: np.ndarray | None = None) -> dict:
         fin = fin[np.isfinite(fin)]
         if fin.size and abs(float(np.median(fin))) > float(np.std(fin)):
             center = "median"
-    return {"cmap": "bwr" if signed else "gray", "symmetric": signed, "center": center}
+    return {"cmap": SIGNED_CMAP if signed else "gray", "symmetric": signed, "center": center}
 
 
 def color_limits(image: np.ndarray, hint: dict) -> tuple[float, float]:
@@ -288,7 +289,7 @@ def save_three_panel(panels: list[tuple[str, np.ndarray]], path, um_per_px: floa
 
 
 # ------------------------------------------------------------------ spatial domain analysis
-UP_COLOR, DOWN_COLOR = "#b2182b", "#2166ac"
+UP_COLOR, DOWN_COLOR = "#2166ac", "#b2182b"  # up (+) blue, down (-) red, as the signed maps
 
 
 def domain_step(ax, img: np.ndarray, step: str, um_per_px: float | None = None, title: str = ""):
@@ -313,7 +314,7 @@ def domain_step(ax, img: np.ndarray, step: str, um_per_px: float | None = None, 
         ax.imshow(a, cmap="gray", vmin=0, vmax=1, **kw)
     elif step in ("asymmetry", "flattened"):
         lim = float(np.nanpercentile(np.abs(a), 99)) or 1.0
-        im = ax.imshow(a, cmap="RdBu_r", vmin=-lim, vmax=lim, **kw)
+        im = ax.imshow(a, cmap="RdBu", vmin=-lim, vmax=lim, **kw)  # positive blue
     elif step == "width_map":
         im = ax.imshow(a, cmap="viridis", **kw)
     elif step == "local_std":

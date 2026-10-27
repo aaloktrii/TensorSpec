@@ -59,7 +59,7 @@ def test_service_loads_batch_file_with_sign_and_roi(tmp_path):
     assert np.allclose(pld[ok], ((lv - lh) / (lv + lh))[ok], atol=1e-5)  # suite sign (LV-LH)/(LV+LH)
     assert np.isnan(pld[~ok]).all() and "pld" in out["sign_flips"]
     assert s.display_hint(n, "nc", "mean_LH")["cmap"] == "gray"
-    assert s.display_hint(n, "nc", "data")["cmap"] == "bwr"
+    assert s.display_hint(n, "nc", "data")["cmap"] == "bwr_r"
     assert [v for _, v in s.nc_outputs(n)][0] == "data"
     st = s.roi_statistics(n, "nc", roi={"kind": "rect", "x0": 60, "x1": 130, "y0": 60, "y1": 130}, threshold=0.0)
     assert set(st["fractions"]) >= {"f_up", "f_down"}
