@@ -406,38 +406,45 @@ def domain_sizes(ax, areas: dict) -> None:
     ax.legend(frameon=False, fontsize=7)
 
 
-def size_fit(ax, fit: dict, quantity: str, state: str, unit: str) -> None:
-    """One state's width or period sample: density histogram, log-normal (solid) and Gaussian (dashed)
-    fits, AIC / KS p and delta AIC (as the toolkit's log-normal vs Gaussian figure)."""
-    col = UP_COLOR if state == "up" else DOWN_COLOR
-    v = np.asarray(fit.get("samples", []), float)
-    ax.set_title(f"{quantity} · {state}", fontsize=8)
+def size_fit(ax, fits: dict, quantity: str) -> None:
+    """Width or period of both states on one axes: density histograms (outlines, common bins), log-normal (solid) and
+    Gaussian (dashed) fits, up blue and down red; AIC / KS p and delta AIC per state in the corner."""
+    unit = fits["unit"]
+    ax.set_title(f"domain {quantity}: log-normal vs Gaussian", fontsize=8)
     ax.set_xlabel(f"domain {quantity} ({unit})")
     ax.set_ylabel("probability density")
-    if v.size < 5 or not (fit.get("lognormal") or fit.get("gaussian")):
-        ax.text(0.5, 0.5, "not enough samples\n(need >= 5)", ha="center", va="center", transform=ax.transAxes,
-                fontsize=8, color="0.4")
+    vals = [np.asarray(fits[quantity][st].get("samples", []), float) for st in ("up", "down")]
+    allv = np.concatenate(vals)
+    if allv.size < 5:
+        ax.text(0.5, 0.5, "not enough samples\n(need >= 5 per state)", ha="center", va="center",
+                transform=ax.transAxes, fontsize=8, color="0.4")
         return
-    ax.hist(v, bins=24, density=True, color=col, alpha=0.3, label=f"data ({v.size})")
+    bins = np.linspace(allv.min(), allv.max(), 25)
     txt = []
-    if fit["lognormal"]:
-        ax.plot(fit["lognormal"]["pdf_x"], fit["lognormal"]["pdf_y"], "-", color=col, lw=1.3, label="log-normal")
-        txt.append(f"log-normal: AIC {fit['lognormal']['aic']:.1f}, KS p {fit['lognormal']['ks_p']:.3f}")
-    if fit["gaussian"]:
-        ax.plot(fit["gaussian"]["pdf_x"], fit["gaussian"]["pdf_y"], "--", color=col, lw=1.3, label="Gaussian")
-        txt.append(f"Gaussian: AIC {fit['gaussian']['aic']:.1f}, KS p {fit['gaussian']['ks_p']:.3f}")
-    if fit["preferred"]:
-        txt.append(f"ΔAIC {fit['delta_aic']:+.1f} → {'log-normal' if fit['preferred'] == 'lognormal' else 'Gaussian'}")
-    ax.text(0.98, 0.98, "\n".join(txt), transform=ax.transAxes, fontsize=6, va="top", ha="right",
+    for st, col, v in (("up", UP_COLOR, vals[0]), ("down", DOWN_COLOR, vals[1])):
+        f = fits[quantity][st]
+        if v.size < 5:
+            txt.append(f"{st}: too few samples")
+            continue
+        ax.hist(v, bins=bins, density=True, histtype="step", color=col, lw=0.8, alpha=0.7,
+                label=f"{st} ({v.size})")  # outlines: up and down stay readable where they overlap
+        if f["lognormal"]:
+            ax.plot(f["lognormal"]["pdf_x"], f["lognormal"]["pdf_y"], "-", color=col, lw=1.3, label=f"{st} log-normal")
+        if f["gaussian"]:
+            ax.plot(f["gaussian"]["pdf_x"], f["gaussian"]["pdf_y"], "--", color=col, lw=1.3, label=f"{st} Gaussian")
+        if f["preferred"]:
+            txt.append(f"{st}: AIC log-normal {f['lognormal']['aic']:.1f}, Gaussian {f['gaussian']['aic']:.1f}; "
+                       f"KS p {f['lognormal']['ks_p']:.3f} / {f['gaussian']['ks_p']:.3f}\n"
+                       f"     ΔAIC {f['delta_aic']:+.1f} → {'log-normal' if f['preferred'] == 'lognormal' else 'Gaussian'}")
+    ax.text(0.98, 0.98, "\n".join(txt), transform=ax.transAxes, fontsize=5.5, va="top", ha="right",
             bbox=dict(boxstyle="round", fc="white", ec="0.6", alpha=0.9))
-    ax.legend(frameon=False, fontsize=6, loc="center right")
+    ax.legend(frameon=False, fontsize=5.5, loc="center right")
 
 
 def size_fits(axes, fits: dict) -> None:
-    """2 x 2 axes: rows width / period, columns up / down."""
-    for row, q in zip(axes, ("width", "period")):
-        for ax, state in zip(row, ("up", "down")):
-            size_fit(ax, fits[q][state], q, state, fits["unit"])
+    """Two axes: widths, then periods (up and down on each)."""
+    for ax, q in zip(axes, ("width", "period")):
+        size_fit(ax, fits, q)
 
 
 def size_fits_text(fits: dict) -> str:
@@ -453,15 +460,16 @@ def size_fits_text(fits: dict) -> str:
 
 
 def save_size_fits_pdf(path, fits: dict, title: str = "") -> None:
-    """Editable PDF (TrueType text) of the 2 x 2 log-normal vs Gaussian comparison, 17.8 cm wide."""
+    """Editable PDF (TrueType text) of the log-normal vs Gaussian comparison (widths | periods, up blue and
+    down red on each), 17.8 cm wide."""
     import matplotlib
     from matplotlib.figure import Figure
 
     with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
                                 "font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
                                 "font.size": 7, "axes.linewidth": 0.6}):
-        fig = Figure(figsize=(7.0, 5.2), layout="constrained")
-        size_fits(fig.subplots(2, 2), fits)
+        fig = Figure(figsize=(7.0, 3.0), layout="constrained")
+        size_fits(fig.subplots(1, 2), fits)
         if title:
             fig.suptitle(title, fontsize=8)
         fig.savefig(path)
