@@ -854,10 +854,23 @@ class PeemDomainView(QWidget):
         bold_titles(g)
         f = QFormLayout(g)
         self.step = _domain_combo([(da.STEP_LABELS[s], s) for s in da.STEPS], "width_map")  # right panel
-        self.step.currentIndexChanged.connect(self._show)
+        self.step.currentIndexChanged.connect(self._hide_fits)
         f.addRow("Show (right):", self.step)
         self.sizes = QCheckBox("Domain-size distribution")
         self.sizes.toggled.connect(self._show)
+        row = QHBoxLayout()  # computed and drawn only on click
+        b = QPushButton("Log-normal vs Gaussian")
+        b.setToolTip("Fit the domain widths and local periods (up and down separately) with a log-normal and a\n"
+                     "Gaussian and compare them (ΔAIC = AIC Gaussian − AIC log-normal; > 0 favours log-normal,\n"
+                     "|Δ| > 10 decisive), as the SDA toolkit. Shown on the right until Show (right) changes.")
+        b.clicked.connect(self._show_fits)
+        row.addWidget(b)
+        b = QPushButton("PDF + CSV…")
+        b.setToolTip("The four fits as an editable PDF, and their numbers (medians, σ_ln, AIC, BIC, KS, ΔAIC)\n"
+                     "as <name>_fits.csv next to it")
+        b.clicked.connect(self._export_fits)
+        row.addWidget(b)
+        f.addRow("Size fits:", row)
         f.addRow(self.sizes)
         row = QHBoxLayout()
         for label, fn, tip in (("Pushed map PDF…", self._export_pushed_pdf,
@@ -965,7 +978,42 @@ class PeemDomainView(QWidget):
                 self.table.setItem(r, c, QTableWidgetItem(text))
 
     # ------------------------------------------------------------------ actions
+    def _show_fits(self):
+        """Fit the selected map's widths / periods and draw them on the right (only on this click)."""
+        cur = self._current()
+        if cur is None:
+            return
+        from PySide6.QtGui import QGuiApplication
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            self._fits = (cur, self.service.domain_size_fits(*cur))
+        except ValueError as exc:
+            self._err(str(exc))
+            return
+        finally:
+            QGuiApplication.restoreOverrideCursor()
+        self._show()
+
+    def _hide_fits(self, *_):
+        self._fits = None
+        self._show()
+
+    def _export_fits(self):
+        cur = self._current()
+        if cur is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export log-normal vs Gaussian", export_path(f"{cur[0]}_{cur[1]}_size_fits.pdf"),
+                                              "PDF (*.pdf)")
+        if path:
+            try:
+                files = self.service.export_domain_size_fits(path, *cur)
+            except (ValueError, OSError) as exc:
+                self._err(str(exc))
+                return
+            self.status.setText("Saved " + ", ".join(os.path.basename(f) for f in files))
+
     def _on_item_changed(self):
+        self._fits = None
         self._move["selected"] = None
         self.auto_flake.blockSignals(True)  # the tick belongs to the map it was ticked on
         self.auto_flake.setChecked(False)
@@ -977,6 +1025,7 @@ class PeemDomainView(QWidget):
         if not items:
             self._err("Push a map first (Map view, 6. Push to analysis).")
             return
+        self._fits = None  # new results: fit again on click
         from PySide6.QtGui import QGuiApplication
 
         QGuiApplication.setOverrideCursor(Qt.WaitCursor)
@@ -1015,9 +1064,15 @@ class PeemDomainView(QWidget):
         result = self.service.domain_result(name, label)
         look = self.service.domain_look(name, label)
         um = look["um_per_px"]
-        sizes = self.sizes.isChecked() and bool(result)
+        fits = getattr(self, "_fits", None)
+        fits = fits[1] if fits and fits[0] == (name, label) and result else None
+        sizes = self.sizes.isChecked() and bool(result) and fits is None
         n = 3 if sizes else 2
-        ax0 = self.fig.add_subplot(1, n, 1)
+        if fits is not None:  # left: pushed map; right: the 2 x 2 log-normal vs Gaussian fits
+            gs = self.fig.add_gridspec(2, 3, width_ratios=[1.4, 1, 1])
+            ax0 = self.fig.add_subplot(gs[:, 0])
+        else:
+            ax0 = self.fig.add_subplot(1, n, 1)
         im0 = peem_plots.pushed_map(ax0, self.service.domain_layer(name, label, "input"), look, f"{name} · pushed map")
         self.fig.colorbar(im0, ax=ax0, fraction=0.04, pad=0.02)
         self._ax, self._scale = ax0, (um or 1.0)  # drawing happens on the pushed map
@@ -1030,6 +1085,11 @@ class PeemDomainView(QWidget):
                      color="yellow" if sel_w == "roi" else "cyan", lw=2.6, zorder=15, scalex=False, scaley=False)
             ax0.set_xlim(*lims[0])
             ax0.set_ylim(*lims[1])
+        if fits is not None:
+            peem_plots.size_fits([[self.fig.add_subplot(gs[r, c]) for c in (1, 2)] for r in (0, 1)], fits)
+            self.caption.setText(peem_plots.size_fits_text(fits))
+            self.canvas.draw_idle()
+            return
         ax1 = self.fig.add_subplot(1, n, 2)
         if result:
             im1 = peem_plots.domain_step(ax1, self.service.domain_layer(name, label, step), step, um,

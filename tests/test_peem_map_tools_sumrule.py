@@ -633,3 +633,38 @@ def test_sym_keeps_every_display_control_visible(qapp, tmp_path):
                 shown = [g for g in row.findChildren(QWidget, options=Qt.FindDirectChildrenOnly) if g.isVisibleTo(row)]
                 assert all(g.geometry().bottom() < row.height() for g in shown), (tab, width, state)
     p.close()
+
+
+def test_size_fits_only_on_click_and_export(qapp, tmp_path, monkeypatch):
+    """Domains: Log-normal vs Gaussian is computed and drawn only on click (2 x 2 next to the pushed map),
+    goes away when Show (right) changes or the map runs again; PDF + CSV… writes both files."""
+    import csv as _csv
+    from PySide6.QtWidgets import QFileDialog
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    p._dataset_name = _images(tmp_path, p.service)
+    p._refresh_meta()
+    t._asymmetry()
+    t._push()
+    dv = t.domain_view
+    dv._set_region("roi", {"kind": "rect", "x0": 4, "x1": 59, "y0": 4, "y1": 59})
+    dv.flake.setCurrentIndex(dv.flake.findData("pushed"))
+    calls = []
+    real = p.service.domain_size_fits
+    monkeypatch.setattr(p.service, "domain_size_fits", lambda *a: (calls.append(a), real(*a))[1])
+    dv._run(all_items=False)
+    assert calls == [] and len(dv.fig.axes) <= 4  # Run does not fit
+    dv._show_fits()
+    assert len(calls) == 1 and "ΔAIC" in dv.caption.text() or "too few" in dv.caption.text()
+    assert sum(1 for a in dv.fig.axes if a.get_title().startswith(("width ·", "period ·"))) == 4
+    dv.step.setCurrentIndex((dv.step.currentIndex() + 1) % dv.step.count())
+    assert not any(a.get_title().startswith("width ·") for a in dv.fig.axes)
+    out = tmp_path / "fits.pdf"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(out), "")))
+    dv._export_fits()
+    assert out.stat().st_size > 1000
+    rows = list(_csv.DictReader(open(tmp_path / "fits_fits.csv")))
+    assert [(r["quantity"], r["state"]) for r in rows] == [("width", "up"), ("width", "down"),
+                                                          ("period", "up"), ("period", "down")]

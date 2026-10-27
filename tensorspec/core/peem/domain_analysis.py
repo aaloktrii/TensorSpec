@@ -257,6 +257,97 @@ def state_width(mask: np.ndarray, min_px: int = 12) -> dict[str, Any]:
     return out
 
 
+def local_period_px(wu: dict[str, Any], wd: dict[str, Any]) -> dict[str, np.ndarray]:
+    """Local period at every skeleton pixel (toolkit ``_local_period_px``): an up-skeleton pixel's own
+    width (2 DT) + the width at the nearest down-skeleton pixel, and the same the other way round.
+    {"up", "down"} in px (empty when a state has no skeleton)."""
+    out = {"up": np.array([]), "down": np.array([])}
+    us, ds_ = wu.get("skeleton"), wd.get("skeleton")
+    if us is None or ds_ is None or not us.any() or not ds_.any():
+        return out
+    _, (dn_iy, dn_ix) = ndi.distance_transform_edt(~ds_, return_indices=True)
+    _, (up_iy, up_ix) = ndi.distance_transform_edt(~us, return_indices=True)
+    uy, ux = np.nonzero(us)
+    out["up"] = 2.0 * wu["dt"][uy, ux] + 2.0 * wd["dt"][dn_iy[uy, ux], dn_ix[uy, ux]]
+    dy, dx = np.nonzero(ds_)
+    out["down"] = 2.0 * wd["dt"][dy, dx] + 2.0 * wu["dt"][up_iy[dy, dx], up_ix[dy, dx]]
+    return out
+
+
+def fit_lognormal(values) -> dict[str, Any] | None:
+    """Two-parameter log-normal (loc 0) by maximum likelihood, with KS and AIC / BIC (toolkit
+    ``fit_lognormal``). None with fewer than 5 positive values."""
+    from scipy import stats
+
+    v = np.asarray(values, float)
+    v = v[v > 0]
+    if v.size < 5:
+        return None
+    shape, loc, scale = stats.lognorm.fit(v, floc=0)
+    ks = stats.kstest(v, "lognorm", args=(shape, loc, scale))
+    loglik = float(np.sum(stats.lognorm.logpdf(v, shape, loc, scale)))
+    n, k = int(v.size), 2
+    xs = np.linspace(v.min(), v.max(), 200)
+    return {"dist": "lognormal", "n": n, "sigma_log": float(shape), "median": float(scale),
+            "mu_log": float(np.log(scale)), "mode": float(scale * np.exp(-shape ** 2)),
+            "loglik": loglik, "aic": float(2 * k - 2 * loglik), "bic": float(k * np.log(n) - 2 * loglik),
+            "ks_stat": float(ks.statistic), "ks_p": float(ks.pvalue),
+            "pdf_x": xs, "pdf_y": stats.lognorm.pdf(xs, shape, loc, scale)}
+
+
+def fit_gaussian(values) -> dict[str, Any] | None:
+    """Gaussian by maximum likelihood, same fields as fit_lognormal (toolkit ``fit_gaussian``)."""
+    from scipy import stats
+
+    v = np.asarray(values, float)
+    v = v[np.isfinite(v)]
+    if v.size < 5:
+        return None
+    mu, sigma = stats.norm.fit(v)
+    if sigma <= 0:
+        return None
+    ks = stats.kstest(v, stats.norm(loc=mu, scale=sigma).cdf)  # frozen cdf: scipy >= 1.18 safe
+    loglik = float(np.sum(stats.norm.logpdf(v, mu, sigma)))
+    n, k = int(v.size), 2
+    xs = np.linspace(v.min(), v.max(), 200)
+    return {"dist": "gaussian", "n": n, "mean": float(mu), "sd": float(sigma),
+            "loglik": loglik, "aic": float(2 * k - 2 * loglik), "bic": float(k * np.log(n) - 2 * loglik),
+            "ks_stat": float(ks.statistic), "ks_p": float(ks.pvalue),
+            "pdf_x": xs, "pdf_y": stats.norm.pdf(xs, mu, sigma)}
+
+
+def compare_lognormal_gaussian(values) -> dict[str, Any]:
+    """Both fits on one sample; delta_aic = AIC(Gaussian) - AIC(log-normal) (> 0 favours log-normal;
+    |delta| > ~10 decisive; both have 2 parameters). Toolkit ``compare_lognormal_gaussian``."""
+    ln, ga = fit_lognormal(values), fit_gaussian(values)
+    out = {"lognormal": ln, "gaussian": ga, "delta_aic": None, "delta_bic": None, "preferred": None}
+    if ln and ga:
+        out["delta_aic"] = ga["aic"] - ln["aic"]
+        out["delta_bic"] = ga["bic"] - ln["bic"]
+        out["preferred"] = "lognormal" if out["delta_aic"] > 0 else "gaussian"
+    return out
+
+
+def size_fits(mz: np.ndarray, um_per_px: float | None = None, min_px: int = 12) -> dict[str, Any]:
+    """Log-normal vs Gaussian for the domain widths (2 DT on the skeleton) and the local periods of the
+    up and down states, fitted separately (toolkit ``make_lognormal_gaussian_comparison_figure``).
+    mz: the three-state map (+1 / 0 / -1). Values in nm when calibrated, else px.
+    Returns {"unit", "width": {"up": {...}, "down": {...}}, "period": {...}}; each state holds its
+    "samples" and the compare_lognormal_gaussian output."""
+    mz = np.asarray(mz)
+    wu, wd = state_width(mz == 1, min_px), state_width(mz == -1, min_px)
+    per = local_period_px(wu, wd)
+    scale = um_per_px * 1000.0 if um_per_px else 1.0
+    out: dict[str, Any] = {"unit": "nm" if um_per_px else "px"}
+    for q, (vu, vd) in (("width", (wu["widths_px"], wd["widths_px"])), ("period", (per["up"], per["down"]))):
+        out[q] = {}
+        for state, v in (("up", vu), ("down", vd)):
+            v = np.asarray(v, float) * scale
+            v = v[v > 0]
+            out[q][state] = {"samples": v, **compare_lognormal_gaussian(v)}
+    return out
+
+
 def walls(m: np.ndarray, roi: np.ndarray, smooth: float = 1.0) -> tuple[np.ndarray, float]:
     """(l) The m = 0 contour (marching squares on lightly smoothed m) inside the flake; its length (px)."""
     from skimage import measure
