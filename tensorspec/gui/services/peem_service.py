@@ -1054,6 +1054,8 @@ class PeemDomainAnalysisSteps:
         img = self.domain_layer(name, label, step)
         um = at.get("um_per_px")
         title = f"{name} · {self.layer_name(at.get('source_kind', '?'), at.get('source_var', 'data'))}"
+        if step == "input":
+            title += " (pushed map)"
         ds = self._domains(name, label)
         flake = np.asarray(ds["flake"].values) if "flake" in ds else None
         peem_plots.save_domain_step_pdf(path, img, step, um if um and np.isfinite(um) else None, title,
