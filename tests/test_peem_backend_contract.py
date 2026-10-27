@@ -38,7 +38,7 @@ WORKFLOW = textwrap.dedent('''
     assert [v for _, v in s.stack_outputs(n)][:2] == ["mean_cp", "mean_cm"]
     s.asymmetry(n)                                                 # 5. asymmetry
     assert s.asymmetry_outputs(n)[0] == ("asymmetry", "data")
-    assert s.display_hint(n, "pcd")["cmap"] == "bwr"               # 6. view
+    assert s.display_hint(n, "pcd")["cmap"] == "bwr_r"             # 6. view (positive blue)
     s.add_profile(n, (32, 4), (32, 60), halfwidth=2, kind="pcd")   # 7. profiles
     assert len(s.list_profiles(n)) == 1
     s.set_roi(n, "roi", {"kind": "rect", "x0": 4, "x1": 60, "y0": 4, "y1": 60})

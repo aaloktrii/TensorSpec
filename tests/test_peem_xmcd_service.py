@@ -183,7 +183,7 @@ def test_export_map_with_options_crop_size_formats_and_limits(tmp_path):
     n = s.load_beamline([pos, neg], "opts", tpx3=False)["name"]
     s.drift_correct(n, method="central"); s.stack(n); s.asymmetry(n)
     o = s.export_options(n, "pcd")
-    assert (o["width_px"], o["height_px"]) == (64, 64) and o["cmap"] == "bwr" and o["vmin"] < 0 < o["vmax"]
+    assert (o["width_px"], o["height_px"]) == (64, 64) and o["cmap"] == "bwr_r" and o["vmin"] < 0 < o["vmax"]
     files = s.export_map(n, "pcd", tmp_path / "cut", crop=(10, 50, 4, 24), pictures=("png", "pdf", "svg"),
                          size_px=(400, 200), dpi=100, cmap="RdBu_r", vmin=-0.1, vmax=0.1, scalebar=True)
     assert [f.rsplit(".", 1)[1] for f in files] == ["tif", "png", "pdf", "svg"]
