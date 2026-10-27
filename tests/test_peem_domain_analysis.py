@@ -94,3 +94,27 @@ def test_auto_flake_ignores_a_drift_strip_at_the_edge():
     assert not keep[:, :25].any() and keep[:, 40:].all()
     flake = da.analyze(a, flake="auto")["layers"]["flake"].astype(bool)
     assert not flake[:, :30].any() and flake[60:140, 70:170].mean() > 0.8
+
+
+def test_size_fits_lognormal_vs_gaussian_widths_and_periods():
+    """Widths (2 DT on the skeleton) and local periods per state, each fitted with a log-normal and a
+    Gaussian (toolkit compare_lognormal_gaussian): log-normal samples favour the log-normal."""
+    rng = np.random.default_rng(1)
+    v = rng.lognormal(np.log(200.0), 0.6, 4000)
+    c = da.compare_lognormal_gaussian(v)
+    assert c["preferred"] == "lognormal" and c["delta_aic"] > 10
+    assert c["lognormal"]["median"] == pytest.approx(200.0, rel=0.05)
+    assert c["lognormal"]["mode"] < c["lognormal"]["median"]
+    g = da.compare_lognormal_gaussian(rng.normal(300.0, 20.0, 4000))
+    assert g["preferred"] == "gaussian" and g["delta_aic"] < 0
+    assert da.compare_lognormal_gaussian([1.0, 2.0, 3.0])["preferred"] is None  # < 5 samples
+
+    yy, xx = np.mgrid[0:200, 0:200]
+    mz = np.where((xx // 10) % 2 == 0, 1, -1).astype(np.int8)  # stripes 10 px wide, period 20 px
+    fits = da.size_fits(mz, um_per_px=None, min_px=12)
+    assert fits["unit"] == "px"
+    for state in ("up", "down"):
+        assert np.median(fits["width"][state]["samples"]) == pytest.approx(10.0, abs=1.5)
+        assert np.median(fits["period"][state]["samples"]) == pytest.approx(20.0, abs=2.5)
+    nm = da.size_fits(mz, um_per_px=0.02, min_px=12)
+    assert nm["unit"] == "nm" and np.median(nm["width"]["up"]["samples"]) == pytest.approx(200.0, abs=30)
