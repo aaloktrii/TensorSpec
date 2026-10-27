@@ -510,6 +510,12 @@ def test_move_outline_and_export_the_pushed_map(qapp, tmp_path, monkeypatch):
     dv._move_key(NS(key="shift+down"))
     roi = p.service.domain_regions("img", "domains_1")["roi"]
     assert (roi["x0"], roi["y0"]) == (11, 20)
+    dv._move_key(NS(key="]"))  # rotate 1 deg about the centre: a polygon, same centre
+    r = p.service.domain_regions("img", "domains_1")["roi"]
+    pts = np.array(r["points"])
+    assert r["kind"] == "polygon" and len(pts) == 4 and np.allclose(pts.mean(0), [21, 30])
+    side = pts[1] - pts[0]
+    assert np.degrees(np.arctan2(side[1], side[0])) == pytest.approx(1.0)
     dv._move_press(NS(inaxes=dv._ax, xdata=60 * s_, ydata=2 * s_, button=1))  # click outside: deselected
     assert dv._move["selected"] is None
     monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(tmp_path / "pushed.pdf"), "")))

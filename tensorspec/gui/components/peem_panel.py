@@ -1027,6 +1027,18 @@ class PeemDomainView(QWidget):
             r.update(cx=r["cx"] + dx, cy=r["cy"] + dy)
         return r
 
+    @classmethod
+    def _rotate_region(cls, region: dict, deg: float) -> dict:
+        """Rotate a region about its centre by deg (positive = clockwise as displayed, rows going down);
+        a rectangle or ellipse becomes a polygon."""
+        xs, ys = cls._region_xy(region)
+        pts = np.column_stack([xs[:-1], ys[:-1]]).astype(float)  # without the closing point
+        c = pts.mean(axis=0)
+        t = np.radians(deg)
+        rot = np.array([[np.cos(t), -np.sin(t)], [np.sin(t), np.cos(t)]])
+        out = (pts - c) @ rot.T + c
+        return {"kind": "polygon", "points": [[float(x), float(y)] for x, y in out]}
+
     @staticmethod
     def _region_xy(region: dict) -> tuple[list[float], list[float]]:
         """Outline of a region in px (closed), for the move preview."""
@@ -1063,7 +1075,8 @@ class PeemDomainView(QWidget):
             self._move["selected"] = which
             self._show()
             self.status.setText(f"{'ROI' if which == 'roi' else 'Background region'} selected: arrow keys move it "
-                                "(Shift + arrow: 10 px), or drag it; click elsewhere to deselect." if which else "")
+                                "(Shift: 10 px), [ / ] rotate it 1° (Shift: 5°), or drag it; click elsewhere to "
+                                "deselect." if which else "")
             return
         if which is None or regions.get(which) is None:
             return
@@ -1100,20 +1113,29 @@ class PeemDomainView(QWidget):
         self.status.setText(f"{'ROI' if which == 'roi' else 'Background region'} moved by ({dx:+.0f}, {dy:+.0f}) px.")
 
     def _move_key(self, ev):
+        """Selected outline: arrows move it 1 px (Shift: 10 px); ] / [ rotate it 1 deg clockwise /
+        anticlockwise about its centre (Shift: 5 deg)."""
         steps = {"left": (-1, 0), "right": (1, 0), "up": (0, -1), "down": (0, 1)}
+        turns = {"]": 1.0, "[": -1.0, "}": 5.0, "{": -5.0, "shift+]": 5.0, "shift+[": -5.0}
         key = str(ev.key or "")
         base = key.replace("shift+", "")
-        if base not in steps or not self._selected():
+        if (base not in steps and key not in turns) or not self._selected():
             return
-        k = 10 if "shift" in key else 1
         which = self._move.get("selected")
         if which is None:
             return
         region = self.service.domain_regions(*self._selected()[0]).get(which)
         if region is None:
             return
-        dx, dy = steps[base]
-        self._set_region(which, self._shift_region(region, dx * k, dy * k))
+        what = "ROI" if which == "roi" else "Background region"
+        if key in turns:
+            self._set_region(which, self._rotate_region(region, turns[key]))
+            self.status.setText(f"{what} rotated {turns[key]:+.0f}° (clockwise +). [ / ] 1°, Shift 5°; arrows move.")
+        else:
+            k = 10 if "shift" in key else 1
+            dx, dy = steps[base]
+            self._set_region(which, self._shift_region(region, dx * k, dy * k))
+            self.status.setText(f"{what} moved ({dx * k:+d}, {dy * k:+d}) px. Arrows 1 px, Shift 10 px; [ / ] rotate.")
         self.canvas.setFocus()
 
     def _set_roi_typed(self):
