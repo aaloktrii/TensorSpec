@@ -36,7 +36,13 @@ class FlowLayout(QLayout):
 
     def setGeometry(self, rect):
         super().setGeometry(rect)
-        self._place(rect, apply=True)
+        need = self._place(rect, apply=True)
+        # When a control grows (e.g. the Sym ± 'white at …' label appears) the row can wrap onto another
+        # line; the parent layout keeps its cached height, so the new line would be cut off. Asking for
+        # the needed height makes the parent give it.
+        w = self.parentWidget()
+        if w is not None and w.minimumHeight() != need:
+            w.setMinimumHeight(need)
 
     def sizeHint(self):
         return self.minimumSize()
