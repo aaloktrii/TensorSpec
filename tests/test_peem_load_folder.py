@@ -164,8 +164,11 @@ def test_closing_during_a_load_stops_the_thread_cleanly(qapp, tmp_path, monkeypa
     """Quitting while folders load must not destroy a running QThread (Qt aborts the app): the thread
     finishes the current job, skips the rest and is waited for."""
     import time
+    from PySide6.QtWidgets import QApplication, QMessageBox
     from tensorspec.gui.components.peem_panel import PeemPanel
 
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
     p = PeemPanel()
     done = []
 
@@ -179,3 +182,28 @@ def test_closing_during_a_load_stops_the_thread_cleanly(qapp, tmp_path, monkeypa
     time.sleep(0.05)
     p._stop_load_thread()
     assert not p._load_thread.isRunning() and len(done) == 1
+    QApplication.processEvents()  # deliver the queued finished signal here, not in a later test
+    assert errors and "test" in errors[0]
+
+
+def test_flat_field_row_sets_the_ue49_detector_maps(qapp, tmp_path):
+    """Flat field: Set… takes the folder with deadpixel_*.tif / NormImage_*.tif, gives both to the service
+    (applied on every UE49 load) and is remembered; Clear removes them."""
+    import tifffile
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    st = PeemPanel._settings()
+    saved = st.value("detector_dir")
+    try:
+        tifffile.imwrite(tmp_path / "deadpixel_10kV.tif", np.zeros((514, 514), np.uint8))
+        tifffile.imwrite(tmp_path / "NormImage_10kV.tif", np.ones((514, 514), np.float32))
+        p = PeemPanel()
+        p._set_detector_folder(str(tmp_path))
+        assert p.service.dead_map_path.endswith("deadpixel_10kV.tif")
+        assert p.service.norm_image_path.endswith("NormImage_10kV.tif")
+        assert "NormImage_10kV.tif" in p.detector_label.text()
+        assert PeemPanel().service.norm_image_path == p.service.norm_image_path  # remembered
+        p._set_detector_folder("")
+        assert p.service.norm_image_path is None and p.detector_label.text() == "none"
+    finally:
+        st.remove("detector_dir") if saved is None else st.setValue("detector_dir", saved)
