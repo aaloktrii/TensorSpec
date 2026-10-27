@@ -777,9 +777,14 @@ def _load_summary(
 DOMAIN_PREFIX = "domains_"
 DOMAIN_PUSH_ATTRS = ("source_kind", "source_var", "mode", "gamma", "vmin", "vmax", "cmap", "um_per_px",
                      "roi_region", "bg_region")
-DOMAIN_TABLE_KEYS = ("f_up", "f_down", "mz", "p_up", "p_neutral", "p_down", "n_domains_up", "n_domains_down",
-              "mean_domain_area_um2", "width_up", "width_down", "period", "wall_length_um",
-              "wall_density_per_um", "stripe_angle_deg", "alignment", "flake_area_um2")
+DOMAIN_TABLE_KEYS = (  # (column, metric): pixel counts without / with the m0 threshold, then shape numbers
+    ("pixels", "n_px"), ("up_px", "n_up_px"), ("down_px", "n_down_px"), ("mz", "mz"),
+    ("m0", "m0"), ("up_px (m0)", "n_up_px_m0"), ("neutral_px (m0)", "n_neutral_px_m0"),
+    ("down_px (m0)", "n_down_px_m0"), ("mz (m0)", "mz_three_state"),
+    ("domains_up", "n_domains_up"), ("domains_down", "n_domains_down"), ("mean_domain_area_um2", "mean_domain_area_um2"),
+    ("width_up", "width_up"), ("width_down", "width_down"), ("period", "period"),
+    ("wall_length_um", "wall_length_um"), ("wall_density_per_um", "wall_density_per_um"),
+    ("stripe_angle_deg", "stripe_angle_deg"), ("alignment", "alignment"), ("flake_area_um2", "flake_area_um2"))
 
 
 class PeemDomainAnalysisSteps:
@@ -976,9 +981,48 @@ class PeemDomainAnalysisSteps:
                 raise ValueError("Background region is ticked but none is drawn")
             bg = roi_stats.background_level(a, np.asarray(ds["bg"].values, bool))["bg"]
         avg = roi_stats.roi_average(a, roi, bg=bg)
-        fr = roi_stats.updown_fractions(a, roi, threshold=0.0, bg=bg)
-        return {"f_up": fr["f_up"], "f_down": fr["f_down"], "mz": fr["f_up"] - fr["f_down"], "mean": avg["mean"],
+        v = (a[roi] if roi is not None else a.ravel()) - bg
+        v = v[np.isfinite(v)]
+        n_up, n_down = int((v > 0).sum()), int((v < 0).sum())
+        return {"n_px": int(v.size), "n_up_px": n_up, "n_down_px": n_down,
+                "mz": (n_up - n_down) / v.size if v.size else float("nan"), "mean": avg["mean"],
                 "zero": bg, "zero_from": "background region" if use_bg else "0", "in_roi": roi is not None}
+
+    # ---------------------------------------------------------------- save / load an analysis
+    def save_domain_analysis(self, name: str, label: str, path: str | Path) -> str:
+        """One pushed map with everything about it (map, ROI / background masks and outlines, Map-view look,
+        step settings, results and pipeline steps) as a NetCDF file, to load and analyse again later."""
+        ds = self._domains(name, label).copy()
+        attrs = {k: (int(v) if isinstance(v, (bool, np.bool_)) else v) for k, v in ds.attrs.items()}
+        ds.attrs = {**attrs, "tensorspec_domain_analysis": 1, "source_dataset": name}
+        ds.to_netcdf(path)
+        return str(path)
+
+    def load_domain_analysis(self, path: str | Path) -> dict[str, Any]:
+        """Load a saved analysis as a pushed map (its dataset is added when not loaded: the map as a one-frame
+        stack). Returns {name, label, params}: the step settings used, to run again or change."""
+        with xr.open_dataset(path) as f:
+            ds = f.load()
+        if not ds.attrs.get("tensorspec_domain_analysis"):
+            raise ValueError("not a saved TensorSpec domain analysis (.nc)")
+        attrs = {k: v for k, v in ds.attrs.items() if k not in ("tensorspec_domain_analysis", "source_dataset")}
+        name = re.sub(r"[^A-Za-z0-9_.-]", "_", str(ds.attrs.get("source_dataset") or Path(path).stem))[:64]
+        a = np.asarray(ds["data"].values, float)
+        if name not in self.list_datasets():
+            ny, nx = a.shape
+            global_workspace.push_spectroscopy_data(name, TensorData(
+                value=a[None].astype(np.float32), axes=[np.zeros(1), np.arange(ny, dtype=float), np.arange(nx, dtype=float)],
+                labels=["frame", "y", "x"], units=["", "px", "px"], data_type="Experimental PEEM",
+                metadata={"um_per_px": attrs.get("um_per_px"), "source": str(path), "loader": "domain_analysis_file",
+                          "pol": []}))
+        used = [int(k[len(DOMAIN_PREFIX):]) for k in global_workspace.list_analysis_children(name)
+                if k.startswith(DOMAIN_PREFIX) and k[len(DOMAIN_PREFIX):].isdigit()]
+        label = f"{DOMAIN_PREFIX}{max(used, default=0) + 1}"
+        extra = {k: ds[k].values for k in ds.data_vars if k != "data"}
+        self._write_domains(name, label, a, extra, attrs)
+        _step_record(name, "load domain analysis", {"file": Path(path).name, "label": label})
+        return {"name": name, "label": label,
+                "params": {k[len("param_"):]: v for k, v in attrs.items() if k.startswith("param_")}}
 
     def domain_look(self, name: str, label: str) -> dict[str, Any]:
         """How the pushed map looked in the Map view: cmap, vmin, vmax, gamma, um_per_px, ROI / background masks."""
@@ -1022,9 +1066,9 @@ class PeemDomainAnalysisSteps:
                 continue
             unit = r.get("width_unit", "px")
             row = {"dataset": it["name"], "map": it["source"], "push": it["mode"], "label": it["label"]}
-            for k in DOMAIN_TABLE_KEYS:
+            for col, k in DOMAIN_TABLE_KEYS:
                 v = r.get(f"{k}_{unit}", r.get(k))
-                row[f"{k} ({unit})" if k in ("width_up", "width_down", "period") else k] = v
+                row[f"{col} ({unit})" if k in ("width_up", "width_down", "period") else col] = v
             rows.append(row)
         return rows
 
