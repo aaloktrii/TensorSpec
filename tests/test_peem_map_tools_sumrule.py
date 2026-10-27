@@ -314,6 +314,9 @@ def test_domains_tab_hides_the_left_column_and_shows_the_pushed_look(qapp, tmp_p
     t.viewer.primary_view().chk_invert.setChecked(True)
     t._push()
     assert p.view_tabs.currentWidget() is t.analysis_view and not p._controls_scroll.isVisibleTo(p)
+    dv = t.domain_view
+    assert dv.canvas.parent() is not None and dv.canvas.isVisibleTo(dv)  # the figure is in the window
+    assert len(dv.fig.axes) >= 2  # pushed map + chosen step
     look = p.service.domain_look("img", "domains_1")
     assert look["cmap"] == "bwr_r" and look["vmin"] < 0 < look["vmax"]
     t.analysis_view.setCurrentWidget(t.plot_view)
