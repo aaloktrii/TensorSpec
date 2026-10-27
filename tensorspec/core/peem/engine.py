@@ -164,12 +164,21 @@ def drift_correct(
     roi: dict,
     search_radius: int,
     track_channel: int = 0,
+    smooth_px: float = 0.0,
+    per_channel: bool = False,
 ) -> TensorData:
     """
     Correct integer translational drift using masked ROI NCC against a reference.
 
     Paired tensors estimate drift on one channel and apply each shift to all
     channels. Exposed borders use edge-clamp fill.
+
+    smooth_px: Gaussian sigma (px) applied to the planes used for tracking only (the shifts are
+    applied to the unsmoothed data). A detector's fixed pixel pattern (e.g. a TPX3 without its
+    flat field) otherwise correlates best at zero shift and hides the real drift; 2 px removes it.
+    per_channel: paired tensors only; every frame of every channel is tracked on its own against
+    the reference frame of track_channel. Needed when the two channels were not recorded together
+    (UE49: the CP and CM frames of a pair come from different scans, minutes apart).
     """
     ref_index = _require_integer(ref_index, "ref_index")
     search_radius = _require_integer(search_radius, "search_radius")
@@ -191,7 +200,16 @@ def drift_correct(
     if bbox_area < 9:
         raise ValueError("ROI bounding box area must be at least 9 pixels")
 
-    ref_plane = tracking_planes[ref_index]
+    if smooth_px < 0:
+        raise ValueError("smooth_px must be >= 0")
+
+    def prep(plane: np.ndarray) -> np.ndarray:
+        if not smooth_px:
+            return plane
+        from scipy.ndimage import gaussian_filter
+        return gaussian_filter(np.asarray(plane, dtype=float), smooth_px)
+
+    ref_plane = prep(tracking_planes[ref_index])
     # Validate template variance even when this is a one-item stack.
     ref_values = np.asarray(ref_plane[mask], dtype=float)
     ref_norm = np.linalg.norm(ref_values - ref_values.mean())
@@ -200,20 +218,27 @@ def drift_correct(
 
     from concurrent.futures import ThreadPoolExecutor  # frames are independent; the FFTs release the GIL
 
-    def frame_shift(index: int) -> tuple[int, int]:
-        if index == ref_index:
-            return (0, 0)
-        return _ncc_best_shift(ref_plane, tracking_planes[index], mask, search_radius)
+    channels = list(range(tensor.value.shape[1])) if (paired and per_channel) else [track_channel]
 
+    def frame_shift(item: tuple[int, int]) -> tuple[int, int]:
+        index, channel = item
+        if index == ref_index and channel == track_channel:
+            return (0, 0)
+        plane = tensor.value[index, channel] if paired else tracking_planes[index]
+        return _ncc_best_shift(ref_plane, prep(plane), mask, search_radius)
+
+    items = [(i, c) for i in range(n_items) for c in channels]
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:
-        shifts: list[tuple[int, int]] = list(pool.map(frame_shift, range(n_items)))
+        found = dict(zip(items, pool.map(frame_shift, items)))
+    shifts: list[tuple[int, int]] = [found[(i, track_channel)] for i in range(n_items)]
 
     corrected = np.empty_like(tensor.value)
     for index, (dx, dy) in enumerate(shifts):
         if paired:
             for channel in range(tensor.value.shape[1]):
+                cdx, cdy = found.get((index, channel), (dx, dy))
                 corrected[index, channel] = _shift_plane(
-                    tensor.value[index, channel], dx, dy
+                    tensor.value[index, channel], cdx, cdy
                 )
         else:
             corrected[index] = _shift_plane(tensor.value[index], dx, dy)
@@ -226,6 +251,11 @@ def drift_correct(
             "drift_roi": deepcopy(roi),
             "drift_search_radius": search_radius,
             "drift_track_channel": track_channel,
+            "drift_smooth_px": float(smooth_px),
+            "drift_per_channel": bool(paired and per_channel),
+            **({"drift_channel_shifts": [
+                [{"dx": found[(i, c)][0], "dy": found[(i, c)][1]} for c in channels]
+                for i in range(n_items)]} if paired and per_channel else {}),
             "drift_shifts": [
                 {"index": index, "dx": dx, "dy": dy}
                 for index, (dx, dy) in enumerate(shifts)

@@ -1313,7 +1313,11 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
         search_radius: int,
         track_channel: int = 0,
         source: str = "raw",
+        smooth_px: float = 0.0,
+        per_channel: bool = False,
     ) -> dict[str, Any]:
+        """smooth_px / per_channel: see core.peem.engine.drift_correct (the PEEM panel uses 2 px and
+        per-channel tracking: TPX3 fixed pattern, UE49 CP / CM pairs from different scans)."""
         if source == "raw":
             tensor = _require_tensor(name)
         else:
@@ -1327,11 +1331,15 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
             roi=roi_dict,
             search_radius=search_radius,
             track_channel=track_channel,
+            smooth_px=smooth_px,
+            per_channel=per_channel,
         )
         if not global_workspace.write_processed_data(name, corrected):
             raise ValueError(f"PEEM data '{name}' not found.")
 
         shifts = corrected.metadata.get("drift_shifts", [])
+        if corrected.metadata.get("drift_channel_shifts"):  # every channel's own shift
+            shifts = [c for per in corrected.metadata["drift_channel_shifts"] for c in per]
         return {
             "name": name,
             "source": source,

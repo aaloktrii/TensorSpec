@@ -40,6 +40,7 @@ XLD_FORMULA = "(LV-LH)/(LV+LH)"
 # pattern. Gradient magnitude is invariant to that sign flip (Igor's
 # driftCorrection also defaults to "find edges").
 CROSS_POL_FILTER = "edges"
+FRAME_FILTER = "smooth"  # frame-to-frame drift: smoothed 1 px (UE49 TPX3 without flat field keeps a pixel pattern)
 
 
 def asymmetry(a: np.ndarray, b: np.ndarray, min_sum: float = 0.0,
@@ -109,7 +110,8 @@ def joint_means(stack_a: np.ndarray, stack_b: np.ndarray, register: bool = True,
     max_shift = max(2.0, max_shift_frac * min(a.shape[1:])) if max_shift_frac else None
     if register:
         box = box or _central_box(a.shape)
-        aligned, shifts = registration.register_stack(np.concatenate([a, b]), 0, box=box, max_shift=max_shift)
+        aligned, shifts = registration.register_stack(np.concatenate([a, b]), 0, box=box, filt=FRAME_FILTER,
+                                                      max_shift=max_shift)
         a, b = aligned[: a.shape[0]], aligned[a.shape[0]:]
     if register:
         mean_a, mean_b, refine = stack_means(a, b, box, max_shift)

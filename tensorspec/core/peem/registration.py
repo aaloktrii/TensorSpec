@@ -29,6 +29,8 @@ def _prep(img: np.ndarray, filt: str | None) -> np.ndarray:
     a = np.nan_to_num(np.asarray(img, dtype=float))
     if filt == "edges":
         a = np.hypot(ndimage.sobel(a, 0), ndimage.sobel(a, 1))
+    elif filt == "smooth":  # sigma 1 px: hides a detector's fixed pixel pattern (it would pin the shift at 0);
+        a = ndimage.gaussian_filter(a, 1.0)  # wider blurs the peak and biases the sub-pixel fit
     elif filt == "smooth_edges":  # single noisy frames: smooth (sigma 2 px) before the gradient
         a = ndimage.gaussian_filter(a, 2.0)
         a = np.hypot(ndimage.sobel(a, 0), ndimage.sobel(a, 1))
@@ -154,6 +156,8 @@ def _filtered(img: np.ndarray, filt: str | None) -> np.ndarray:
     a = np.nan_to_num(np.asarray(img, dtype=float))
     if filt == "edges":
         return np.hypot(ndimage.sobel(a, 0), ndimage.sobel(a, 1))
+    if filt == "smooth":
+        return ndimage.gaussian_filter(a, 1.0)
     if filt == "smooth_edges":
         a = ndimage.gaussian_filter(a, 2.0)
         return np.hypot(ndimage.sobel(a, 0), ndimage.sobel(a, 1))
