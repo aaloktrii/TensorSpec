@@ -1090,6 +1090,45 @@ class PeemDomainAnalysisSteps:
             w.writerows([("up", v) for v in ar["up"]] + [("down", v) for v in ar["down"]])
         return str(path)
 
+    def domain_size_fits(self, name: str, label: str) -> dict[str, Any]:
+        """Log-normal vs Gaussian fits of the domain widths and local periods, up and down separately
+        (core/peem/domain_analysis.size_fits), from the analysed three-state map. Computed on request."""
+        at = dict(self._domains(name, label).attrs)
+        if not at.get("analysed"):
+            raise ValueError(f"run the domain analysis on {label} first")
+        um = at.get("um_per_px")
+        return da.size_fits(self.domain_layer(name, label, "three_states"),
+                            um if um and np.isfinite(um) else None, int(at.get("param_min_px", da.DEFAULTS["min_px"])))
+
+    def export_domain_size_fits(self, path: str | Path, name: str, label: str) -> list[str]:
+        """The fits as an editable PDF (2 x 2: width / period, up / down) and their numbers as
+        <stem>_fits.csv. Returns both paths."""
+        from tensorspec.plotting import peem_plots
+
+        fits = self.domain_size_fits(name, label)
+        at = dict(self._domains(name, label).attrs)
+        path = Path(path).with_suffix(".pdf")
+        title = f"{name} · {self.layer_name(at.get('source_kind', '?'), at.get('source_var', 'data'))}"
+        peem_plots.save_size_fits_pdf(path, fits, title)
+        u = fits["unit"]
+        cols = ["quantity", "state", "n", f"lognormal_median ({u})", "lognormal_sigma_log", f"lognormal_mode ({u})",
+                "lognormal_aic", "lognormal_bic", "lognormal_ks_stat", "lognormal_ks_p", f"gaussian_mean ({u})",
+                f"gaussian_sd ({u})", "gaussian_aic", "gaussian_bic", "gaussian_ks_stat", "gaussian_ks_p",
+                "delta_aic", "delta_bic", "preferred"]
+        csv_path = path.with_name(path.stem + "_fits.csv")
+        with open(csv_path, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(cols)
+            for q in ("width", "period"):
+                for state in ("up", "down"):
+                    f = fits[q][state]
+                    ln, ga = f["lognormal"] or {}, f["gaussian"] or {}
+                    w.writerow([q, state, int(np.size(f["samples"])), ln.get("median"), ln.get("sigma_log"), ln.get("mode"),
+                                ln.get("aic"), ln.get("bic"), ln.get("ks_stat"), ln.get("ks_p"), ga.get("mean"),
+                                ga.get("sd"), ga.get("aic"), ga.get("bic"), ga.get("ks_stat"), ga.get("ks_p"),
+                                f["delta_aic"], f["delta_bic"], f["preferred"]])
+        return [str(path), str(csv_path)]
+
     def export_domain_figure(self, path: str | Path, name: str, label: str, step: str = "three_states") -> str:
         """Editable PDF (TrueType text) of one step with axes in um, titled with the dataset and numbers."""
         from tensorspec.plotting import peem_plots

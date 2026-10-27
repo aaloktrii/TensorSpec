@@ -406,6 +406,67 @@ def domain_sizes(ax, areas: dict) -> None:
     ax.legend(frameon=False, fontsize=7)
 
 
+def size_fit(ax, fit: dict, quantity: str, state: str, unit: str) -> None:
+    """One state's width or period sample: density histogram, log-normal (solid) and Gaussian (dashed)
+    fits, AIC / KS p and delta AIC (as the toolkit's log-normal vs Gaussian figure)."""
+    col = UP_COLOR if state == "up" else DOWN_COLOR
+    v = np.asarray(fit.get("samples", []), float)
+    ax.set_title(f"{quantity} · {state}", fontsize=8)
+    ax.set_xlabel(f"domain {quantity} ({unit})")
+    ax.set_ylabel("probability density")
+    if v.size < 5 or not (fit.get("lognormal") or fit.get("gaussian")):
+        ax.text(0.5, 0.5, "not enough samples\n(need >= 5)", ha="center", va="center", transform=ax.transAxes,
+                fontsize=8, color="0.4")
+        return
+    ax.hist(v, bins=24, density=True, color=col, alpha=0.3, label=f"data ({v.size})")
+    txt = []
+    if fit["lognormal"]:
+        ax.plot(fit["lognormal"]["pdf_x"], fit["lognormal"]["pdf_y"], "-", color=col, lw=1.3, label="log-normal")
+        txt.append(f"log-normal: AIC {fit['lognormal']['aic']:.1f}, KS p {fit['lognormal']['ks_p']:.3f}")
+    if fit["gaussian"]:
+        ax.plot(fit["gaussian"]["pdf_x"], fit["gaussian"]["pdf_y"], "--", color=col, lw=1.3, label="Gaussian")
+        txt.append(f"Gaussian: AIC {fit['gaussian']['aic']:.1f}, KS p {fit['gaussian']['ks_p']:.3f}")
+    if fit["preferred"]:
+        txt.append(f"ΔAIC {fit['delta_aic']:+.1f} → {'log-normal' if fit['preferred'] == 'lognormal' else 'Gaussian'}")
+    ax.text(0.98, 0.98, "\n".join(txt), transform=ax.transAxes, fontsize=6, va="top", ha="right",
+            bbox=dict(boxstyle="round", fc="white", ec="0.6", alpha=0.9))
+    ax.legend(frameon=False, fontsize=6, loc="center right")
+
+
+def size_fits(axes, fits: dict) -> None:
+    """2 x 2 axes: rows width / period, columns up / down."""
+    for row, q in zip(axes, ("width", "period")):
+        for ax, state in zip(row, ("up", "down")):
+            size_fit(ax, fits[q][state], q, state, fits["unit"])
+
+
+def size_fits_text(fits: dict) -> str:
+    """One line: delta AIC and the favoured model per quantity and state."""
+    parts = []
+    for q in ("width", "period"):
+        for state in ("up", "down"):
+            f = fits[q][state]
+            parts.append(f"{q} {state}: " + (f"ΔAIC {f['delta_aic']:+.1f} ({'log-normal' if f['preferred'] == 'lognormal' else 'Gaussian'})"
+                                           if f["preferred"] else "too few samples"))
+    return "Log-normal vs Gaussian (ΔAIC = AIC Gaussian − AIC log-normal; > 0 favours log-normal, |Δ| > 10 decisive): " \
+        + "; ".join(parts)
+
+
+def save_size_fits_pdf(path, fits: dict, title: str = "") -> None:
+    """Editable PDF (TrueType text) of the 2 x 2 log-normal vs Gaussian comparison, 17.8 cm wide."""
+    import matplotlib
+    from matplotlib.figure import Figure
+
+    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
+                                "font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
+                                "font.size": 7, "axes.linewidth": 0.6}):
+        fig = Figure(figsize=(7.0, 5.2), layout="constrained")
+        size_fits(fig.subplots(2, 2), fits)
+        if title:
+            fig.suptitle(title, fontsize=8)
+        fig.savefig(path)
+
+
 def save_domain_step_pdf(path, img: np.ndarray, step: str, um_per_px: float | None, title: str,
                          numbers: dict | None = None, flake: np.ndarray | None = None,
                          look: dict | None = None) -> None:
