@@ -42,6 +42,9 @@ from tensorspec.gui.services.peem_service import PeemService
 from tensorspec.plotting import peem_plots
 
 
+DRIFT_SMOOTH_PX = 2.0  # Gaussian sigma of the planes used to track drift (the shifts move the raw data)
+
+
 class PeemLoadThread(QThread):
     """Load jobs in order, each ``(kind, source, name)``: ``("path", path, name)`` TIF stack / folder,
     ``("images", folder, name)`` PNG / JPEG frames, ``("beamline", [paths], name)`` UE49 / UView / P3B.
@@ -82,6 +85,37 @@ class PeemPanel(QWidget):
         self._meta: dict | None = None
         self._load_thread: PeemLoadThread | None = None
         self._setup_ui()
+        self._set_detector_folder(str(self._settings().value("detector_dir", "") or ""), quiet=True)
+
+    # --- UE49 detector maps (dead pixels + flat field), remembered between sessions --------------
+    @staticmethod
+    def _detector_files(folder: str) -> tuple[str | None, str | None]:
+        """The newest deadpixel*.tif and NormImage*.tif in a folder (None when missing)."""
+        import glob
+
+        def newest(pattern):
+            hits = sorted(glob.glob(os.path.join(folder, pattern)), key=os.path.getmtime)
+            return hits[-1] if hits else None
+        return newest("[Dd]ead[Pp]ixel*.tif*"), newest("[Nn]orm[Ii]mage*.tif*")
+
+    def _pick_detector_maps(self):
+        folder = QFileDialog.getExistingDirectory(self, "Folder with deadpixel_*.tif and NormImage_*.tif",
+                                                  str(self._settings().value("detector_dir", "") or ""))
+        if folder:
+            self._set_detector_folder(folder)
+
+    def _set_detector_folder(self, folder: str, quiet: bool = False):
+        dead, norm = self._detector_files(folder) if folder and os.path.isdir(folder) else (None, None)
+        if folder and not (dead or norm):
+            if not quiet:
+                QMessageBox.warning(self, "Flat field", f"No deadpixel*.tif or NormImage*.tif in\n{folder}")
+            return
+        self.service.set_detector_maps(dead, norm)
+        self._settings().setValue("detector_dir", folder if (dead or norm) else "")
+        names = [os.path.basename(p) for p in (norm, dead) if p]
+        self.detector_label.setText(", ".join(names) if names else "none")
+        self.detector_label.setToolTip("\n".join(p for p in (norm, dead) if p) or "No detector maps: UE49 frames "
+                                       "keep the TPX3 pixel pattern")
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
@@ -114,6 +148,20 @@ class PeemPanel(QWidget):
         self.btn_attach_csv = QPushButton("Attach CSV")
         self.btn_attach_csv.clicked.connect(self._attach_csv)
         load_form.addRow(self.btn_attach_csv)
+        det_row = QHBoxLayout()  # UE49 TPX3 dead-pixel + flat-field maps, applied while loading
+        self.detector_label = QLabel("none")
+        self.detector_label.setWordWrap(True)
+        det_row.addWidget(self.detector_label, 1)
+        b = QPushButton("Set…")
+        b.setToolTip("UE49 TPX3 detector maps: pick the folder with the beamline's deadpixel_*.tif and\n"
+                     "NormImage_*.tif (e.g. 'Procedure files'). Used for every UE49 load from then on;\n"
+                     "without the flat field the detector's pixel pattern stays in every frame.")
+        b.clicked.connect(self._pick_detector_maps)
+        det_row.addWidget(b)
+        b = QPushButton("Clear")
+        b.clicked.connect(lambda: self._set_detector_folder(""))
+        det_row.addWidget(b)
+        load_form.addRow("Flat field:", det_row)
         self.dataset_combo = QComboBox()
         self.dataset_combo.setToolTip("Loaded datasets (e.g. several .nc map files); pick one to work on")
         self.dataset_combo.activated.connect(lambda *_: self.select_dataset(self.dataset_combo.currentText()))
@@ -433,6 +481,8 @@ class PeemPanel(QWidget):
                              + ", ".join(os.path.basename(q.rstrip(os.sep)) for q in first["sources"]))
             if first.get("format"):
                 parts.append(f"format={first['format']}")
+            if first.get("format") == "ue49" and not self.service.norm_image_path:
+                parts.append("no flat field (Flat field: Set…)")
             if first.get("csv_prompt"):
                 parts.append("Attach CSV if needed.")
         else:
@@ -552,6 +602,8 @@ class PeemPanel(QWidget):
                     roi_dict=roi,
                     search_radius=self.drift_radius.value(),
                     source=self.drift_source.currentData(),
+                    smooth_px=DRIFT_SMOOTH_PX,  # the detector's pixel pattern must not pin the shift at 0
+                    per_channel=True,  # after Stack Pairs: CP and CM frames each tracked on their own
                 )
             finally:
                 QGuiApplication.restoreOverrideCursor()
