@@ -9,7 +9,9 @@ import numpy as np
 
 
 SIGNED_KINDS = {"pcd", "pld", "pmld", "pmnld", "domain_map", "compare"}
-SIGNED_CMAP = "bwr_r"  # PEEM convention: positive blue, negative red (white at the centre)
+# PEEM colour convention (every signed map, domain map and export): positive blue, negative red, white at
+# the centre; up (+) domains blue, down (-) red. Change it here only.
+SIGNED_CMAP = "bwr_r"
 SIGNED_VARS = ("", "data", "difference", "flattened", "bg_removed", "fft_filtered", "data_original",
                "map", "reference", "offset_removed")
 
@@ -265,8 +267,8 @@ def drift(ax, d: dict) -> None:
 
 def save_three_panel(panels: list[tuple[str, np.ndarray]], path, um_per_px: float | None = None,
                      scale_bar_um: float = 2.0) -> str:
-    """Three maps side by side on ONE grey scale (each centred on its median: offsets without I0 are
-    not compared), unlabelled scale bar on the last panel; vector PDF with editable text."""
+    """Three maps side by side on ONE signed colour scale (SIGNED_CMAP; each centred on its median: offsets
+    without I0 are not compared), unlabelled scale bar on the last panel; vector PDF with editable text."""
     import matplotlib
     from matplotlib.figure import Figure
 
@@ -276,7 +278,7 @@ def save_three_panel(panels: list[tuple[str, np.ndarray]], path, um_per_px: floa
     fig = Figure(figsize=(3.4 * len(imgs), 3.7), layout="tight")
     axes = fig.subplots(1, len(imgs))
     for ax, (t, a) in zip(np.atleast_1d(axes), imgs):
-        ax.imshow(a - np.nanmedian(a), cmap="gray", vmin=-lim, vmax=lim, interpolation="nearest")
+        ax.imshow(a - np.nanmedian(a), cmap=SIGNED_CMAP, vmin=-lim, vmax=lim, interpolation="nearest")
         ax.set_axis_off()
         ax.set_title(t, fontsize=8)
     if um_per_px:
@@ -289,7 +291,7 @@ def save_three_panel(panels: list[tuple[str, np.ndarray]], path, um_per_px: floa
 
 
 # ------------------------------------------------------------------ spatial domain analysis
-UP_COLOR, DOWN_COLOR = "#2166ac", "#b2182b"  # up (+) blue, down (-) red, as the signed maps
+UP_COLOR, DOWN_COLOR = "#0000ff", "#ff0000"  # up (+) blue, down (-) red: the ends of SIGNED_CMAP
 
 
 def domain_step(ax, img: np.ndarray, step: str, um_per_px: float | None = None, title: str = ""):
@@ -314,7 +316,7 @@ def domain_step(ax, img: np.ndarray, step: str, um_per_px: float | None = None, 
         ax.imshow(a, cmap="gray", vmin=0, vmax=1, **kw)
     elif step in ("asymmetry", "flattened"):
         lim = float(np.nanpercentile(np.abs(a), 99)) or 1.0
-        im = ax.imshow(a, cmap="RdBu", vmin=-lim, vmax=lim, **kw)  # positive blue
+        im = ax.imshow(a, cmap=SIGNED_CMAP, vmin=-lim, vmax=lim, **kw)
     elif step == "width_map":
         im = ax.imshow(a, cmap="viridis", **kw)
     elif step == "local_std":
