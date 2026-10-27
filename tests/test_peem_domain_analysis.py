@@ -26,7 +26,7 @@ def test_matches_the_sda_toolkit():
     a = _labyrinth()
     r = da.analyze(a, um_per_px=0.02, flake="all")
     m = r["metrics"]
-    assert m["f_up"] == pytest.approx(0.5535546875)
+    assert m["n_up_px"] / (m["n_up_px"] + m["n_down_px"]) == pytest.approx(0.5535546875)  # toolkit frac_up
     assert m["mz"] == pytest.approx(0.107109375)
     assert (m["n_domains_up"], m["n_domains_down"], m["wall_length_px"]) == (7, 7, 1284)
     assert m["width_up_nm"] == pytest.approx(316.732602, abs=1e-5)
@@ -39,7 +39,7 @@ def test_stripe_width_period_and_direction():
         r = da.analyze(_stripes(angle_deg=angle), um_per_px=None, flake="all", background="none",
                        denoise="none")
         m = r["metrics"]
-        assert m["f_up"] == pytest.approx(0.5, abs=0.03)
+        assert m["n_up_px"] / m["n_px"] == pytest.approx(0.5, abs=0.03)
         assert m["period_px"] == pytest.approx(20, abs=3)
         assert abs((m["stripe_angle_deg"] - angle + 90) % 180 - 90) < 3, (angle, m["stripe_angle_deg"])
         assert m["alignment"] > 0.9
@@ -54,8 +54,10 @@ def test_background_region_sets_the_zero():
     roi = ~bg
     biased = da.analyze(a, roi=roi, background="none", denoise="none")["metrics"]
     fixed = da.analyze(a, roi=roi, bg_mask=bg, background="region", denoise="none")["metrics"]
-    assert biased["f_up"] > 0.95
-    assert fixed["f_up"] == pytest.approx(0.5, abs=0.03) and fixed["split"] == "zero"
+    assert biased["n_up_px"] > 0.95 * biased["n_px"]
+    assert fixed["n_up_px"] / fixed["n_px"] == pytest.approx(0.5, abs=0.03) and fixed["split"] == "zero"
+    assert "f_up" not in fixed and "p_up" not in fixed  # counts only
+    assert fixed["n_up_px_m0"] + fixed["n_neutral_px_m0"] + fixed["n_down_px_m0"] == fixed["n_px"]
     with pytest.raises(ValueError, match="background region"):
         da.analyze(a, background="region")
 

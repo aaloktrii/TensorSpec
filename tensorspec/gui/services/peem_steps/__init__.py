@@ -106,12 +106,13 @@ checks every public call is listed here and runs the workflow without Qt):
     domain_regions, set_domain_region(name, label, which, region)
                                           ROI / background region of one pushed map (drawn in Analysis -> Domains)
     domain_auto_flake(name, label)        automatic flake outline -> that map's ROI
-    save_domain_region, load_domain_region, domain_roi_statistics (split at zero / background mean)
+    save_domain_region, load_domain_region, domain_roi_statistics (pixel counts split at zero / background mean)
+    save_domain_analysis, load_domain_analysis   one pushed map + settings + results as .nc; load to run again
     run_domain_analysis(name, label, **params)
                                           core/peem/domain_analysis (the SDA toolkit's pipeline): normalize,
                                           denoise (TV), local std, flake, background (Gaussian / region /
                                           none), FFT filter, asymmetry m, three states, up / down, width map,
-                                          skeleton, walls -> f_up, f_down, <m_z>, counts, widths, period,
+                                          skeleton, walls -> pixel counts (up / down; up / neutral / down at m0), <m_z>, domain counts, widths, period,
                                           walls, stripe direction and alignment
     domain_result, domain_layer, domain_areas, domain_table
     export_domain_table, export_domain_areas, export_domain_figure (editable PDF, axes in um)
