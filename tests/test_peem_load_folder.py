@@ -186,24 +186,32 @@ def test_closing_during_a_load_stops_the_thread_cleanly(qapp, tmp_path, monkeypa
     assert errors and "test" in errors[0]
 
 
-def test_flat_field_row_sets_the_ue49_detector_maps(qapp, tmp_path):
-    """Flat field: Set… takes the folder with deadpixel_*.tif / NormImage_*.tif, gives both to the service
-    (applied on every UE49 load) and is remembered; Clear removes them."""
+def test_flat_field_is_optional_and_ue49_only(qapp, tmp_path):
+    """Flat field (UE49): off by default; Set… remembers the folder with deadpixel_*.tif / NormImage_*.tif,
+    and the maps reach the service (used for UE49 loads only) only while Use is ticked."""
     import tifffile
     from tensorspec.gui.components.peem_panel import PeemPanel
 
     st = PeemPanel._settings()
-    saved = st.value("detector_dir")
+    saved = {k: st.value(k) for k in ("detector_dir", "detector_on")}
     try:
+        st.remove("detector_dir")
+        st.remove("detector_on")
         tifffile.imwrite(tmp_path / "deadpixel_10kV.tif", np.zeros((514, 514), np.uint8))
         tifffile.imwrite(tmp_path / "NormImage_10kV.tif", np.ones((514, 514), np.float32))
         p = PeemPanel()
+        assert not p.chk_detector.isChecked() and p.service.norm_image_path is None  # optional: off
         p._set_detector_folder(str(tmp_path))
+        assert "NormImage_10kV.tif" in p.detector_label.text()
+        assert p.service.norm_image_path is None  # folder set, still not used
+        p.chk_detector.setChecked(True)
         assert p.service.dead_map_path.endswith("deadpixel_10kV.tif")
         assert p.service.norm_image_path.endswith("NormImage_10kV.tif")
-        assert "NormImage_10kV.tif" in p.detector_label.text()
-        assert PeemPanel().service.norm_image_path == p.service.norm_image_path  # remembered
-        p._set_detector_folder("")
-        assert p.service.norm_image_path is None and p.detector_label.text() == "none"
+        q = PeemPanel()  # remembered: folder and tick
+        assert q.chk_detector.isChecked() and q.service.norm_image_path == p.service.norm_image_path
+        p.chk_detector.setChecked(False)
+        assert p.service.norm_image_path is None and p.service.dead_map_path is None
+        assert not PeemPanel().chk_detector.isChecked()
     finally:
-        st.remove("detector_dir") if saved is None else st.setValue("detector_dir", saved)
+        for k, v in saved.items():
+            st.remove(k) if v is None else st.setValue(k, v)

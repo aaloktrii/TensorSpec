@@ -87,7 +87,7 @@ class PeemPanel(QWidget):
         self._setup_ui()
         self._set_detector_folder(str(self._settings().value("detector_dir", "") or ""), quiet=True)
 
-    # --- UE49 detector maps (dead pixels + flat field), remembered between sessions --------------
+    # --- UE49 (BESSY II) detector maps: dead pixels + flat field; optional, off unless ticked ------
     @staticmethod
     def _detector_files(folder: str) -> tuple[str | None, str | None]:
         """The newest deadpixel*.tif and NormImage*.tif in a folder (None when missing)."""
@@ -105,17 +105,34 @@ class PeemPanel(QWidget):
             self._set_detector_folder(folder)
 
     def _set_detector_folder(self, folder: str, quiet: bool = False):
+        """Remember the folder with the maps; they are used only while 'Use' is ticked."""
         dead, norm = self._detector_files(folder) if folder and os.path.isdir(folder) else (None, None)
         if folder and not (dead or norm):
             if not quiet:
                 QMessageBox.warning(self, "Flat field", f"No deadpixel*.tif or NormImage*.tif in\n{folder}")
             return
-        self.service.set_detector_maps(dead, norm)
+        self._detector_maps = (dead, norm)
         self._settings().setValue("detector_dir", folder if (dead or norm) else "")
         names = [os.path.basename(p) for p in (norm, dead) if p]
-        self.detector_label.setText(", ".join(names) if names else "none")
-        self.detector_label.setToolTip("\n".join(p for p in (norm, dead) if p) or "No detector maps: UE49 frames "
-                                       "keep the TPX3 pixel pattern")
+        self.detector_label.setText(", ".join(names) if names else "no folder set")
+        self.detector_label.setToolTip("\n".join(p for p in (norm, dead) if p) or "Set… the folder with the maps")
+        self._apply_detector_maps()
+
+    def _use_detector_toggled(self, on: bool):
+        if on and not any(getattr(self, "_detector_maps", (None, None))):
+            self._pick_detector_maps()  # nothing set yet: ask for the folder
+            if not any(self._detector_maps):
+                self.chk_detector.setChecked(False)
+                return
+        self._settings().setValue("detector_on", bool(on))
+        self._apply_detector_maps()
+
+    def _apply_detector_maps(self):
+        """The service applies the maps to UE49 loads only, and only while 'Use' is ticked."""
+        dead, norm = getattr(self, "_detector_maps", (None, None))
+        on = self.chk_detector.isChecked()
+        self.service.set_detector_maps(dead if on else None, norm if on else None)
+        self.detector_label.setEnabled(on)
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
@@ -148,20 +165,25 @@ class PeemPanel(QWidget):
         self.btn_attach_csv = QPushButton("Attach CSV")
         self.btn_attach_csv.clicked.connect(self._attach_csv)
         load_form.addRow(self.btn_attach_csv)
-        det_row = QHBoxLayout()  # UE49 TPX3 dead-pixel + flat-field maps, applied while loading
-        self.detector_label = QLabel("none")
+        # Optional, UE49 (BESSY II) only: the TPX3 dead-pixel + flat-field maps, applied while loading.
+        # Other beamlines (BNL UView, ALS .P3B) and TIF stacks are never touched.
+        det_row = QHBoxLayout()
+        self.chk_detector = QCheckBox("Use")
+        self.chk_detector.setToolTip("Optional, UE49 (BESSY II) data only: correct each TPX3 frame with the beamline's\n"
+                                     "dead-pixel map and flat field (NormImage) while loading, as the beamline's Igor\n"
+                                     "procedure. Removes the detector's fixed pixel pattern. Reload after changing it.")
+        self.chk_detector.setChecked(str(self._settings().value("detector_on", "false")).lower() == "true")
+        self.chk_detector.toggled.connect(self._use_detector_toggled)
+        det_row.addWidget(self.chk_detector)
+        self.detector_label = QLabel("no folder set")
         self.detector_label.setWordWrap(True)
         det_row.addWidget(self.detector_label, 1)
         b = QPushButton("Set…")
-        b.setToolTip("UE49 TPX3 detector maps: pick the folder with the beamline's deadpixel_*.tif and\n"
-                     "NormImage_*.tif (e.g. 'Procedure files'). Used for every UE49 load from then on;\n"
-                     "without the flat field the detector's pixel pattern stays in every frame.")
+        b.setToolTip("Folder with the beamline's deadpixel_*.tif and NormImage_*.tif (e.g. 'Procedure files');\n"
+                     "the newest of each is used. Remembered between sessions.")
         b.clicked.connect(self._pick_detector_maps)
         det_row.addWidget(b)
-        b = QPushButton("Clear")
-        b.clicked.connect(lambda: self._set_detector_folder(""))
-        det_row.addWidget(b)
-        load_form.addRow("Flat field:", det_row)
+        load_form.addRow("Flat field (UE49):", det_row)
         self.dataset_combo = QComboBox()
         self.dataset_combo.setToolTip("Loaded datasets (e.g. several .nc map files); pick one to work on")
         self.dataset_combo.activated.connect(lambda *_: self.select_dataset(self.dataset_combo.currentText()))
@@ -481,8 +503,6 @@ class PeemPanel(QWidget):
                              + ", ".join(os.path.basename(q.rstrip(os.sep)) for q in first["sources"]))
             if first.get("format"):
                 parts.append(f"format={first['format']}")
-            if first.get("format") == "ue49" and not self.service.norm_image_path:
-                parts.append("no flat field (Flat field: Set…)")
             if first.get("csv_prompt"):
                 parts.append("Attach CSV if needed.")
         else:
