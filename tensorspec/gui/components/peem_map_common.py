@@ -4,8 +4,8 @@ from __future__ import annotations
 import os
 import re
 
-from PySide6.QtCore import QObject, QSettings, Qt, Signal
-from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtCore import QObject, QSettings, Signal
+from PySide6.QtWidgets import (QDoubleSpinBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QWidget)
 
 
@@ -43,21 +43,21 @@ def _coords_row(placeholder: str, on_set) -> tuple[QHBoxLayout, QLineEdit]:
     return row, edit
 
 
-# Lighter shades of the other suites' main-button colours (QE / Wannier90: Load W90 green, Run red,
-# Fetch teal; ARPES: Push orange), with dark text. Kept to the few main steps so the panel stays clean.
+# TensorSpec's main-button colours (see the other suites): white bold text on the suite colour; disabled = the
+# same hue darker with grey text (QE generator pattern). Kept to the few main steps so the panel stays clean.
 ACTION = {
-    "load": ("#a9dcab", "#1d3d1f", "#d6e6d6"),
-    "map": ("#f2a9ae", "#5a1418", "#ead3d5"),
-    "domains": ("#f7c896", "#5a3208", "#eadccd"),  # ARPES "Push" orange
-    "handover": ("#a3dbe5", "#0c3f48", "#d2e5e8"),
+    "load": ("#5cb85c", "#295329"),      # load / push (DFT Push bands)
+    "map": ("#2b5c8f", "#132940"),       # primary compute (Workspace Browser Launch Data Viewer, DFT Calculate)
+    "domains": ("#e67e22", "#68390f"),   # hand-over to analysis (DFT Prepare TB for ARPES, ARPES push)
+    "handover": ("#17a2b8", "#0c5460"),  # data transfer (QE Fetch Wannier)
 }
 
 
 def action_style(button: QPushButton, kind: str) -> QPushButton:
-    """Colour a step's main button like the other suites (bold, light shade, greyed when disabled)."""
-    bg, fg, off = ACTION[kind]
-    button.setStyleSheet(f"QPushButton {{ background-color: {bg}; color: {fg}; font-weight: bold; padding: 5px; }}"
-                         f"QPushButton:disabled {{ background-color: {off}; color: #999999; }}")  # as the DFT panel
+    """Colour a step's main button as the other TensorSpec suites do (white bold text, 8 px padding)."""
+    bg, off = ACTION[kind]
+    button.setStyleSheet(f"QPushButton {{ background-color: {bg}; color: white; font-weight: bold; padding: 8px; }}"
+                         f"QPushButton:disabled {{ background-color: {off}; color: #888888; }}")
     return button
 
 
@@ -67,21 +67,8 @@ def bold_titles(group) -> None:
 
 
 def _subtitle(text: str) -> QLabel:
-    """A small heading inside a section (e.g. 'Flatten along the line', 'Profiles')."""
-    lab = QLabel(text)
-    lab.setStyleSheet("font-weight: bold; padding-top: 6px;")
-    return lab
-
-
-def tidy_forms(widget) -> None:
-    """The TensorSpec form look of the DFT panel on every platform (macOS otherwise keeps fields at their
-    size hint, right-aligns labels and clips combo texts): labels left, fields grow to the full width.
-    Spacing stays the style's default, as in the other suites."""
-    for form in widget.findChildren(QFormLayout):
-        form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        form.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-        form.setRowWrapPolicy(QFormLayout.DontWrapRows)
+    """A small heading inside a section (e.g. 'Flatten along the line', 'Profiles'), as the Workspace Browser's."""
+    return QLabel(f"<b>{text}</b>")
 
 
 # --- Export location: one folder for every PEEM save dialog (maps, profiles, Domains PDFs / CSV / .nc) ---
