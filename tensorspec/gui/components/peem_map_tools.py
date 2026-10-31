@@ -43,7 +43,7 @@ from PySide6.QtWidgets import (
 from tensorspec.core.data_models import TensorData
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.gui.components.peem_map_common import (
-    _coords_row, _dspin, _numbers, _subtitle, action_style, bold_titles, export_path, tidy_forms)
+    _coords_row, _dspin, _numbers, _subtitle, action_style, bold_titles, export_path)
 from tensorspec.plotting import peem_plots
 
 
@@ -257,7 +257,6 @@ class PeemMapTools:
         self.status = QLabel("")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
-        tidy_forms(self.controls)
 
     def _build_map_view(self):
         self.map_view = QWidget()

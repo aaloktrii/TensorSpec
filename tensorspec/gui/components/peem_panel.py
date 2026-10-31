@@ -37,7 +37,7 @@ from PySide6.QtWidgets import (
 from tensorspec.gui.components.data_viewer_panel import DataViewerPanel
 from tensorspec.core.peem import domain_analysis as da
 from tensorspec.gui.components.peem_map_common import (_dspin, action_style, bold_titles, export_dir,
-                                                         export_dir_row, export_path, tidy_forms)
+                                                         export_dir_row, export_path)
 from tensorspec.gui.services.peem_service import PeemService
 from tensorspec.plotting import peem_plots
 
@@ -113,8 +113,8 @@ class PeemPanel(QWidget):
             return
         self._detector_maps = (dead, norm)
         self._settings().setValue("detector_dir", folder if (dead or norm) else "")
-        names = [os.path.basename(p) for p in (norm, dead) if p]
-        self.detector_label.setText(", ".join(names) if names else "no folder set")
+        # the folder's name keeps the row narrow; the two files are in the tooltip
+        self.detector_label.setText(os.path.basename(folder.rstrip(os.sep)) if (dead or norm) else "no folder set")
         self.detector_label.setToolTip("\n".join(p for p in (norm, dead) if p) or "Set… the folder with the maps")
         self._apply_detector_maps()
 
@@ -176,7 +176,6 @@ class PeemPanel(QWidget):
         self.chk_detector.toggled.connect(self._use_detector_toggled)
         det_row.addWidget(self.chk_detector)
         self.detector_label = QLabel("no folder set")
-        self.detector_label.setWordWrap(True)
         det_row.addWidget(self.detector_label, 1)
         b = QPushButton("Set…")
         b.setToolTip("Folder with the beamline's deadpixel_*.tif and NormImage_*.tif (e.g. 'Procedure files');\n"
@@ -246,11 +245,12 @@ class PeemPanel(QWidget):
         control_layout.addWidget(self.map_tools.controls)
 
         control_layout.addStretch()
-        tidy_forms(control_panel)  # same clean form layout on macOS / Windows / Linux
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(control_panel)
-        scroll.setMinimumWidth(400)
+        # wide enough for every section (no horizontal scrolling, nothing clipped)
+        scroll.setMinimumWidth(max(400, control_panel.minimumSizeHint().width()
+                                   + scroll.verticalScrollBar().sizeHint().width() + 4))
         splitter.addWidget(scroll)
         self._controls_scroll = scroll
 
@@ -283,7 +283,7 @@ class PeemPanel(QWidget):
         splitter.addWidget(self.view_tabs)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([420, 720])
+        splitter.setSizes([scroll.minimumWidth(), 1100 - scroll.minimumWidth()])
 
     def _sync_controls(self):
         mt = self.map_tools
@@ -739,7 +739,6 @@ class PeemDomainView(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         controls = self._build_controls()
-        tidy_forms(controls)
         scroll.setWidget(controls)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setMinimumWidth(controls.minimumSizeHint().width() + scroll.verticalScrollBar().sizeHint().width() + 4)
@@ -747,7 +746,6 @@ class PeemDomainView(QWidget):
         split.addWidget(self._build_results())
         split.setStretchFactor(1, 1)
         split.setSizes([400, 700])
-        tidy_forms(self)
 
     # ------------------------------------------------------------------ building
     def _build_controls(self) -> QWidget:
