@@ -202,7 +202,7 @@ def test_flat_field_is_optional_and_ue49_only(qapp, tmp_path):
         p = PeemPanel()
         assert not p.chk_detector.isChecked() and p.service.norm_image_path is None  # optional: off
         p._set_detector_folder(str(tmp_path))
-        assert "NormImage_10kV.tif" in p.detector_label.text()
+        assert p.detector_label.text() == tmp_path.name and "NormImage_10kV.tif" in p.detector_label.toolTip()
         assert p.service.norm_image_path is None  # folder set, still not used
         p.chk_detector.setChecked(True)
         assert p.service.dead_map_path.endswith("deadpixel_10kV.tif")

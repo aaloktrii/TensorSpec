@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from tensorspec.gui.components.peem_map_common import action_style, bold_titles, tidy_forms
+from tensorspec.gui.components.peem_map_common import action_style, bold_titles
 from tensorspec.gui.services.peem_service import PeemService
 
 
@@ -40,7 +40,6 @@ class PeemSumRulePanel(QWidget):
         self._dataset_name: str | None = None
         self._roi: dict | None = None
         self._setup_ui()
-        tidy_forms(self)
         self.refresh_datasets()
 
     # ------------------------------------------------------------------ UI

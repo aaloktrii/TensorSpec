@@ -133,7 +133,7 @@ class ExportMapDialog(QDialog):
         bb.rejected.connect(self.reject)
         lay.addWidget(bb)
         self.error = QLabel()
-        self.error.setStyleSheet("color: #c0392b")
+        self.error.setStyleSheet("color: #d9534f")
         lay.addWidget(self.error)
         self._busy = False
         self._region_changed()
