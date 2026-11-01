@@ -780,7 +780,8 @@ DOMAIN_PUSH_ATTRS = ("source_kind", "source_var", "mode", "gamma", "vmin", "vmax
 DOMAIN_TABLE_KEYS = (  # (column, metric): pixel counts without / with the m0 threshold, then shape numbers
     ("pixels", "n_px"), ("up_px", "n_up_px"), ("down_px", "n_down_px"), ("mz", "mz"),
     ("m0", "m0"), ("up_px (m0)", "n_up_px_m0"), ("neutral_px (m0)", "n_neutral_px_m0"),
-    ("down_px (m0)", "n_down_px_m0"), ("mz (m0)", "mz_three_state"),
+    ("down_px (m0)", "n_down_px_m0"), ("mz (m0)", "mz_three_state"), ("mz (continuous)", "mz_continuous"),
+    ("mz (continuous) without f0", "mz_continuous_hat"),
     ("domains_up", "n_domains_up"), ("domains_down", "n_domains_down"), ("mean_domain_area_um2", "mean_domain_area_um2"),
     ("width_up", "width_up"), ("width_down", "width_down"), ("period", "period"),
     ("wall_length_um", "wall_length_um"), ("wall_density_per_um", "wall_density_per_um"),
@@ -1130,16 +1131,17 @@ class PeemDomainAnalysisSteps:
         return [str(path), str(csv_path)]
 
     # ---------------------------------------------------------------- compare two analysed states
-    def _alignment_image(self, name: str, label: str) -> tuple[np.ndarray, str]:
+    def _alignment_image(self, name: str, label: str) -> np.ndarray | None:
         """Image to align a pushed map on: the dataset's intensity (sum of the two channel means: topography, no
-        magnetic sign), else the pushed map itself."""
+        magnetic sign); None without one (e.g. an analysis loaded from .nc). Never the magnetic map: its pattern is
+        what changed between the states."""
         kind = dict(self._domains(name, label).attrs).get("source_kind")
         for k in (kind, "stack"):
             ds = global_workspace.pull_analysis_data(name, k) if k else None
             means = [v for v in (ds.data_vars if ds is not None else ()) if str(v).startswith("mean_")]
             if len(means) >= 2:
-                return np.asarray(ds[means[0]].values, float) + np.asarray(ds[means[1]].values, float), "intensity"
-        return np.asarray(self.domain_layer(name, label, "input"), float), "pushed map"
+                return np.asarray(ds[means[0]].values, float) + np.asarray(ds[means[1]].values, float)
+        return None
 
     def compare_domains(self, name_a: str, label_a: str, name_b: str, label_b: str, window_px: float = 10.0,
                         block_um: float = 1.0, n_boot: int = 1000) -> dict[str, Any]:
@@ -1162,15 +1164,24 @@ class PeemDomainAnalysisSteps:
         umB = dict(self._domains(name_b, label_b).attrs).get("um_per_px")
         umA = umA if umA and np.isfinite(umA) else None
         umB = umB if umB and np.isfinite(umB) else None
+        tr = None
         if name_a == name_b and sA.shape == sB.shape:
             align = {"method": "same dataset", "shift_dy_px": 0.0, "shift_dx_px": 0.0, "rotation_deg": 0.0,
                      "scale": 1.0, "overlap_r": 1.0}
         else:
-            (iA, how_a), (iB, how_b) = self._alignment_image(name_a, label_a), self._alignment_image(name_b, label_b)
-            tr, r = map_align.align(iA, iB, scale=(umA / umB) if (umA and umB) else 1.0)
-            c = ((iA.shape[0] - 1) / 2, (iA.shape[1] - 1) / 2)
-            align = {"method": f"{how_a} images" if how_a == how_b else f"{how_a} / {how_b}",
-                     **tr.describe(c), "overlap_r": float(r)}
+            iA, iB = self._alignment_image(name_a, label_a), self._alignment_image(name_b, label_b)
+            if iA is not None and iB is not None:
+                tr, r = map_align.align(iA, iB, scale=(umA / umB) if (umA and umB) else 1.0)
+                align = {"method": "intensity images", **tr.describe(((iA.shape[0] - 1) / 2, (iA.shape[1] - 1) / 2)),
+                         "overlap_r": float(r)}
+            elif sA.shape == sB.shape:
+                align = {"method": "NOT aligned (no intensity images: load both datasets to align)",
+                         "shift_dy_px": 0.0, "shift_dx_px": 0.0, "rotation_deg": 0.0, "scale": 1.0,
+                         "overlap_r": float("nan")}
+            else:
+                raise ValueError("the two maps differ in size and cannot be aligned without their datasets: "
+                                 "load both datasets (their intensity images are used to align)")
+        if tr is not None:
             sB = np.nan_to_num(tr.warp(sB.astype(float), order=0)).astype(np.int8)
             mB = tr.warp(mB, order=1)
             roiB = tr.warp(roiB.astype(float), order=0) > 0.5
