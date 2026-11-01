@@ -1129,6 +1129,92 @@ class PeemDomainAnalysisSteps:
                                 f["delta_aic"], f["delta_bic"], f["preferred"]])
         return [str(path), str(csv_path)]
 
+    # ---------------------------------------------------------------- compare two analysed states
+    def _alignment_image(self, name: str, label: str) -> tuple[np.ndarray, str]:
+        """Image to align a pushed map on: the dataset's intensity (sum of the two channel means: topography, no
+        magnetic sign), else the pushed map itself."""
+        kind = dict(self._domains(name, label).attrs).get("source_kind")
+        for k in (kind, "stack"):
+            ds = global_workspace.pull_analysis_data(name, k) if k else None
+            means = [v for v in (ds.data_vars if ds is not None else ()) if str(v).startswith("mean_")]
+            if len(means) >= 2:
+                return np.asarray(ds[means[0]].values, float) + np.asarray(ds[means[1]].values, float), "intensity"
+        return np.asarray(self.domain_layer(name, label, "input"), float), "pushed map"
+
+    def compare_domains(self, name_a: str, label_a: str, name_b: str, label_b: str, window_px: float = 10.0,
+                        block_um: float = 1.0, n_boot: int = 1000) -> dict[str, Any]:
+        """Pixel-by-pixel comparison of two analysed pushed maps (A before, B after): B is aligned onto A (same
+        dataset: as is; else a similarity fit of the intensity images, core/peem/map_align), then the flip map,
+        memory r (95 % block bootstrap), local memory, wall shift and population changes in the common active area
+        (core/peem/domain_analysis.compare_states; the three-state maps of the domain analysis, same m0)."""
+        from tensorspec.core.peem import map_align
+
+        if (name_a, label_a) == (name_b, label_b):
+            raise ValueError("choose two different maps")
+        for n, lab in ((name_a, label_a), (name_b, label_b)):
+            if not self.domain_result(n, lab):
+                raise ValueError(f"run the domain analysis on {n} · {lab} first")
+        layer = self.domain_layer
+        sA, mA = layer(name_a, label_a, "three_states"), layer(name_a, label_a, "asymmetry")
+        sB, mB = layer(name_b, label_b, "three_states"), layer(name_b, label_b, "asymmetry")
+        roiA, roiB = layer(name_a, label_a, "flake").astype(bool), layer(name_b, label_b, "flake").astype(bool)
+        umA = dict(self._domains(name_a, label_a).attrs).get("um_per_px")
+        umB = dict(self._domains(name_b, label_b).attrs).get("um_per_px")
+        umA = umA if umA and np.isfinite(umA) else None
+        umB = umB if umB and np.isfinite(umB) else None
+        if name_a == name_b and sA.shape == sB.shape:
+            align = {"method": "same dataset", "shift_dy_px": 0.0, "shift_dx_px": 0.0, "rotation_deg": 0.0,
+                     "scale": 1.0, "overlap_r": 1.0}
+        else:
+            (iA, how_a), (iB, how_b) = self._alignment_image(name_a, label_a), self._alignment_image(name_b, label_b)
+            tr, r = map_align.align(iA, iB, scale=(umA / umB) if (umA and umB) else 1.0)
+            c = ((iA.shape[0] - 1) / 2, (iA.shape[1] - 1) / 2)
+            align = {"method": f"{how_a} images" if how_a == how_b else f"{how_a} / {how_b}",
+                     **tr.describe(c), "overlap_r": float(r)}
+            sB = np.nan_to_num(tr.warp(sB.astype(float), order=0)).astype(np.int8)
+            mB = tr.warp(mB, order=1)
+            roiB = tr.warp(roiB.astype(float), order=0) > 0.5
+        layers, metrics = da.compare_states(sA, sB, mA, mB, roiA & roiB, umA, window_px, block_um, n_boot)
+        res = {"A": (name_a, label_a), "B": (name_b, label_b),
+               "titles": (self._domain_title(name_a, label_a), self._domain_title(name_b, label_b)),
+               "sA": sA, "sB": sB, "layers": layers, "metrics": metrics, "alignment": align,
+               "settings": {"window_px": window_px, "block_um": block_um, "n_boot": n_boot, "um_per_px": umA}}
+        self._last_domain_compare = res
+        _step_record(name_b, f"compare {label_b} with {name_a} · {label_a}",
+                     {k: v for k, v in metrics.items() if np.isscalar(v)})
+        return res
+
+    def _domain_title(self, name: str, label: str) -> str:
+        at = dict(self._domains(name, label).attrs)
+        return f"{name} · {self.layer_name(at.get('source_kind', '?'), at.get('source_var', 'data'))}"
+
+    def export_domain_compare(self, path: str | Path) -> list[str]:
+        """The last comparison: editable PDF (A, B, flip map, local memory) and <stem>.csv with every number."""
+        from tensorspec.plotting import peem_plots
+
+        res = getattr(self, "_last_domain_compare", None)
+        if res is None:
+            raise ValueError("compare two maps first")
+        path = Path(path).with_suffix(".pdf")
+        peem_plots.save_domain_compare_pdf(path, res)
+        m, p = res["metrics"], res["metrics"]["populations"]
+        with open(path.with_suffix(".csv"), "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["A", " · ".join(res["A"])])
+            w.writerow(["B", " · ".join(res["B"])])
+            for k, v in {**res["alignment"], **res["settings"]}.items():
+                w.writerow([k, v])
+            w.writerow([])
+            for k, v in m.items():
+                if np.isscalar(v):
+                    w.writerow([k, v])
+            for side in ("A", "B"):
+                for k, v in p[side].items():
+                    w.writerow([f"populations.{side}.{k}", v])
+            for k, v in p["change"].items():
+                w.writerow([f"populations.change.{k}", json.dumps(v) if isinstance(v, dict) else v])
+        return [str(path), str(path.with_suffix(".csv"))]
+
     def export_domain_figure(self, path: str | Path, name: str, label: str, step: str = "three_states") -> str:
         """Editable PDF (TrueType text) of one step with axes in um, titled with the dataset and numbers."""
         from tensorspec.plotting import peem_plots
