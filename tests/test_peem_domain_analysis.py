@@ -118,3 +118,25 @@ def test_size_fits_lognormal_vs_gaussian_widths_and_periods():
         assert np.median(fits["period"][state]["samples"]) == pytest.approx(20.0, abs=2.5)
     nm = da.size_fits(mz, um_per_px=0.02, min_px=12)
     assert nm["unit"] == "nm" and np.median(nm["width"]["up"]["samples"]) == pytest.approx(200.0, abs=30)
+
+
+def test_compare_states_as_the_map_comparison_program():
+    """A state against itself: nothing switched, r = 1, walls do not move; against its reverse: all switched,
+    r = -1, Delta<m_z> = -2 <m_z>, all of it direct up <-> down."""
+    from scipy import ndimage
+    g = ndimage.gaussian_filter(np.random.default_rng(1).normal(size=(80, 90)), 3)
+    m = g / np.abs(g).max()
+    s = np.where(m > 0.1, 1, np.where(m < -0.1, -1, 0)).astype(np.int8)
+    roi = np.zeros(s.shape, bool)
+    roi[5:75, 5:85] = True
+    L, r = da.compare_states(s, s, m, m, roi, um_per_px=0.03, n_boot=200)
+    assert r["switched_pct"] == 0 and r["r"] == pytest.approx(1.0)
+    two = np.where(m > 0, 1, -1).astype(np.int8)  # walls = up touching down: none across a neutral band
+    assert da.compare_states(two, two, m, m, roi, um_per_px=0.03, n_boot=50)[1]["wall_shift_B_to_A"] == 0
+    assert r["populations"]["change"]["d_mz"] == pytest.approx(0)
+    L, r = da.compare_states(s, -s, m, -m, roi, um_per_px=0.03, n_boot=200)
+    assert r["switched_pct"] == pytest.approx(100) and r["r"] == pytest.approx(-1.0)
+    p = r["populations"]
+    assert p["change"]["d_mz"] == pytest.approx(-2 * p["A"]["mz"])
+    assert p["change"]["d_mz_direct"] == pytest.approx(p["change"]["d_mz"]) and p["change"]["d_mz_via_neutral"] == pytest.approx(0)
+    assert np.nanmax(L["flip"]) <= 4 and r["n_up_to_down"] + r["n_down_to_up"] == r["classified_px"]

@@ -674,3 +674,43 @@ def test_size_fits_only_on_click_and_export(qapp, tmp_path, monkeypatch):
     rows = list(_csv.DictReader(open(tmp_path / "fits_fits.csv")))
     assert [(r["quantity"], r["state"]) for r in rows] == [("width", "up"), ("width", "down"),
                                                           ("period", "up"), ("period", "down")]
+
+
+def test_compare_tab_two_analysed_maps(qapp, tmp_path, monkeypatch):
+    """Analysis -> Compare: lists the maps analysed in Domains, compares A -> B (B aligned onto A), draws A, B, the
+    flip map and the local memory, fills the table and exports PDF + CSV; the left column is hidden there."""
+    import csv as _csv
+    from PySide6.QtWidgets import QFileDialog
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    t = p.map_tools
+    for name in ("img_a", "img_b"):
+        (tmp_path / name).mkdir()
+        p._dataset_name = _images(tmp_path / name, p.service, name)
+        p._refresh_meta()
+        t._asymmetry()
+        t._push()
+    dv, cv = t.domain_view, t.compare_view
+    for it in p.service.domain_inputs():
+        p.service.set_domain_region(it["name"], it["label"], "roi", {"kind": "rect", "x0": 4, "x1": 59, "y0": 4, "y1": 59})
+        p.service.run_domain_analysis(it["name"], it["label"], flake="pushed")
+    p.view_tabs.setCurrentWidget(t.analysis_view)
+    t.analysis_view.setCurrentWidget(cv)
+    p.show()
+    qapp.processEvents()
+    assert not p._controls_scroll.isVisible()
+    assert cv.a.count() == 2 and cv.a.currentData() != cv.b.currentData() and cv.btn_compare.isEnabled()
+    cv._compare()
+    titles = [a.get_title() for a in cv.fig.axes]
+    assert titles[0].startswith("A:") and titles[1].startswith("B:") and "switched" in titles[2] and "local memory" in titles[3]
+    labels = [cv.table.item(i, 0).text() for i in range(cv.table.rowCount())]
+    assert "memory r" in labels and "⟨m_z⟩" in labels and "up → down (% of up)" in labels
+    assert "aligned onto A" in cv.status.text()
+    out = tmp_path / "cmp.pdf"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(out), "")))
+    cv._export()
+    assert out.stat().st_size > 1000
+    rows = {r[0]: r[1] for r in _csv.reader(open(tmp_path / "cmp.csv")) if r}
+    assert "switched_pct" in rows and "populations.change.d_mz" in rows and rows["method"]
+    p.close()

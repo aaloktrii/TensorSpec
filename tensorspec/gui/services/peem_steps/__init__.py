@@ -116,6 +116,9 @@ checks every public call is listed here and runs the workflow without Qt):
                                           walls, stripe direction and alignment
     domain_result, domain_layer, domain_areas, domain_table
     export_domain_table, export_domain_areas, export_domain_figure (editable PDF, axes in um)
+    compare_domains(A, B)                 two analysed maps: B aligned onto A, flip map, memory r (block
+                                          bootstrap), local memory, wall shift, population changes;
+                                          export_domain_compare -> PDF + CSV
     domain_size_fits(name, label)         log-normal vs Gaussian fits of the widths and local periods, up /
                                           down separately (on request); export_domain_size_fits -> PDF + CSV
     auto_flake_roi(name, kind, var)       automatic flake outline -> the dataset's ROI (polygon)

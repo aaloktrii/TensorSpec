@@ -348,6 +348,145 @@ def size_fits(mz: np.ndarray, um_per_px: float | None = None, min_px: int = 12) 
     return out
 
 
+# ------------------------------------------------------------------ comparison of two states
+# Ported from the map-comparison program (Spatial-Domain-Analysis-GUI, xmcd_toolkit/core/comparison.py and
+# populations.py): the three-state maps s (+1 up, -1 down, 0 neutral) and the asymmetry m of the domain analysis of
+# two states on one grid, inside one ROI.
+FLIP_CODES = {"stayed_down": 0, "stayed_up": 1, "up_to_down": 2, "down_to_up": 3, "uncertain": 4}
+POP_CLASSES = ("up", "neutral", "down")
+
+
+def flip_map(sA: np.ndarray, sB: np.ndarray, roi: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+    """Per pixel: stayed up / stayed down / up->down / down->up / uncertain (neutral in A or B); NaN outside the
+    ROI. f_up->down = N(up->down) / N(up in A), f_down->up likewise, over pixels classified in both."""
+    both = roi & (sA != 0) & (sB != 0)
+    flip = np.full(sA.shape, np.nan)
+    flip[roi] = FLIP_CODES["uncertain"]
+    flip[both & (sA == 1) & (sB == 1)] = FLIP_CODES["stayed_up"]
+    flip[both & (sA == -1) & (sB == -1)] = FLIP_CODES["stayed_down"]
+    flip[both & (sA == 1) & (sB == -1)] = FLIP_CODES["up_to_down"]
+    flip[both & (sA == -1) & (sB == 1)] = FLIP_CODES["down_to_up"]
+    n = {k: int((flip == v).sum()) for k, v in FLIP_CODES.items()}
+    n_up, n_dn, n_cl = n["stayed_up"] + n["up_to_down"], n["stayed_down"] + n["down_to_up"], int(both.sum())
+    m = {"roi_px": int(roi.sum()), "classified_px": n_cl, "classified_pct": 100 * n_cl / max(int(roi.sum()), 1),
+         **{f"n_{k}": v for k, v in n.items()},
+         "up_to_down_pct": 100 * n["up_to_down"] / max(n_up, 1),
+         "down_to_up_pct": 100 * n["down_to_up"] / max(n_dn, 1),
+         "switched_pct": 100 * (n["up_to_down"] + n["down_to_up"]) / max(n_cl, 1)}
+    m["memory_from_flips"] = 1 - (m["up_to_down_pct"] + m["down_to_up_pct"]) / 100
+    return flip, m
+
+
+def memory_r(a: np.ndarray, b: np.ndarray, roi: np.ndarray, block_px: int, n_boot: int = 1000,
+             seed: int = 0) -> tuple[float, float, float]:
+    """Pearson r of a, b over the ROI and its 95 % block-bootstrap interval (block_px x block_px blocks drawn with
+    replacement, so neighbouring, correlated pixels are resampled together)."""
+    v = roi & np.isfinite(a) & np.isfinite(b)
+    if v.sum() < 3:
+        return float("nan"), float("nan"), float("nan")
+    av, bv = a[v] - a[v].mean(), b[v] - b[v].mean()
+    r = float((av * bv).sum() / np.sqrt((av * av).sum() * (bv * bv).sum()))
+    ys, xs = np.nonzero(v)
+    _, inv = np.unique((ys // block_px) * (xs.max() // block_px + 1) + xs // block_px, return_inverse=True)
+    k = inv.max() + 1
+    sums = [np.bincount(inv, w, k) for w in (np.ones(v.sum()), av, bv, av * bv, av ** 2, bv ** 2)]
+    pick = np.random.default_rng(seed).integers(0, k, (n_boot, k))
+    n, sa, sb, sab, saa, sbb = (q[pick].sum(1) for q in sums)
+    rb = (sab - sa * sb / n) / np.sqrt(np.maximum((saa - sa ** 2 / n) * (sbb - sb ** 2 / n), 1e-30))
+    lo, hi = np.percentile(rb, (2.5, 97.5))
+    return r, float(lo), float(hi)
+
+
+def local_memory(a: np.ndarray, b: np.ndarray, roi: np.ndarray, sigma_px: float) -> np.ndarray:
+    """Windowed Pearson r (Gaussian window sigma_px, restricted to the ROI, renormalised at its edge)."""
+    w = (roi & np.isfinite(a) & np.isfinite(b)).astype(float)
+    if not w.any():
+        return np.full(a.shape, np.nan)
+    sel = w > 0
+    av = np.where(sel, a - a[sel].mean(), 0.0)
+    bv = np.where(sel, b - b[sel].mean(), 0.0)
+    gw = np.maximum(ndi.gaussian_filter(w, sigma_px, truncate=3.0), 1e-6)
+
+    def g(v):
+        return ndi.gaussian_filter(v * w, sigma_px, truncate=3.0) / gw
+
+    ma, mb = g(av), g(bv)
+    r = (g(av * bv) - ma * mb) / np.sqrt(np.maximum((g(av * av) - ma ** 2) * (g(bv * bv) - mb ** 2), 1e-30))
+    return np.where(roi, np.clip(r, -1, 1), np.nan)
+
+
+def contact_walls(s: np.ndarray, roi: np.ndarray) -> np.ndarray:
+    """Up pixels with a down neighbour (4-connectivity) and vice versa, inside the ROI."""
+    up, dn = (s == 1) & roi, (s == -1) & roi
+    return (up & ndi.binary_dilation(dn)) | (dn & ndi.binary_dilation(up))
+
+
+def wall_shift(wa: np.ndarray, wb: np.ndarray, um_per_px: float | None = None) -> float:
+    """Median distance from the walls wb to the nearest wall in wa: nm if um_per_px is known, else px."""
+    if not wa.any() or not wb.any():
+        return float("nan")
+    d = float(np.median(ndi.distance_transform_edt(~wa)[wb]))
+    return d * um_per_px * 1000 if um_per_px else d
+
+
+def population_fractions(s: np.ndarray, roi: np.ndarray) -> dict[str, float]:
+    """Area fractions (0-1) of up / neutral / down in the ROI, <m_z> = f_up - f_down, and without the neutral class."""
+    n_up, n_0, n_dn = int(((s == 1) & roi).sum()), int(((s == 0) & roi).sum()), int(((s == -1) & roi).sum())
+    n = max(n_up + n_0 + n_dn, 1)
+    return {"up": n_up / n, "neutral": n_0 / n, "down": n_dn / n, "mz": (n_up - n_dn) / n, "n": n_up + n_0 + n_dn,
+            "up_hat": n_up / max(n_up + n_dn, 1), "mz_hat": (n_up - n_dn) / max(n_up + n_dn, 1)}
+
+
+def _minimal_flows(d: dict[str, float]) -> dict[tuple[str, str], float]:
+    """Fewest class changes consistent with the changes d = {class: Delta f}."""
+    shrink = {k: -v for k, v in d.items() if v < 0}
+    grow = {k: v for k, v in d.items() if v > 0}
+    if len(shrink) == 1:
+        (src, _), = shrink.items()
+        return {(src, g): v for g, v in grow.items()}
+    if len(grow) == 1:
+        (dst, _), = grow.items()
+        return {(src, dst): v for src, v in shrink.items()}
+    return {}
+
+
+def population_change(fa: dict[str, float], fb: dict[str, float]) -> dict[str, Any]:
+    """Net changes between two states (fractions 0-1): Delta f per class, Delta<m_z> split into the direct
+    up<->down part and the part through the neutral class (minimal redistribution), and bounds on the area that
+    changed class (lower 1/2 sum |Delta f_k|, upper 1 - sum max(0, f_k(A) + f_k(B) - 1)). Net only: switching in
+    opposite directions that cancels is not seen here (the flip map shows it)."""
+    d = {k: fb[k] - fa[k] for k in POP_CLASSES}
+    flows = _minimal_flows(d)
+    direct = flows.get(("down", "up"), 0.0) - flows.get(("up", "down"), 0.0)
+    via_neutral = (flows.get(("neutral", "up"), 0.0) + flows.get(("down", "neutral"), 0.0)
+                   - flows.get(("neutral", "down"), 0.0) - flows.get(("up", "neutral"), 0.0))
+    return {"d_up": d["up"], "d_neutral": d["neutral"], "d_down": d["down"], "d_mz": fb["mz"] - fa["mz"],
+            "d_mz_direct": 2 * direct, "d_mz_via_neutral": via_neutral,
+            "flows": {f"{a}->{b}": v for (a, b), v in flows.items()},
+            "changed_lower": 0.5 * sum(abs(v) for v in d.values()),
+            "changed_upper": 1 - sum(max(0.0, fa[k] + fb[k] - 1) for k in POP_CLASSES),
+            "d_mz_hat": fb["mz_hat"] - fa["mz_hat"]}
+
+
+def compare_states(sA: np.ndarray, sB: np.ndarray, mA: np.ndarray, mB: np.ndarray, roi: np.ndarray,
+                   um_per_px: float | None = None, window_px: float = 10.0, block_um: float = 1.0,
+                   n_boot: int = 1000) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    """Everything for one pair on one grid: flip map, memory r (95 % block bootstrap, blocks ~ block_um), local
+    memory, wall shift both ways, populations in the common ROI. Returns (layers, metrics)."""
+    roi = roi & np.isfinite(mA) & np.isfinite(mB)
+    flip, m = flip_map(sA, sB, roi)
+    block = max(int(round(block_um / um_per_px)), 4) if um_per_px else 32
+    r, lo, hi = memory_r(mA, mB, roi, block, n_boot)
+    rl = local_memory(mA, mB, roi, window_px)
+    wA, wB = contact_walls(sA, roi), contact_walls(sB, roi)
+    fa, fb = population_fractions(sA, roi), population_fractions(sB, roi)
+    m.update(r=r, r_ci_lo=lo, r_ci_hi=hi, r_local_median=float(np.nanmedian(rl)) if roi.any() else float("nan"),
+             wall_shift_B_to_A=wall_shift(wA, wB, um_per_px), wall_shift_A_to_B=wall_shift(wB, wA, um_per_px),
+             wall_shift_unit="nm" if um_per_px else "px",
+             populations={"A": fa, "B": fb, "change": population_change(fa, fb)})
+    return {"flip": flip, "r_local": rl, "roi": roi, "walls_A": wA, "walls_B": wB}, m
+
+
 def walls(m: np.ndarray, roi: np.ndarray, smooth: float = 1.0) -> tuple[np.ndarray, float]:
     """(l) The m = 0 contour (marching squares on lightly smoothed m) inside the flake; its length (px)."""
     from skimage import measure

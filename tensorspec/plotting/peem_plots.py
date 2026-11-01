@@ -475,6 +475,64 @@ def save_size_fits_pdf(path, fits: dict, title: str = "") -> None:
         fig.savefig(path)
 
 
+# switched pixels as the map-comparison program ("purple / magenta"); stayed up / down keep the state colours
+FLIP_COLOURS = (DOWN_COLOR, UP_COLOR, "#6A3D9A", "#E36FA8", "#ffffff")   # by domain_analysis.FLIP_CODES
+FLIP_LABELS = ("stayed down", "stayed up", "up → down", "down → up", "uncertain")
+
+
+def _rgb(img: np.ndarray, colours: dict) -> np.ndarray:
+    """Categories -> true-colour RGB (white elsewhere): exact colours, safe to edit in Illustrator."""
+    import matplotlib.colors as mcolors
+
+    out = np.ones(img.shape + (3,))
+    v = np.nan_to_num(img, nan=-999)
+    for val, col in colours.items():
+        out[v == val] = mcolors.to_rgb(col)
+    return out
+
+
+def _short(text: str, width: int = 34) -> str:
+    return text if len(text) <= width else text[:width - 1] + "…"
+
+
+def domain_compare(fig, res: dict) -> None:
+    """A and B (three states), flip map, local memory, cropped to the common active area (as the map-comparison
+    program's figure)."""
+    fig.clear()
+    L, m = res["layers"], res["metrics"]
+    roi = L["roi"]
+    ys, xs = np.nonzero(roi)
+    sl = (slice(ys.min(), ys.max() + 1), slice(xs.min(), xs.max() + 1)) if ys.size else (slice(None),) * 2
+    ax = fig.subplots(1, 4, sharex=True, sharey=True)
+    for a, s, t in ((ax[0], res["sA"], f"A: {_short(res['titles'][0])}"), (ax[1], res["sB"], f"B: {_short(res['titles'][1])}")):
+        a.imshow(_rgb(np.where(roi, s, -9)[sl], {1: UP_COLOR, -1: DOWN_COLOR}), interpolation="nearest")
+        a.set_title(t, fontsize=8)
+    ax[2].imshow(_rgb(np.where(roi, L["flip"], -9)[sl], dict(enumerate(FLIP_COLOURS[:4]))), interpolation="nearest")
+    ax[2].set_title(f"switched {m['switched_pct']:.0f} % of classified\n{m['up_to_down_pct']:.0f} % of up → down · "
+                    f"{m['down_to_up_pct']:.0f} % of down → up", fontsize=8)
+    from matplotlib.patches import Patch
+    ax[2].legend(handles=[Patch(facecolor=c, edgecolor="0.4", lw=0.4, label=l) for c, l in zip(FLIP_COLOURS, FLIP_LABELS)],
+                 fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=3, frameon=False)
+    im = ax[3].imshow(np.where(roi, L["r_local"], np.nan)[sl], cmap="PiYG", vmin=-1, vmax=1, interpolation="nearest")
+    ax[3].set_title(f"local memory (r = {m['r']:+.2f} [{m['r_ci_lo']:+.2f}, {m['r_ci_hi']:+.2f}])", fontsize=8)
+    fig.colorbar(im, ax=ax[3], shrink=0.7)
+    for a in ax:
+        a.set_xticks([])
+        a.set_yticks([])
+
+
+def save_domain_compare_pdf(path, res: dict) -> None:
+    """Editable PDF (TrueType text) of domain_compare, 17.8 cm wide."""
+    import matplotlib
+    from matplotlib.figure import Figure
+
+    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "font.family": "sans-serif",
+                                "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"], "font.size": 7}):
+        fig = Figure(figsize=(7.0, 2.6), layout="constrained")
+        domain_compare(fig, res)
+        fig.savefig(path)
+
+
 def save_domain_step_pdf(path, img: np.ndarray, step: str, um_per_px: float | None, title: str,
                          numbers: dict | None = None, flake: np.ndarray | None = None,
                          look: dict | None = None) -> None:

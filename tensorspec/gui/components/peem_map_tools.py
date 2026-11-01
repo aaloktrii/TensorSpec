@@ -282,10 +282,11 @@ class PeemMapTools:
     def _build_plot_view(self):
         from PySide6.QtWidgets import QTabWidget
 
-        from tensorspec.gui.components.peem_panel import PeemDomainView  # lazy: the panel imports this module
+        from tensorspec.gui.components.peem_panel import PeemDomainCompareView, PeemDomainView  # lazy: the panel imports this module
 
         self.plot_view = QWidget()
         self.domain_view = PeemDomainView(self.service, self._parent)
+        self.compare_view = PeemDomainCompareView(self.service, self._parent)
         self.analysis_view = QTabWidget()
         self.analysis_view.setDocumentMode(True)
         v = QVBoxLayout(self.plot_view)
@@ -309,6 +310,7 @@ class PeemMapTools:
         self._plot_kind = None
         self.analysis_view.addTab(self.plot_view, "Plots")
         self.analysis_view.addTab(self.domain_view, "Domains")
+        self.analysis_view.addTab(self.compare_view, "Compare")
 
     # ------------------------------------------------------------------ helpers
     def _name(self) -> str | None:

@@ -287,8 +287,8 @@ class PeemPanel(QWidget):
 
     def _sync_controls(self):
         mt = self.map_tools
-        on_domains = (self.view_tabs.currentWidget() is mt.analysis_view
-                      and mt.analysis_view.currentWidget() is mt.domain_view)
+        on_domains = (self.view_tabs.currentWidget() is mt.analysis_view  # Domains and Compare have their own controls
+                      and mt.analysis_view.currentWidget() in (mt.domain_view, mt.compare_view))
         self._controls_scroll.setVisible(not on_domains)
 
     @staticmethod
@@ -1460,3 +1460,143 @@ class PeemDomainView(QWidget):
                 self.status.setText(f"Saved {self.service.export_domain_areas(path, name, label)}")
             except ValueError as exc:
                 self._err(str(exc))
+
+
+# ---------------------------------------------------------------------------------------------- Analysis -> Compare
+COMPARE_ROWS = (  # (metric, label, format): the map-comparison program's numbers, A -> B
+    ("roi_px", "common active area (px)", "{:d}"), ("classified_pct", "classified (% of area)", "{:.1f}"),
+    ("n_stayed_up", "stayed up (px)", "{:d}"), ("n_stayed_down", "stayed down (px)", "{:d}"),
+    ("n_up_to_down", "up → down (px)", "{:d}"), ("n_down_to_up", "down → up (px)", "{:d}"),
+    ("up_to_down_pct", "up → down (% of up)", "{:.1f}"), ("down_to_up_pct", "down → up (% of down)", "{:.1f}"),
+    ("switched_pct", "switched (% of classified)", "{:.1f}"), ("r", "memory r", "{:+.3f}"),
+    ("r_ci_lo", "r 95 % low", "{:+.3f}"), ("r_ci_hi", "r 95 % high", "{:+.3f}"),
+    ("r_local_median", "local r median", "{:+.3f}"),
+    ("wall_shift_B_to_A", "wall shift B→A", "{:.1f}"), ("wall_shift_A_to_B", "wall shift A→B", "{:.1f}"))
+POPULATION_ROWS = (("up", "f↑"), ("neutral", "f₀"), ("down", "f↓"), ("mz", "⟨m_z⟩"), ("mz_hat", "⟨m_z⟩ without f₀"))
+CHANGE_ROWS = (("d_mz_direct", "Δ⟨m_z⟩ from up ↔ down"), ("d_mz_via_neutral", "Δ⟨m_z⟩ through neutral"),
+               ("changed_lower", "changed class, at least"), ("changed_upper", "changed class, at most"))
+
+
+class PeemDomainCompareView(QWidget):
+    """Analysis -> Compare: two maps analysed in Domains (A before, B after), compared pixel by pixel as the
+    map-comparison program does (PeemService.compare_domains). Only A, B, Compare and Export."""
+
+    def __init__(self, service, parent=None):
+        super().__init__(parent)
+        self.service = service
+        root = QHBoxLayout(self)
+        root.setContentsMargins(4, 4, 4, 4)
+        split = QSplitter(Qt.Horizontal)
+        split.setChildrenCollapsible(False)
+        root.addWidget(split)
+
+        g = QGroupBox("Compare two states")
+        bold_titles(g)
+        f = QFormLayout(g)
+        self.a, self.b = QComboBox(), QComboBox()
+        for c, tip in ((self.a, "Before: a map analysed in Domains"), (self.b, "After: B is aligned onto A")):
+            c.setToolTip(tip)
+            c.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            c.setMinimumContentsLength(18)
+        f.addRow("A:", self.a)
+        f.addRow("B:", self.b)
+        self.btn_compare = action_style(QPushButton("Compare"), "map")
+        self.btn_compare.setToolTip("B aligned onto A (same dataset: as is; else on the intensity images), then the "
+                                    "flip map, memory r (95 % block bootstrap, 1 µm blocks), local memory (10 px "
+                                    "window), wall shift and population changes in the common active area")
+        self.btn_compare.clicked.connect(self._compare)
+        f.addRow(self.btn_compare)
+        b = QPushButton("Export PDF + CSV…")
+        b.clicked.connect(self._export)
+        f.addRow(b)
+        self.status = QLabel("Analyse two maps in Domains, then compare them here.")
+        self.status.setWordWrap(True)  # below the group: a wrapped label in a native macOS form does not grow
+        left = QWidget()
+        v = QVBoxLayout(left)
+        v.addWidget(g)
+        v.addWidget(self.status)
+        v.addStretch()
+        split.addWidget(left)
+
+        right = QSplitter(Qt.Vertical)
+        right.setChildrenCollapsible(False)
+        self.fig = Figure(figsize=(9, 3.4), layout="constrained")
+        self.canvas = FigureCanvas(self.fig)
+        right.addWidget(self.canvas)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["", "A", "B", "A → B"])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        right.addWidget(self.table)
+        right.setSizes([420, 300])
+        split.addWidget(right)
+        split.setStretchFactor(1, 1)
+        split.setSizes([300, 800])
+
+    def showEvent(self, event):  # the maps may have been analysed meanwhile
+        self.refresh()
+        super().showEvent(event)
+
+    def refresh(self):
+        items = [it for it in self.service.domain_inputs() if it["analysed"]]
+        for combo, default in ((self.a, 0), (self.b, 1)):
+            keep = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for it in items:
+                combo.addItem(it["title"], (it["name"], it["label"]))
+            i = combo.findData(keep) if keep is not None else -1
+            combo.setCurrentIndex(i if i >= 0 else min(default, combo.count() - 1))
+            combo.blockSignals(False)
+        self.btn_compare.setEnabled(len(items) >= 2)
+
+    def _compare(self):
+        a, b = self.a.currentData(), self.b.currentData()
+        if not a or not b:
+            return
+        from PySide6.QtGui import QGuiApplication
+        QGuiApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            res = self.service.compare_domains(*a, *b)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Compare", str(exc))
+            return
+        finally:
+            QGuiApplication.restoreOverrideCursor()
+        peem_plots.domain_compare(self.fig, res)
+        self.canvas.draw_idle()
+        self._fill(res)
+        al = res["alignment"]
+        self.status.setText(f"B aligned onto A ({al['method']}): shift {al['shift_dy_px']:+.1f}, {al['shift_dx_px']:+.1f} px, "
+                            f"rotation {al['rotation_deg']:+.2f}°, scale {al['scale']:.3f}, overlap r {al['overlap_r']:.2f}")
+
+    def _fill(self, res):
+        m, p = res["metrics"], res["metrics"]["populations"]
+        unit = m.get("wall_shift_unit", "px")
+        rows = []
+        for k, lab, fmt in COMPARE_ROWS:
+            v = m.get(k)
+            txt = "—" if v is None or (isinstance(v, float) and not np.isfinite(v)) else fmt.format(v)
+            rows.append((lab + (f" ({unit})" if k.startswith("wall") else ""), "", "", txt))
+        for k, lab in POPULATION_ROWS:
+            rows.append((lab, f"{100 * p['A'][k]:.2f} %", f"{100 * p['B'][k]:.2f} %",
+                         f"{100 * (p['B'][k] - p['A'][k]):+.2f} %"))
+        for k, lab in CHANGE_ROWS:
+            sign = "" if k.startswith("changed") else "+"
+            rows.append((lab, "", "", f"{100 * p['change'][k]:{sign}.2f} %"))
+        self.table.setRowCount(len(rows))
+        for i, row in enumerate(rows):
+            for j, txt in enumerate(row):
+                self.table.setItem(i, j, QTableWidgetItem(txt))
+
+    def _export(self):
+        if getattr(self.service, "_last_domain_compare", None) is None:
+            QMessageBox.warning(self, "Compare", "Compare two maps first.")
+            return
+        a, b = self.service._last_domain_compare["A"], self.service._last_domain_compare["B"]
+        path, _ = QFileDialog.getSaveFileName(self, "Export comparison", export_path(f"compare_{a[0]}_{b[0]}.pdf"), "PDF (*.pdf)")
+        if path:
+            files = self.service.export_domain_compare(path)
+            self.status.setText("Saved " + ", ".join(os.path.basename(f) for f in files))
