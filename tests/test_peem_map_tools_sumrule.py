@@ -703,7 +703,7 @@ def test_compare_tab_two_analysed_maps(qapp, tmp_path, monkeypatch):
     assert cv.a.count() == 2 and cv.a.currentData() != cv.b.currentData() and cv.btn_compare.isEnabled()
     cv._compare()
     titles = [a.get_title() for a in cv.fig.axes]
-    assert titles[0].startswith("A:") and titles[1].startswith("B:") and "switched" in titles[2] and "local memory" in titles[3]
+    assert titles[0].startswith("A\n") and titles[1].startswith("B\n") and "switched" in titles[2] and "local memory" in titles[3]
     labels = [cv.table.item(i, 0).text() for i in range(cv.table.rowCount())]
     assert "memory r" in labels and "⟨m_z⟩" in labels and "up → down (% of up)" in labels
     assert "aligned onto A" in cv.status.text()
