@@ -7,6 +7,11 @@ from __future__ import annotations
 
 import numpy as np
 
+# Every PEEM PDF / SVG: editable text (TrueType), and uncompressed, so that matplotlib never stores a picture with
+# <= 256 colours as an indexed image (Illustrator shows those in the wrong colours). Maps are drawn with
+# interpolation "none", so a PDF holds every pixel of the map (not a copy resampled to the page).
+PDF_RC = {"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none", "pdf.compression": 0}
+
 
 SIGNED_KINDS = {"pcd", "pld", "pmld", "pmnld", "domain_map", "compare"}
 # PEEM colour convention (every signed map, domain map and export): positive blue, negative red, white at
@@ -105,7 +110,7 @@ def save_map_picture(
         ax = fig.add_subplot()
         aspect = "equal"
     im = ax.imshow(img, cmap=cmap or hint.get("cmap", "gray"), vmin=vmin, vmax=vmax, aspect=aspect,
-                   interpolation="nearest")
+                   interpolation="none")
     ax.axis("off")
     if not image_only:
         if title:
@@ -121,7 +126,7 @@ def save_map_picture(
             ax.plot([x0, x0 + px], [y0, y0], "-", color="black", lw=3, solid_capstyle="butt")
             ax.text(x0 + px / 2, y0 - ny * 0.02, f"{um:g} µm", ha="center", va="bottom", fontsize=9)
     kw = {} if (size_px or image_only) else {"bbox_inches": "tight"}
-    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}):
+    with matplotlib.rc_context(PDF_RC):
         fig.savefig(path, dpi=dpi, **kw)
 
 
@@ -179,7 +184,7 @@ def save_pdf(fig, path) -> None:
     """Vector PDF with editable text (TrueType fonts), readable in Adobe Illustrator."""
     import matplotlib
 
-    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none"}):
+    with matplotlib.rc_context(PDF_RC):
         fig.savefig(path, format="pdf", bbox_inches="tight", transparent=True)
 
 
@@ -278,7 +283,7 @@ def save_three_panel(panels: list[tuple[str, np.ndarray]], path, um_per_px: floa
     fig = Figure(figsize=(3.4 * len(imgs), 3.7), layout="tight")
     axes = fig.subplots(1, len(imgs))
     for ax, (t, a) in zip(np.atleast_1d(axes), imgs):
-        ax.imshow(a - np.nanmedian(a), cmap=SIGNED_CMAP, vmin=-lim, vmax=lim, interpolation="nearest")
+        ax.imshow(a - np.nanmedian(a), cmap=SIGNED_CMAP, vmin=-lim, vmax=lim, interpolation="none")
         ax.set_axis_off()
         ax.set_title(t, fontsize=8)
     if um_per_px:
@@ -303,7 +308,7 @@ def domain_step(ax, img: np.ndarray, step: str, um_per_px: float | None = None, 
     ny, nx = a.shape
     s = um_per_px or 1.0
     ext = [0, nx * s, ny * s, 0]
-    kw = {"extent": ext, "interpolation": "nearest"}
+    kw = {"extent": ext, "interpolation": "none"}
     im = None
     if step in ("three_states",):
         ax.imshow(np.where(a == 0, np.nan, a), cmap=ListedColormap([DOWN_COLOR, UP_COLOR]), vmin=-1, vmax=1, **kw)
@@ -359,7 +364,7 @@ def pushed_map(ax, img: np.ndarray, look: dict, title: str = ""):
     g = float(look.get("gamma") or 1.0)
     norm = mcolors.Normalize(vmin, vmax) if abs(g - 1.0) < 1e-6 else mcolors.PowerNorm(g, vmin, vmax)
     im = ax.imshow(a, cmap=look.get("cmap") or "gray", norm=norm, extent=[0, nx * s, ny * s, 0],
-                   interpolation="nearest")
+                   interpolation="none")
     xs, ys = (np.arange(nx) + 0.5) * s, (np.arange(ny) + 0.5) * s
     for key, color in (("roi", "yellow"), ("bg", "cyan")):
         m = look.get(key)
@@ -465,7 +470,7 @@ def save_size_fits_pdf(path, fits: dict, title: str = "") -> None:
     import matplotlib
     from matplotlib.figure import Figure
 
-    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
+    with matplotlib.rc_context({**PDF_RC,
                                 "font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
                                 "font.size": 7, "axes.linewidth": 0.6}):
         fig = Figure(figsize=(7.0, 3.0), layout="constrained")
@@ -480,42 +485,57 @@ FLIP_COLOURS = (DOWN_COLOR, UP_COLOR, "#6A3D9A", "#E36FA8", "#ffffff")   # by do
 FLIP_LABELS = ("stayed down", "stayed up", "up → down", "down → up", "uncertain")
 
 
-def _rgb(img: np.ndarray, colours: dict) -> np.ndarray:
-    """Categories -> true-colour RGB (white elsewhere): exact colours, safe to edit in Illustrator."""
-    import matplotlib.colors as mcolors
+def _categorical(ax, img: np.ndarray, colours: dict) -> None:
+    """Integer-category map as vector shapes, one compound path per category with pixel-exact outlines (as the
+    map-comparison program): editable in Illustrator, exact colours, every pixel. colours: {value: colour}."""
+    from matplotlib.patches import PathPatch
+    from matplotlib.path import Path as MPath
+    from skimage.measure import find_contours
 
-    out = np.ones(img.shape + (3,))
+    h, w = img.shape
     v = np.nan_to_num(img, nan=-999)
     for val, col in colours.items():
-        out[v == val] = mcolors.to_rgb(col)
-    return out
+        m = v == val
+        if not m.any():
+            continue
+        up = np.kron(m, np.ones((2, 2), bool))                     # 2x: contours run along the pixel edges
+        verts, codes = [], []
+        for c in find_contours(np.pad(up, 1).astype(float), 0.5):
+            xy = np.round(np.c_[(c[:, 1] - 1) / 2 - 0.25, (c[:, 0] - 1) / 2 - 0.25] * 2) / 2
+            verts += list(xy) + [xy[0]]
+            codes += [MPath.MOVETO] + [MPath.LINETO] * (len(xy) - 1) + [MPath.CLOSEPOLY]
+        ax.add_patch(PathPatch(MPath(verts, codes), facecolor=col, edgecolor=col, lw=0.15))
+    ax.set_xlim(-0.5, w - 0.5)
+    ax.set_ylim(h - 0.5, -0.5)
+    ax.set_aspect("equal")
 
 
-def _short(text: str, width: int = 34) -> str:
+def _short(text: str, width: int = 26) -> str:
     return text if len(text) <= width else text[:width - 1] + "…"
 
 
 def domain_compare(fig, res: dict) -> None:
     """A and B (three states), flip map, local memory, cropped to the common active area (as the map-comparison
     program's figure)."""
+    from matplotlib.patches import Patch
+
     fig.clear()
     L, m = res["layers"], res["metrics"]
     roi = L["roi"]
     ys, xs = np.nonzero(roi)
     sl = (slice(ys.min(), ys.max() + 1), slice(xs.min(), xs.max() + 1)) if ys.size else (slice(None),) * 2
     ax = fig.subplots(1, 4, sharex=True, sharey=True)
-    for a, s, t in ((ax[0], res["sA"], f"A: {_short(res['titles'][0])}"), (ax[1], res["sB"], f"B: {_short(res['titles'][1])}")):
-        a.imshow(_rgb(np.where(roi, s, -9)[sl], {1: UP_COLOR, -1: DOWN_COLOR}), interpolation="nearest")
-        a.set_title(t, fontsize=8)
-    ax[2].imshow(_rgb(np.where(roi, L["flip"], -9)[sl], dict(enumerate(FLIP_COLOURS[:4]))), interpolation="nearest")
-    ax[2].set_title(f"switched {m['switched_pct']:.0f} % of classified\n{m['up_to_down_pct']:.0f} % of up → down · "
-                    f"{m['down_to_up_pct']:.0f} % of down → up", fontsize=8)
-    from matplotlib.patches import Patch
+    for a, s, side, title in ((ax[0], res["sA"], "A", res["titles"][0]), (ax[1], res["sB"], "B", res["titles"][1])):
+        _categorical(a, np.where(roi, s, -9)[sl], {1: UP_COLOR, -1: DOWN_COLOR})
+        a.set_title(f"{side}\n{_short(title.split(' · ')[0])}", fontsize=7)
+    _categorical(ax[2], np.where(roi, L["flip"], -9)[sl], dict(enumerate(FLIP_COLOURS[:4])))
+    ax[2].set_title(f"switched {m['switched_pct']:.0f} % of classified\n{m['up_to_down_pct']:.0f} % of up → down, "
+                    f"{m['down_to_up_pct']:.0f} % of down → up", fontsize=7)
     ax[2].legend(handles=[Patch(facecolor=c, edgecolor="0.4", lw=0.4, label=l) for c, l in zip(FLIP_COLOURS, FLIP_LABELS)],
-                 fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=3, frameon=False)
-    im = ax[3].imshow(np.where(roi, L["r_local"], np.nan)[sl], cmap="PiYG", vmin=-1, vmax=1, interpolation="nearest")
-    ax[3].set_title(f"local memory (r = {m['r']:+.2f} [{m['r_ci_lo']:+.2f}, {m['r_ci_hi']:+.2f}])", fontsize=8)
-    fig.colorbar(im, ax=ax[3], shrink=0.7)
+                 fontsize=6, loc="upper center", bbox_to_anchor=(0.5, -0.02), ncol=3, frameon=False)
+    im = ax[3].imshow(np.where(roi, L["r_local"], np.nan)[sl], cmap="PiYG", vmin=-1, vmax=1, interpolation="none")
+    ax[3].set_title(f"local memory\nr = {m['r']:+.2f} [{m['r_ci_lo']:+.2f}, {m['r_ci_hi']:+.2f}]", fontsize=7)
+    fig.colorbar(im, ax=ax[3], shrink=0.7).ax.tick_params(labelsize=6)
     for a in ax:
         a.set_xticks([])
         a.set_yticks([])
@@ -526,7 +546,7 @@ def save_domain_compare_pdf(path, res: dict) -> None:
     import matplotlib
     from matplotlib.figure import Figure
 
-    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "font.family": "sans-serif",
+    with matplotlib.rc_context({**PDF_RC, "font.family": "sans-serif",
                                 "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"], "font.size": 7}):
         fig = Figure(figsize=(7.0, 2.6), layout="constrained")
         domain_compare(fig, res)
@@ -540,7 +560,7 @@ def save_domain_step_pdf(path, img: np.ndarray, step: str, um_per_px: float | No
     import matplotlib
     from matplotlib.figure import Figure
 
-    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "svg.fonttype": "none",
+    with matplotlib.rc_context({**PDF_RC,
                                 "font.family": "sans-serif", "font.sans-serif": ["Arial", "Helvetica", "DejaVu Sans"],
                                 "font.size": 7, "axes.linewidth": 0.6}):
         fig = Figure(figsize=(3.42, 3.2), layout="constrained")
@@ -562,7 +582,7 @@ def save_domain_sizes_pdf(path, areas: dict, title: str = "") -> None:
     import matplotlib
     from matplotlib.figure import Figure
 
-    with matplotlib.rc_context({"pdf.fonttype": 42, "ps.fonttype": 42, "font.size": 7}):
+    with matplotlib.rc_context({**PDF_RC, "font.size": 7}):
         fig = Figure(figsize=(3.42, 2.4), layout="constrained")
         ax = fig.add_subplot(111)
         domain_sizes(ax, areas)
