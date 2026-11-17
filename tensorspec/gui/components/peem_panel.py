@@ -660,26 +660,28 @@ class PeemPanel(QWidget):
                     source=self.drift_source.currentData(),
                     smooth_px=DRIFT_SMOOTH_PX,  # the detector's pixel pattern must not pin the shift at 0
                     per_channel=True,  # after Stack Pairs: CP and CM frames each tracked on their own
+                    edges="auto",  # energy scans: match flake edges (the contrast changes across the edge)
                 )
             finally:
                 QGuiApplication.restoreOverrideCursor()
             self._refresh_meta()
             algo = result.get("drift_method", "ncc_roi")
             self.drift_algo_label.setText(f"NCC ROI ({algo})")
+            how = ", on flake edges (energy scan)" if result.get("edges") else ""
             self.status_label.setText(
-                f"Drift applied (max |dx|={result['max_abs_dx']}, |dy|={result['max_abs_dy']})"
+                f"Drift applied{how} (max |dx|={result['max_abs_dx']}, |dy|={result['max_abs_dy']})"
             )
         except Exception as exc:
             QMessageBox.critical(self, "Drift error", str(exc))
 
     def _to_sum_rule(self, name: str):
-        """Corrected CP / CM pairs -> the Sum Rule window (XAS suite), as a new dataset
-        <name>_sumrule with an energy per pair (PeemService.to_sum_rule)."""
+        """Drift-corrected frames (or pairs, after Stack Pairs) -> the XAS window, as a new dataset <name>_sumrule with
+        one CP and one CM image per photon energy (PeemService.to_sum_rule)."""
         res = self.service.to_sum_rule(name)
         from tensorspec.gui.suites.xas_suite import open_sum_rule
         open_sum_rule(res["name"], self.service)
         note = f" ({res['note']})" if res.get("note") else ""
-        self.status_label.setText(f"Sent to the Sum Rule window as '{res['name']}'{note}.")
+        self.status_label.setText(f"Sent to the XAS window as '{res['name']}' ({res.get('source', 'frames')}){note}.")
 
     def _refresh_meta(self):
         name = self._dataset_name

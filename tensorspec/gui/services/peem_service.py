@@ -163,6 +163,14 @@ def _require_tensor(name: str) -> TensorData:
     return tensor
 
 
+def _scan_groups(tensor: TensorData) -> list | None:
+    """The scan of every frame of a frame stack loaded from several scans (drift_correct groups), else None."""
+    scans = (tensor.metadata or {}).get("scan_of_frame")
+    if np.ndim(tensor.value) != 3 or scans is None or len(scans) != len(tensor.value) or len(set(map(str, scans))) < 2:
+        return None
+    return [str(x) for x in scans]
+
+
 def _processed_tensor(name: str) -> TensorData | None:
     tensor = global_workspace.pull_tensor_data(name, "processed")
     if tensor is None:
@@ -603,6 +611,9 @@ def _run_sumrule(
     seed: int | None = None,
 ) -> _SumruleResult:
     raw = _require_tensor(name)
+    pols = sorted({str(t) for t in (raw.metadata or {}).get("pol") or []})
+    if len(pols) == 1 and np.ndim(raw.value) == 3 and global_workspace.pull_tensor_data(name, "processed") is None:
+        raise ValueError(f"'{name}' has {pols[0]} frames only: the sum rule needs both polarizations (CP and CM)")
     tags = _sumrule_tags(name)
     source_kind = pick_source_kind(_sumrule_available_nodes(name), tags)
 
@@ -1451,9 +1462,14 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
         source: str = "raw",
         smooth_px: float = 0.0,
         per_channel: bool = False,
+        edges: bool | str = False,
     ) -> dict[str, Any]:
         """smooth_px / per_channel: see core.peem.engine.drift_correct (the PEEM panel uses 2 px and
-        per-channel tracking: TPX3 fixed pattern, UE49 CP / CM pairs from different scans)."""
+        per-channel tracking: TPX3 fixed pattern, UE49 CP / CM pairs from different scans).
+        edges: match the edge strength instead of the intensity (core.peem.engine.drift_correct); "auto" = when the
+        frames span several photon energies (an energy scan: the contrast changes across the edge), with 3 px
+        smoothing (the frames there are noisier).
+        """
         if source == "raw":
             tensor = _require_tensor(name)
         else:
@@ -1461,6 +1477,14 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
             if tensor is None:
                 raise ValueError(f"PEEM data '{name}' has no processed data.")
 
+        if edges == "auto":
+            from tensorspec.core.peem.bg import resolve_energy
+            from tensorspec.core.peem.engine import MIN_AUTO_ENERGY_BIN_EV
+
+            energy, src = resolve_energy(len(_require_tensor(name).value), _require_tensor(name).metadata or {})
+            edges = src != "index" and float(np.ptp(np.asarray(energy, float))) > MIN_AUTO_ENERGY_BIN_EV
+            if edges:
+                smooth_px = max(smooth_px, 3.0)
         corrected = drift_correct(
             tensor,
             ref_index=ref_index,
@@ -1469,6 +1493,8 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
             track_channel=track_channel,
             smooth_px=smooth_px,
             per_channel=per_channel,
+            edges=bool(edges),
+            groups=_scan_groups(tensor),
         )
         if not global_workspace.write_processed_data(name, corrected):
             raise ValueError(f"PEEM data '{name}' not found.")
@@ -1487,6 +1513,8 @@ class PeemService(PeemLoadSteps, PeemCleanupSteps, PeemDriftStackSteps, PeemImag
             "shape": [int(s) for s in corrected.value.shape],
             "has_drift": True,
             "drift_method": corrected.metadata.get("drift_method", "ncc_roi"),
+            "edges": bool(corrected.metadata.get("drift_edges")),
+            "group_offsets": corrected.metadata.get("drift_group_offsets", []),
         }
 
     def bg_preview(
