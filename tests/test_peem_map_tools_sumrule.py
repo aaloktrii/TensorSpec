@@ -743,3 +743,19 @@ def test_view_tabs_across_the_top_with_the_control_column_below(qapp):
     qapp.processEvents()
     assert not p._controls_scroll.isVisibleTo(p)
     p.close()
+
+
+def test_single_energy_with_readback_jitter_is_one_energy():
+    """A fixed-energy acquisition whose energy readback jitters by ~1 meV (UE49 707.0007-707.0035 eV) is one
+    energy, not several; a real scan (0.06 eV steps) keeps every step."""
+    from tensorspec.core.peem.engine import average_by_energy
+
+    rng = np.random.default_rng(0)
+    frames = rng.normal(100, 1, (120, 4, 4))
+    pol = ["CP"] * 30 + ["CM"] * 60 + ["CP"] * 30
+    jitter = 707.0 + rng.uniform(0.0007, 0.0035, 120)
+    _, _, points, counts, _ = average_by_energy(frames, pol, jitter, ("CP", "CM"))
+    assert len(points) == 1 and counts == [[60, 60]]
+    scan = np.concatenate([np.arange(60) * 0.06, np.arange(60) * 0.06]) + 570.0 + rng.uniform(0, 0.003, 120)
+    _, _, points, _, _ = average_by_energy(frames, ["CP"] * 60 + ["CM"] * 60, scan, ("CP", "CM"))
+    assert len(points) == 60
