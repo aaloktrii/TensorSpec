@@ -107,8 +107,8 @@ def test_peem_view_tabs_and_canvases(peem_suite, qapp):
 
 
 def test_peem_splitter_left_column_not_collapsed(peem_suite):
-    splitter = peem_suite.panel.findChild(QSplitter)
-    assert splitter is not None
+    splitter = peem_suite.panel._controls_scroll.parentWidget()  # Frame / Map page that shows the column
+    assert isinstance(splitter, QSplitter) and splitter.indexOf(peem_suite.panel._controls_scroll) == 0
     sizes = splitter.sizes()
     assert sizes[0] >= MIN_LEFT_WIDTH, sizes
 
