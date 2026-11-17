@@ -716,3 +716,30 @@ def test_compare_tab_two_analysed_maps(qapp, tmp_path, monkeypatch):
     rows = {r[0]: r[1] for r in _csv.reader(open(tmp_path / "cmp.csv")) if r}
     assert "switched_pct" in rows and "populations.change.d_mz" in rows and rows["method"]
     p.close()
+
+
+def test_view_tabs_across_the_top_with_the_control_column_below(qapp):
+    """Frame | Map | Analysis span the top; Frame and Map show the one control column on the left (it moves with
+    the tab and keeps its width), Analysis (Domains | Compare) has its own controls."""
+    from PySide6.QtWidgets import QSplitter
+    from tensorspec.gui.components.peem_panel import PeemPanel
+
+    p = PeemPanel()
+    p.resize(1200, 800)
+    p.show()
+    qapp.processEvents()
+    t = p.view_tabs
+    assert t.parentWidget() is p and [t.tabText(i) for i in range(t.count())] == ["Frame", "Map", "Analysis"]
+    widths = []
+    for i, view in ((0, None), (1, p.map_tools.map_view)):
+        t.setCurrentIndex(i)
+        qapp.processEvents()
+        page = p._controls_scroll.parentWidget()
+        assert isinstance(page, QSplitter) and page.indexOf(p._controls_scroll) == 0 and p._controls_scroll.isVisibleTo(p)
+        assert view is None or t.currentWidget() is view
+        widths.append(page.sizes()[0])
+    assert abs(widths[0] - widths[1]) <= 2
+    t.setCurrentWidget(p.map_tools.analysis_view)
+    qapp.processEvents()
+    assert not p._controls_scroll.isVisibleTo(p)
+    p.close()
