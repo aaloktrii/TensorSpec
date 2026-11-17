@@ -157,6 +157,9 @@ def _drift_planes(
     )
 
 
+GROUP_SEARCH_PX = 40  # wide search for the offset between scans (drift_correct groups)
+
+
 def drift_correct(
     tensor: TensorData,
     *,
@@ -166,6 +169,8 @@ def drift_correct(
     track_channel: int = 0,
     smooth_px: float = 0.0,
     per_channel: bool = False,
+    edges: bool = False,
+    groups: list | None = None,
 ) -> TensorData:
     """
     Correct integer translational drift using masked ROI NCC against a reference.
@@ -179,6 +184,14 @@ def drift_correct(
     per_channel: paired tensors only; every frame of every channel is tracked on its own against
     the reference frame of track_channel. Needed when the two channels were not recorded together
     (UE49: the CP and CM frames of a pair come from different scans, minutes apart).
+    edges: match the edge strength (gradient magnitude of the smoothed planes) instead of the intensity. Flake edges
+    stay where they are when the contrast changes or inverts across an absorption edge, so the frames of an energy
+    scan all match one reference (an intensity match fails there and a frame-to-frame match drifts away).
+    groups: one label per frame (e.g. the scan each frame came from); paired tensors tracked per channel use the
+    channel as the group. Separate scans can sit further apart than the search radius (UE49: CP and CM scans 17 px
+    apart), so each group other than the reference's first finds its offset from one frame with a wide search
+    (GROUP_SEARCH_PX) and its frames are then tracked within search_radius around that offset. The offset is used only
+    when it lies outside search_radius, so data whose groups already fit the window give the same result as before.
     """
     ref_index = _require_integer(ref_index, "ref_index")
     search_radius = _require_integer(search_radius, "search_radius")
@@ -204,10 +217,11 @@ def drift_correct(
         raise ValueError("smooth_px must be >= 0")
 
     def prep(plane: np.ndarray) -> np.ndarray:
-        if not smooth_px:
+        if not smooth_px and not edges:
             return plane
-        from scipy.ndimage import gaussian_filter
-        return gaussian_filter(np.asarray(plane, dtype=float), smooth_px)
+        from scipy import ndimage
+        out = ndimage.gaussian_filter(np.asarray(plane, dtype=float), smooth_px) if smooth_px else np.asarray(plane, float)
+        return np.hypot(ndimage.sobel(out, 0), ndimage.sobel(out, 1)) if edges else out
 
     ref_plane = prep(tracking_planes[ref_index])
     # Validate template variance even when this is a one-item stack.
@@ -220,14 +234,39 @@ def drift_correct(
 
     channels = list(range(tensor.value.shape[1])) if (paired and per_channel) else [track_channel]
 
+    items = [(i, c) for i in range(n_items) for c in channels]
+
+    if paired and per_channel:
+        group_of = {item: item[1] for item in items}
+    elif groups is not None:
+        if len(groups) != n_items:
+            raise ValueError("groups must give one label per frame")
+        group_of = {item: groups[item[0]] for item in items}
+    else:
+        group_of = {item: 0 for item in items}
+    ref_group = group_of.get((ref_index, track_channel), group_of[items[0]])
+    wide = int(min(200, max(GROUP_SEARCH_PX, 3 * search_radius), min(ny, nx) // 3))
+    offsets: dict = {}
+    for item in items:  # first frame of each other group (the reference's pair partner when tracking per channel)
+        g = group_of[item]
+        if g == ref_group or g in offsets:
+            continue
+        first = (ref_index, item[1]) if (paired and per_channel) else item
+        plane = tensor.value[first[0], first[1]] if paired else tracking_planes[first[0]]
+        off = _ncc_best_shift(ref_plane, prep(plane), mask, wide) if wide > search_radius else (0, 0)
+        offsets[g] = off if max(abs(off[0]), abs(off[1])) > search_radius else (0, 0)
+
     def frame_shift(item: tuple[int, int]) -> tuple[int, int]:
         index, channel = item
         if index == ref_index and channel == track_channel:
             return (0, 0)
-        plane = tensor.value[index, channel] if paired else tracking_planes[index]
-        return _ncc_best_shift(ref_plane, prep(plane), mask, search_radius)
+        plane = prep(tensor.value[index, channel] if paired else tracking_planes[index])
+        odx, ody = offsets.get(group_of[item], (0, 0))
+        if odx or ody:
+            plane = _shift_plane(plane, odx, ody)
+        dx, dy = _ncc_best_shift(ref_plane, plane, mask, search_radius)
+        return (dx + odx, dy + ody)
 
-    items = [(i, c) for i in range(n_items) for c in channels]
     with ThreadPoolExecutor(max_workers=min(8, os.cpu_count() or 1)) as pool:
         found = dict(zip(items, pool.map(frame_shift, items)))
     shifts: list[tuple[int, int]] = [found[(i, track_channel)] for i in range(n_items)]
@@ -253,6 +292,9 @@ def drift_correct(
             "drift_track_channel": track_channel,
             "drift_smooth_px": float(smooth_px),
             "drift_per_channel": bool(paired and per_channel),
+            "drift_edges": bool(edges),
+            "drift_group_offsets": [{"group": str(g), "dx": int(o[0]), "dy": int(o[1])}
+                                    for g, o in offsets.items() if o != (0, 0)],
             **({"drift_channel_shifts": [
                 [{"dx": found[(i, c)][0], "dy": found[(i, c)][1]} for c in channels]
                 for i in range(n_items)]} if paired and per_channel else {}),
@@ -465,10 +507,11 @@ def average_by_energy(
     frames: np.ndarray,
     pol: list[str],
     energy: np.ndarray | None,
-    tags: tuple[str, str],
+    tags: tuple[str, ...],
     energy_bin_eV: float | None = None,
 ) -> tuple[np.ndarray, list[str], list[float], list[list[int]], float | None]:
     """Average drift-corrected frames per photon energy and polarization: A(E1), B(E1), A(E2), ...
+    (one tag, e.g. ("CP",): one polarization only, A(E1), A(E2), ...)
 
     Frames are grouped in energy bins of ``energy_bin_eV`` (None = the larger median energy step
     of the two polarizations, so separate A / B sweeps on different energy points still pair up);
@@ -476,7 +519,6 @@ def average_by_energy(
     Returns (stack, pol tags, bin energies, [n_A, n_B] per bin, bin width used or None).
     Moved from the PEEM service's to_peem_stack (gui/services/peem_steps/drift_stack.py)."""
     has_e = energy is not None
-    ta, tb = tags
     ekey = np.zeros(len(pol))
     if has_e:
         if energy_bin_eV is None:
@@ -489,14 +531,13 @@ def average_by_energy(
         ekey = np.floor((energy - energy.min()) / energy_bin_eV + 0.5)
     points, imgs, pol_out, counts = [], [], [], []
     for e in np.unique(ekey):
-        ia = [i for i, t in enumerate(pol) if t == ta and ekey[i] == e]
-        ib = [i for i, t in enumerate(pol) if t == tb and ekey[i] == e]
-        if not ia or not ib:
+        idx = [[i for i, t in enumerate(pol) if t == tg and ekey[i] == e] for tg in tags]
+        if not all(idx):
             continue
-        points.append(float(np.mean(energy[ia + ib])) if has_e else 0.0)
-        imgs += [frames[ia].mean(axis=0), frames[ib].mean(axis=0)]
-        pol_out += [ta, tb]
-        counts.append([len(ia), len(ib)])
+        points.append(float(np.mean(energy[sum(idx, [])])) if has_e else 0.0)
+        imgs += [frames[i].mean(axis=0) for i in idx]
+        pol_out += list(tags)
+        counts.append([len(i) for i in idx])
     if not points:
-        raise ValueError(f"no energy has both {ta} and {tb} frames")
+        raise ValueError(f"no energy has both {' and '.join(tags)} frames" if len(tags) > 1 else f"no {tags[0]} frames")
     return np.stack(imgs), pol_out, points, counts, energy_bin_eV

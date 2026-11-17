@@ -107,9 +107,10 @@ class PeemMapTools:
         af.addRow("Offset:", b)
         lay.addWidget(asym)
         if self._send_to_sum_rule is not None:
-            b = action_style(QPushButton("→ Sum Rule (corrected pairs)"), "handover")
-            b.setToolTip("Open the Sum Rule window with this dataset: ROI spectra, background, sum rule\n"
-                         "(the XMCD sum rule needs CP / CM; LH / LV give spectra and background)")
+            b = action_style(QPushButton("→ XAS (spectra)"), "handover")
+            b.setToolTip("Send the drift-corrected frames to the XAS window (no Stack Pairs needed): each frame is\n"
+                         "grouped by its own polarization and photon energy, then region spectra, background and\n"
+                         "sum rule there (the XMCD sum rule needs CP / CM; LH / LV give spectra and background)")
             b.clicked.connect(self._send)
             self.btn_sum_rule = b  # placed by the panel, right after 3. Drift
 
@@ -335,7 +336,7 @@ class PeemMapTools:
         kind = {"CP / CM": "XMCD", "LH / LV": "XLD"}.get(pair, "dichroism")
         self.btn_asymmetry.setText(f"Make {kind} map ({pair})" if pair != "pairs" else "Make dichroism map")
         if hasattr(self, "btn_sum_rule"):
-            self.btn_sum_rule.setText(f"→ Sum Rule (corrected {pair})")
+            self.btn_sum_rule.setText(f"→ XAS ({pair} spectra)" if pair != "pairs" else "→ XAS (spectra)")
 
     def refresh(self, select: tuple[str, str] | None = None):
         """Show the dataset's maps (after the asymmetry step); keeps the chosen layer."""

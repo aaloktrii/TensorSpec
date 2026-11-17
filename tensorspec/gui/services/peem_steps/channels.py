@@ -73,6 +73,35 @@ def _channels(name: str) -> dict[str, Any]:
             "ea": ea, "eb": eb, "mixed": mixed}
 
 
+def _frame_channels(name: str) -> dict[str, Any]:
+    """Every frame with its own polarization and photon energy, without Stack Pairs: the drift-corrected frames
+    (/processed as frame x y, when Drift ran on the frames) or else the raw frames. Same keys as _channels.
+    Frames of one polarization only (e.g. all CP): pair None, tb / fb / eb None (spectra of that one channel)."""
+    raw = _require_raw(name)
+    proc = global_workspace.pull_tensor_data(name, "processed")
+    drifted = proc is not None and np.ndim(proc.value) == 3 and len(proc.value) == len(raw.value)
+    frames = np.asarray(proc.value if drifted else raw.value)
+    md = raw.metadata or {}
+    pol = [str(t) for t in (md.get("pol") or [])][:len(frames)]
+    pair = next((p for p, t in PAIRS.items() if set(t) <= set(pol)), None)
+    energy, src = resolve_energy(len(frames), md)
+    e = np.asarray(energy, float) if src != "index" else None
+    if pair is None:
+        tags = sorted({t for t in pol if t in sum(PAIRS.values(), ())})
+        if len(tags) != 1:
+            raise ValueError(f"the frames are tagged {sorted(set(pol))}: need CP / CM or LH / LV frames")
+        ia = [i for i, t in enumerate(pol) if t == tags[0]]
+        return {"pair": None, "ta": tags[0], "tb": None, "fa": frames[ia], "fb": None,
+                "ea": e[ia] if e is not None else None, "eb": None, "mixed": 0.0,
+                "drift_corrected": drifted, "stacked": False}
+    ta, tb = PAIRS[pair]
+    ia = [i for i, t in enumerate(pol) if t == ta]
+    ib = [i for i, t in enumerate(pol) if t == tb]
+    return {"pair": pair, "ta": ta, "tb": tb, "fa": frames[ia], "fb": frames[ib],
+            "ea": e[ia] if e is not None else None, "eb": e[ib] if e is not None else None, "mixed": 0.0,
+            "drift_corrected": drifted, "stacked": False}
+
+
 def _step(e: np.ndarray) -> float:
     u = np.unique(np.round(e, 4))
     return float(np.median(np.diff(u))) if len(u) > 1 else 0.0
@@ -150,7 +179,9 @@ class PeemChannelSteps:
         return out
 
     def to_sum_rule(self, name: str, energy_bin_eV: float | None = None) -> dict[str, Any]:
-        """The PEEM tab's corrected frames -> new dataset ``<name>_sumrule`` for the Sum Rule window.
+        """The PEEM tab's corrected frames -> new dataset ``<name>_sumrule`` for the XAS window (spectra, background,
+        sum rule). Works on the drift-corrected frames directly (no Stack Pairs needed: each frame keeps its own
+        polarization and energy); after Stack Pairs it uses the corrected pairs.
 
         Frames are regrouped by their own photon energy (core/peem/engine.average_by_energy; bin
         width ``energy_bin_eV``, None = the energy step): one CP and one CM image per energy, as
@@ -158,11 +189,19 @@ class PeemChannelSteps:
         sum-rule steps read for a channel). Then paired and separated (PeemService.pair / separate).
         Without an energy axis the corrected pairs are handed over as they are. The original
         dataset is not changed."""
-        ch = _channels(name)
+        cube = global_workspace.pull_tensor_data(name, "processed")
+        if cube is not None and np.ndim(cube.value) == 4:  # after Stack Pairs: the corrected pairs
+            ch = {**_channels(name), "stacked": True,
+                  "drift_corrected": (cube.metadata or {}).get("drift_method") is not None}
+            note = _mixing_note(ch)
+        else:  # no Stack Pairs needed: every (drift-corrected) frame by its own polarization and energy
+            ch = _frame_channels(name)
+            note = None if ch["drift_corrected"] else "frames not drift-corrected (run 3. Drift first for sharper spectra)"
         ta, tb = ch["ta"], ch["tb"]
         raw = _require_raw(name)
         ny, nx = ch["fa"].shape[1:]
-        note = _mixing_note(ch)
+        if tb is None:
+            return self._single_to_sum_rule(name, ch, raw, note, energy_bin_eV)
         if ch["ea"] is not None:
             frames = np.concatenate([ch["fa"], ch["fb"]])
             pol = [ta] * len(ch["fa"]) + [tb] * len(ch["fb"])
@@ -187,6 +226,7 @@ class PeemChannelSteps:
         paired = self.pair(label, "CP_CM" if ch["pair"] == "xmcd" else "LH_LV")
         sep = self.separate(label)
         out = {"name": label, "from": name, "pair": ch["pair"], "n_pairs": paired["n_pairs"], "channels": sep["channels"],
+               "source": ("stacked pairs" if ch["stacked"] else "frames") + (", drift-corrected" if ch["drift_corrected"] else ""),
                "energy_range_eV": [float(min(points)), float(max(points))] if points else None,
                "energy_bin_eV": round(float(width), 4) if width else None}
         if counts:
@@ -197,6 +237,37 @@ class PeemChannelSteps:
                              "across the edge" if points and len(points) == 1 else None) if x]
         if notes:
             out["note"] = "; ".join(notes)
+        _record(name, "to sum rule", {k: v for k, v in out.items() if k not in ("name", "frames_per_energy")}
+                | {"dataset": label})
+        return out
+
+    def _single_to_sum_rule(self, name, ch, raw, note, energy_bin_eV) -> dict[str, Any]:
+        """One polarization only (e.g. all CP): one image per photon energy, no pairing; the XAS window shows its
+        spectrum (and background); XMCD and the sum rule need both polarizations."""
+        ta = ch["ta"]
+        if ch["ea"] is not None:
+            stack, _, points, counts, width = average_by_energy(ch["fa"], [ta] * len(ch["fa"]), ch["ea"], (ta,), energy_bin_eV)
+        else:
+            stack, points, counts, width = ch["fa"], None, None, None
+        md = {k: v for k, v in (raw.metadata or {}).items()
+              if k in ("format", "beamline", "default_convention", "fov_um", "um_per_px", "source", "loader")}
+        md.update({"pol": [ta] * len(stack), "frame_names": [f"{ta}_{i:04d}" for i in range(len(stack))],
+                   "derived_by": "PEEM tab: corrected frames for the Sum Rule window", "derived_from": name})
+        if points:
+            md["beamline_table"] = {"columns": ["energy"], "series": {"energy": [float(p) for p in points]}}
+        label = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{name}_sumrule")[:64]
+        global_workspace.push_spectroscopy_data(label, TensorData(
+            value=np.asarray(stack, np.float32), axes=[np.arange(len(stack), dtype=float), raw.axes[1], raw.axes[2]],
+            labels=["frame", "y", "x"], units=list(raw.units), data_type="Experimental PEEM", metadata=md))
+        out = {"name": label, "from": name, "pair": None, "n_pairs": len(stack), "channels": [ta],
+               "source": "frames" + (", drift-corrected" if ch["drift_corrected"] else ""),
+               "energy_range_eV": [float(min(points)), float(max(points))] if points else None,
+               "energy_bin_eV": round(float(width), 4) if width else None}
+        if counts:
+            out["frames_per_energy"] = {ta: [c[0] for c in counts]}
+        notes = [x for x in (f"{ta} only: XAS spectrum, no XMCD or sum rule (needs both polarizations)", note,
+                             None if points else "no photon-energy axis: spectra on the frame index") if x]
+        out["note"] = "; ".join(notes)
         _record(name, "to sum rule", {k: v for k, v in out.items() if k not in ("name", "frames_per_energy")}
                 | {"dataset": label})
         return out
@@ -214,20 +285,38 @@ class PeemChannelSteps:
         return names
 
     def channel_image(self, name: str) -> np.ndarray:
-        """Mean of both channels over all corrected pairs: the image the region is drawn on."""
+        """Mean of both channels over all corrected pairs (one polarization: of its frames): the image the region
+        is drawn on."""
+        cube = global_workspace.pull_tensor_data(name, "processed")
+        if cube is None or np.ndim(cube.value) != 4:
+            ch = _frame_channels(name)
+            return np.asarray(ch["fa"] if ch["tb"] is None else np.concatenate([ch["fa"], ch["fb"]]), float).mean(axis=0)
         cube, _, _ = _paired_cube(name)
         return np.asarray(cube.value, float).mean(axis=(0, 1))
 
     def roi_spectra(self, name: str, roi: dict | None = None) -> dict[str, Any]:
         """CP / CM spectra (mean over ``roi``, whole image if None) per photon energy, with
         XAS = (CP + CM) / 2 and XMCD = CM − CP (LV − LH for linear). Frames are grouped by their own
-        energy, so mismatched CP / CM sweeps still give matching points."""
-        ch = _channels(name)
+        energy, so mismatched CP / CM sweeps still give matching points. One polarization only: its spectrum as
+        XAS, channels [CP] and dichroism None."""
+        cube = global_workspace.pull_tensor_data(name, "processed")
+        ch = _channels(name) if cube is not None and np.ndim(cube.value) == 4 else _frame_channels(name)
         ta, tb = ch["ta"], ch["tb"]
         ny, nx = ch["fa"].shape[1:]
         mask = None if roi is None else roi_to_mask(ny, nx, roi)
         mean = (lambda f: np.asarray(f, float)[:, mask].mean(axis=1)) if mask is not None else \
                (lambda f: np.asarray(f, float).mean(axis=(1, 2)))
+        if tb is None:
+            a = mean(ch["fa"])
+            if ch["ea"] is not None:
+                st, _, points, _, _ = average_by_energy(a[:, None, None], [ta] * len(a), ch["ea"], (ta,))
+                a, x, src = st[:, 0, 0], np.asarray(points, float), "frames"
+            else:
+                x, src = np.arange(len(a), dtype=float), "index"
+            order = np.argsort(x)
+            return {"name": name, "pair": None, "channels": [ta], "energy": x[order].tolist(), "energy_source": src,
+                    ta: a[order].tolist(), "xas": a[order].tolist(), "dichroism": None,
+                    "n_pixels": int(mask.sum()) if mask is not None else int(ny * nx)}
         a, b = mean(ch["fa"]), mean(ch["fb"])
         if ch["ea"] is not None:
             vals = np.concatenate([a, b])[:, None, None]
