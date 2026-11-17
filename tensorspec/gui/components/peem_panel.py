@@ -77,6 +77,60 @@ class PeemLoadThread(QThread):
         self.finished_signal.emit(bool(summaries), summaries, "\n".join(errors))
 
 
+class _ViewTabs(QTabWidget):
+    """Frame | Map | Analysis across the top of the window. A page added with controls=True is a splitter with the
+    one control column (1-7) on the left and its view on the right; the column moves to whichever such page is
+    shown, keeping its width. widget(), currentWidget(), setCurrentWidget() and indexOf() speak in the views."""
+
+    def __init__(self, controls: QWidget):
+        super().__init__()
+        self.setDocumentMode(True)
+        self._controls = controls
+        self._view = {}  # page -> view
+        self.currentChanged.connect(self._place_controls)
+
+    def add_view(self, view: QWidget, label: str, controls: bool = True) -> int:
+        page = view
+        if controls:
+            page = QSplitter(Qt.Horizontal)
+            page.setChildrenCollapsible(False)
+            page.addWidget(view)
+        self._view[page] = view
+        i = self.addTab(page, label)
+        if controls and self._controls.parentWidget() is None:
+            self._place_controls(i)
+        return i
+
+    def _place_controls(self, index: int):
+        page = super().widget(index)
+        if not isinstance(page, QSplitter) or page.indexOf(self._controls) == 0:
+            return
+        old = self._controls.parentWidget()
+        width = old.sizes()[0] if isinstance(old, QSplitter) and old.count() > 1 else self._controls.minimumWidth()
+        page.insertWidget(0, self._controls)
+        page.setStretchFactor(0, 0)
+        page.setStretchFactor(1, 1)
+        page.setSizes([width, max(page.width() - width, 600)])
+
+    def widget(self, index: int):
+        page = super().widget(index)
+        return self._view.get(page, page)
+
+    def currentWidget(self):
+        return self.widget(self.currentIndex())
+
+    def indexOf(self, w):
+        for i in range(self.count()):
+            if w is self.widget(i) or w is super().widget(i):
+                return i
+        return -1
+
+    def setCurrentWidget(self, w):
+        i = self.indexOf(w)
+        if i >= 0:
+            self.setCurrentIndex(i)
+
+
 class PeemPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -136,9 +190,6 @@ class PeemPanel(QWidget):
 
     def _setup_ui(self):
         root = QVBoxLayout(self)
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setChildrenCollapsible(False)
-        root.addWidget(splitter)
 
         # --- LEFT: controls (forms only — plots live on right tabs) ---
         control_panel = QWidget()
@@ -251,12 +302,12 @@ class PeemPanel(QWidget):
         # wide enough for every section (no horizontal scrolling, nothing clipped)
         scroll.setMinimumWidth(max(400, control_panel.minimumSizeHint().width()
                                    + scroll.verticalScrollBar().sizeHint().width() + 4))
-        splitter.addWidget(scroll)
         self._controls_scroll = scroll
 
-        # --- RIGHT: Frame (DataViewer) | Map | Analysis ---
-        self.view_tabs = QTabWidget()
-        self.view_tabs.setDocumentMode(True)
+        # --- Frame (DataViewer) | Map | Analysis across the top; Frame and Map show the control column (1-7) on
+        # the left and their picture on the right; Analysis (Domains | Compare) has its own controls ---
+        self.view_tabs = _ViewTabs(scroll)
+        root.addWidget(self.view_tabs)
 
         view_panel = QWidget()
         view_layout = QVBoxLayout(view_panel)
@@ -272,24 +323,9 @@ class PeemPanel(QWidget):
         view_layout.addLayout(nav)
         self.frame_viewer = DataViewerPanel(compact=True)
         view_layout.addWidget(self.frame_viewer, stretch=1)
-        self.view_tabs.addTab(view_panel, "Frame")
-
-        self.view_tabs.addTab(self.map_tools.map_view, "Map")
-        self.view_tabs.addTab(self.map_tools.analysis_view, "Analysis")
-        # Analysis -> Domains has its own controls: the left column (1-7) is hidden there
-        self.view_tabs.currentChanged.connect(lambda *_: self._sync_controls())
-        self.map_tools.analysis_view.currentChanged.connect(lambda *_: self._sync_controls())
-
-        splitter.addWidget(self.view_tabs)
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([scroll.minimumWidth(), 1100 - scroll.minimumWidth()])
-
-    def _sync_controls(self):
-        mt = self.map_tools
-        on_domains = (self.view_tabs.currentWidget() is mt.analysis_view  # Domains and Compare have their own controls
-                      and mt.analysis_view.currentWidget() in (mt.domain_view, mt.compare_view))
-        self._controls_scroll.setVisible(not on_domains)
+        self.view_tabs.add_view(view_panel, "Frame")
+        self.view_tabs.add_view(self.map_tools.map_view, "Map")
+        self.view_tabs.add_view(self.map_tools.analysis_view, "Analysis", controls=False)
 
     @staticmethod
     def _pair_row(a, b):

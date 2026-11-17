@@ -8,7 +8,7 @@ The PEEM panel plugs it in with a few lines:
     tools = PeemMapTools(service, get_name=lambda: panel._dataset_name, send_to_sum_rule=...)
     left_layout.addWidget(tools.controls)           # sections 4-7
     view_tabs.addTab(tools.map_view, "Map")         # maps with ROI / profile overlays
-    view_tabs.addTab(tools.analysis_view, "Analysis")  # Plots (profiles, histogram, FFT) | Domains
+    view_tabs.addTab(tools.analysis_view, "Analysis")  # Domains | Compare
 """
 from __future__ import annotations
 
@@ -499,8 +499,11 @@ class PeemMapTools:
         w = page.parentWidget()
         while w is not None and not isinstance(w, QTabWidget):
             w = w.parentWidget()
-        if w is not None:
-            w.setCurrentWidget(page)
+        if w is not None:  # the page itself or the tab that holds it (Frame / Map pages carry the control column)
+            for i in range(w.count()):
+                if w.widget(i) is page or w.widget(i).isAncestorOf(page):
+                    w.setCurrentIndex(i)
+                    break
         if sub is not None and isinstance(page, QTabWidget):
             page.setCurrentWidget(sub)
 
