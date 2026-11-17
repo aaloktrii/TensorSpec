@@ -67,7 +67,7 @@ class PeemMapTools:
         self._shown_name: str | None = None
         self._build_controls()
         self._build_map_view()
-        self._build_plot_view()
+        self._build_analysis_view()
 
     # ------------------------------------------------------------------ building
     def _build_controls(self):
@@ -179,6 +179,10 @@ class PeemMapTools:
             b.clicked.connect(fn)
             row.addWidget(b)
         nf.addRow(row)
+        b = QPushButton("Export profiles…")
+        b.setToolTip("The ticked profiles as a vector PDF (editable text) and their values as a .csv next to it")
+        b.clicked.connect(self._export_profiles)
+        nf.addRow(b)
         self.prof_dock = QCheckBox("Profiles beside the map")
         self.prof_dock.setChecked(True)
         self.prof_dock.setToolTip("Each line's profile under the map (mostly horizontal line, on the map's x axis)\n"
@@ -186,7 +190,7 @@ class PeemMapTools:
         self.prof_dock.toggled.connect(lambda *_: self._dock_profiles())
         nf.addRow(self.prof_dock)
         self.prof_offset = _dspin(0, 1e6, 0.0, 0.01, 4)
-        self.prof_offset.valueChanged.connect(lambda *_: self._draw_profiles())
+        self.prof_offset.setToolTip("Spacing between the profiles in the exported figure")
         nf.addRow("Offset:", self.prof_offset)
         lay.addWidget(an)
 
@@ -279,36 +283,15 @@ class PeemMapTools:
         rng.addWidget(b)
         v.addLayout(rng)
 
-    def _build_plot_view(self):
+    def _build_analysis_view(self):
         from PySide6.QtWidgets import QTabWidget
 
         from tensorspec.gui.components.peem_panel import PeemDomainCompareView, PeemDomainView  # lazy: the panel imports this module
 
-        self.plot_view = QWidget()
         self.domain_view = PeemDomainView(self.service, self._parent)
         self.compare_view = PeemDomainCompareView(self.service, self._parent)
         self.analysis_view = QTabWidget()
         self.analysis_view.setDocumentMode(True)
-        v = QVBoxLayout(self.plot_view)
-        h = QHBoxLayout()
-        for label, fn, tip in (("Histogram", self._histogram, "Pixel values of the map shown in the Map view (inside its ROI if set)"),
-                               ("FFT", self._fft, "2-D FFT of the map shown in the Map view: the ring gives the domain period")):
-            b = QPushButton(label)
-            b.setToolTip(tip)
-            b.clicked.connect(fn)
-            h.addWidget(b)
-        self.plot_title = QLabel("")
-        h.addWidget(self.plot_title, 1)
-        b = QPushButton("Export PDF…")
-        b.setToolTip("Vector PDF with editable text (Illustrator); profiles also as a .csv next to it")
-        b.clicked.connect(self._export_plot_pdf)
-        h.addWidget(b)
-        v.addLayout(h)
-        self.pfig = Figure(figsize=(6, 4), layout="tight")
-        self.pcanvas = FigureCanvas(self.pfig)
-        v.addWidget(self.pcanvas, 1)
-        self._plot_kind = None
-        self.analysis_view.addTab(self.plot_view, "Plots")
         self.analysis_view.addTab(self.domain_view, "Domains")
         self.analysis_view.addTab(self.compare_view, "Compare")
 
@@ -682,13 +665,6 @@ class PeemMapTools:
             return
         self._on_line({"a": (y1, x1), "b": (y2, x2)})
 
-    def _plot(self, kind: str, title: str):
-        self._show_view(self.analysis_view, self.plot_view)
-        self._plot_kind = kind
-        self.plot_title.setText(title)
-        self.pfig.clear()
-        return self.pfig.add_subplot()
-
     def _add_profile(self):
         name = self._name()
         if not name:
@@ -704,11 +680,6 @@ class PeemMapTools:
     def _draw_profiles(self):
         name = self._get_name()
         profiles = self.service.list_profiles(name) if name else []
-        shown = sum(1 for pr in profiles if pr.get("visible", True))
-        ax = self._plot("profiles", f"{shown} of {len(profiles)} line profile(s) shown")
-        if profiles:
-            peem_plots.line_profiles(ax, profiles, self.prof_offset.value())
-        self.pcanvas.draw_idle()
         self._fill_profile_list(profiles)
         self._dock_profiles()
 
@@ -782,28 +753,6 @@ class PeemMapTools:
             self._line = None
             self._draw_profiles()
             self._update_overlays()
-
-    def _histogram(self):
-        name = self._name()
-        if name:
-            kind, var = self._shown()
-            h = self._call(self.service.histogram, name, kind, var, 0, self._roi())
-            if h is not None:
-                peem_plots.histogram(self._plot("histogram", f"histogram of {kind} / {var}"), h)
-                self.pcanvas.draw_idle()
-
-    def _fft(self):
-        name = self._name()
-        if name:
-            kind, var = self._shown()
-            f = self._call(self.service.image_fft, name, kind, var, 0)
-            if f is not None:
-                self._show_view(self.analysis_view, self.plot_view)
-                self._plot_kind = "fft"
-                self.plot_title.setText(f"FFT of {kind} / {var}")
-                self.pfig.clear()
-                peem_plots.image_fft(self.pfig, f)
-                self.pcanvas.draw_idle()
 
     # ------------------------------------------------------------------ 6. push and export (ROI: Analysis -> Domains)
     def _set_roi(self, roi: dict | None):
@@ -879,17 +828,22 @@ class PeemMapTools:
             if files:
                 self.status.setText("Saved " + ", ".join(os.path.basename(f) for f in files))
 
-    def _export_plot_pdf(self):
-        path, _ = QFileDialog.getSaveFileName(self._parent, "Export plot as PDF", export_path(f"{self._get_name() or 'profile'}_profile.pdf"), "PDF (*.pdf)")
+    def _export_profiles(self):
+        """The ticked profiles: vector PDF (editable text) and their values as a .csv next to it."""
+        name = self._get_name()
+        shown = [pr for pr in (self.service.list_profiles(name) if name else []) if pr.get("visible", True)]
+        if not shown:
+            self._err("Add a profile first (draw a line, then Add profile).")
+            return
+        path, _ = QFileDialog.getSaveFileName(self._parent, "Export profiles", export_path(f"{name}_profiles.pdf"), "PDF (*.pdf)")
         if not path:
             return
         path = path if path.lower().endswith(".pdf") else path + ".pdf"
-        peem_plots.save_pdf(self.pfig, path)
-        name = self._get_name()
-        shown = [pr for pr in (self.service.list_profiles(name) if name else []) if pr.get("visible", True)]
-        if self._plot_kind == "profiles" and shown:
-            peem_plots.save_profiles_csv(shown, path[:-4] + ".csv")  # the profiles in the PDF
-        self.status.setText(f"Saved {os.path.basename(path)}")
+        fig = Figure(figsize=(6, 4), layout="tight")
+        peem_plots.line_profiles(fig.add_subplot(), shown, self.prof_offset.value())
+        peem_plots.save_pdf(fig, path)
+        peem_plots.save_profiles_csv(shown, path[:-4] + ".csv")
+        self.status.setText(f"Saved {os.path.basename(path)} and {os.path.basename(path)[:-4]}.csv")
 
     # ------------------------------------------------------------------ to the Sum Rule window
     def _send(self):

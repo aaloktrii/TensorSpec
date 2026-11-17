@@ -99,8 +99,7 @@ def test_peem_panel_sections_and_sum_rule_window(qapp, tmp_path, monkeypatch):
     assert t._shown() == ("pcd", "data") and v0.combo_cmap.currentText() == "bwr" and v0.chk_invert.isChecked()  # positive blue
     t._on_line({"a": (32, 4), "b": (32, 60)})
     t._add_profile()
-    t._histogram()
-    assert len(p.service.list_profiles("img")) == 1 and t.plot_title.text().startswith("histogram")
+    assert len(p.service.list_profiles("img")) == 1 and p.view_tabs.currentWidget() is not t.analysis_view  # stays on the map
     t._push()  # -> Analysis / Domains
     assert t.analysis_view.currentWidget() is t.domain_view and t.domain_view.items.count() == 1
     t.domain_view._set_region("roi", {"kind": "rect", "x0": 4, "x1": 60, "y0": 4, "y1": 60})
@@ -321,13 +320,14 @@ def test_domains_tab_hides_the_left_column_and_shows_the_pushed_look(qapp, tmp_p
     assert len(dv.fig.axes) >= 2  # pushed map + chosen step
     look = p.service.domain_look("img", "domains_1")
     assert look["cmap"] == "bwr_r" and look["vmin"] < 0 < look["vmax"]
-    t.analysis_view.setCurrentWidget(t.plot_view)
+    p.view_tabs.setCurrentWidget(t.map_view)
     assert p._controls_scroll.isVisibleTo(p)
+    assert [t.analysis_view.tabText(i) for i in range(t.analysis_view.count())] == ["Domains", "Compare"]
 
 
 def test_draw_line_by_dragging_stays_on_and_snaps(qapp, tmp_path):
     """5. Line profile: Draw line is a toggle; press-drag-release draws (Shift snaps to 0 / 45 / 90 deg),
-    the tool stays on for the next line, Esc ends it. Histogram and FFT sit on Analysis -> Plots."""
+    the tool stays on for the next line, Esc ends it. The profiles export from 5. Line profile."""
     import time
     from PySide6.QtCore import QPoint, Qt
     from PySide6.QtTest import QTest
@@ -339,7 +339,7 @@ def test_draw_line_by_dragging_stays_on_and_snaps(qapp, tmp_path):
     p.show()
     t = p.map_tools
     assert any(g.title() == "5. Line profile" for g in p.findChildren(QGroupBox))
-    assert {b.text() for b in t.plot_view.findChildren(QPushButton)} >= {"Histogram", "FFT"}
+    assert "Export profiles…" in {b.text() for b in t.controls.findChildren(QPushButton)}
     p._dataset_name = _images(tmp_path, p.service)
     p._refresh_meta()
     t._asymmetry()
@@ -598,7 +598,9 @@ def test_export_to_folder_is_shared_by_every_save_dialog(qapp, tmp_path, monkeyp
         monkeypatch.setattr(QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (asked.append(a[2]), ("", ""))[1]))
         monkeypatch.setattr(QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (asked.append(a[2]), ("", ""))[1]))
         t._export()
-        t._export_plot_pdf()
+        t._on_line({"a": (32, 4), "b": (32, 60)})
+        t._add_profile()
+        t._export_profiles()
         dv._export_pushed_pdf()
         dv._export_table()
         dv._save_analysis()
