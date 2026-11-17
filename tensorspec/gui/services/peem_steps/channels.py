@@ -29,7 +29,7 @@ from scipy import ndimage
 from tensorspec.core.data_models import TensorData
 from tensorspec.core.peem import dichroism, products
 from tensorspec.core.peem.bg import resolve_energy
-from tensorspec.core.peem.engine import average_by_energy
+from tensorspec.core.peem.engine import MIN_AUTO_ENERGY_BIN_EV, average_by_energy
 from tensorspec.core.peem.roi import roi_to_mask
 from tensorspec.core.workspace import global_workspace
 from tensorspec.gui.services.peem_steps.common import _record, _require_raw
@@ -79,7 +79,7 @@ def _step(e: np.ndarray) -> float:
 
 
 def _mixing_note(ch: dict) -> str | None:
-    if ch["ea"] is None or ch["mixed"] <= max(_step(ch["ea"]), 1e-3) / 2:
+    if ch["ea"] is None or ch["mixed"] <= max(_step(ch["ea"]), MIN_AUTO_ENERGY_BIN_EV) / 2:  # readback jitter: not mixing
         return None
     return (f"Stack Pairs paired {ch['ta']} / {ch['tb']} frames of different photon energies (median "
             f"{ch['mixed']:.2f} eV apart: the two sweeps differ); frames are regrouped by their own energy")
