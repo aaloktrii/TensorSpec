@@ -458,6 +458,9 @@ def separate_pairs(tensor: TensorData) -> dict[str, TensorData]:
     return out
 
 
+MIN_AUTO_ENERGY_BIN_EV = 0.02  # eV: above readback jitter (~0.003 eV), below real energy steps
+
+
 def average_by_energy(
     frames: np.ndarray,
     pol: list[str],
@@ -479,7 +482,9 @@ def average_by_energy(
         if energy_bin_eV is None:
             uniq = [np.unique(energy[[i for i, t in enumerate(pol) if t == tg]]) for tg in tags]
             steps = [float(np.median(np.diff(u))) for u in uniq if len(u) > 1]  # one energy: no step
-            energy_bin_eV = max(steps) if steps else 0.01
+            # never below MIN_AUTO_ENERGY_BIN_EV: at a fixed photon energy the readback still jitters by ~1 meV,
+            # which must not split one energy into several (monochromator steps are >= ~0.05 eV)
+            energy_bin_eV = max(max(steps) if steps else 0.0, MIN_AUTO_ENERGY_BIN_EV)
         energy_bin_eV = max(float(energy_bin_eV), 1e-3)
         ekey = np.floor((energy - energy.min()) / energy_bin_eV + 0.5)
     points, imgs, pol_out, counts = [], [], [], []
