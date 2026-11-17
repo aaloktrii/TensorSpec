@@ -759,3 +759,63 @@ def test_single_energy_with_readback_jitter_is_one_energy():
     scan = np.concatenate([np.arange(60) * 0.06, np.arange(60) * 0.06]) + 570.0 + rng.uniform(0, 0.003, 120)
     _, _, points, _, _ = average_by_energy(frames, ["CP"] * 60 + ["CM"] * 60, scan, ("CP", "CM"))
     assert len(points) == 60
+
+
+def test_to_xas_from_drift_corrected_frames_without_stack_pairs(tmp_path):
+    """→ XAS needs no Stack Pairs: the frames (drift-corrected when 3. Drift was run on them) go to the XAS window,
+    regrouped by each frame's own energy. The CM scan sits 14 px from the CP scan (beyond the 6 px search):
+    Drift finds the scan offset (groups = scans) and matches the flake edges (energy scan: contrast changes)."""
+    rng = np.random.default_rng(2)
+    n = 64
+    yy, xx = np.mgrid[0:n, 0:n]
+    flake = (xx > 18) & (xx < 46) & (yy > 14) & (yy < 40)
+
+    def frames(f, dx, dy):
+        return np.stack([np.roll(np.where(flake, 1000 * e * (1 + f), 600.0), (dy, dx), (0, 1)) + rng.normal(0, 3, (n, n))
+                         for e in EDGE])
+
+    a = synthetic.write_ue49_scan(tmp_path, "Mono_S_0001", frames(0.02, 0, 0), [f"Cr_pos_{i:04d}" for i in range(26)], energy=E)
+    b = synthetic.write_ue49_scan(tmp_path, "Mono_S_0002", frames(-0.02, 14, -2), [f"Cr_neg_{i:04d}" for i in range(26)], energy=E)
+    s = PeemService()
+    s.load_beamline([a, b], "scan_frames", tpx3=False)
+    first = s.to_sum_rule("scan_frames")
+    assert first["source"] == "frames" and "not drift-corrected" in first["note"]
+    d = s.drift("scan_frames", 0, {"kind": "rect", "x0": 8, "y0": 6, "x1": 56, "y1": 50}, 6, source="raw",
+                smooth_px=2.0, per_channel=True, edges="auto")
+    assert d["edges"] and d["group_offsets"] == [{"group": "Mono_S_0002", "dx": -14, "dy": 2}]
+    sr = s.to_sum_rule("scan_frames")
+    assert sr["source"] == "frames, drift-corrected" and sr["energy_range_eV"] == [570.0, 595.0] and not sr.get("note")
+    sp = s.roi_spectra(sr["name"], {"kind": "rect", "x0": 22, "x1": 42, "y0": 18, "y1": 36})  # inside the flake
+    r = np.array(sp["dichroism"]) / np.array(sp["xas"])
+    assert np.mean(r) == pytest.approx(-0.04, abs=0.005)  # CM 2 % below CP on the flake, both scans aligned
+
+
+def test_one_polarization_goes_to_xas_without_a_partner(qapp, tmp_path, monkeypatch):
+    """CP frames only (no CM scan): → XAS hands over one CP image per energy; the XAS window shows the CP spectrum
+    and its background; XMCD and the sum rule say they need both polarizations."""
+    from PySide6.QtWidgets import QMessageBox
+    from tensorspec.gui.components.peem_sumrule_panel import PeemSumRulePanel
+
+    rng = np.random.default_rng(4)
+    a = synthetic.write_ue49_scan(tmp_path, "Mono_S_0001",
+                                  np.stack([np.full((16, 16), 1000 * e) + rng.normal(0, 5, (16, 16)) for e in EDGE]),
+                                  [f"Cr_pos_{i:04d}" for i in range(26)], energy=E)
+    s = PeemService()
+    s.load_beamline([a], "scan_cp", tpx3=False)
+    sr = s.to_sum_rule("scan_cp")
+    assert sr["channels"] == ["CP"] and sr["n_pairs"] == 26 and sr["energy_range_eV"] == [570.0, 595.0]
+    assert sr["note"].startswith("CP only")
+    sp = s.roi_spectra(sr["name"])
+    assert sp["channels"] == ["CP"] and sp["dichroism"] is None
+    assert np.allclose(np.array(sp["CP"]) / 1000, EDGE, atol=0.01)
+    assert s.channel_image(sr["name"]).shape == (16, 16)
+    assert len(s.bg_preview(sr["name"], node="raw", method="linear", e0=570.0, e1=573.0)["energy"]) == 26
+    with pytest.raises(ValueError, match="CP frames only"):
+        s.sumrule_preview(sr["name"], nh=3, l3_lo=574, l3_hi=582, l2_lo=582, l2_hi=592, r_lo=570, r_hi=595)
+    errors = []
+    monkeypatch.setattr(QMessageBox, "critical", staticmethod(lambda *a, **k: errors.append(a[2])))
+    panel = PeemSumRulePanel(service=s)
+    panel.select_dataset(sr["name"])
+    assert not errors, errors
+    assert [l.get_label() for l in panel.spec_ax.get_lines()] == ["CP"]
+    panel.close()

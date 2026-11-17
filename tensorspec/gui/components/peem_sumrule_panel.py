@@ -239,7 +239,8 @@ class PeemSumRulePanel(QWidget):
             if not str(child).endswith("_bg"):
                 self.bg_node.addItem(f"Processed / {child}", f"processed/{child}")
         n = int(meta.get("n_pairs") or meta.get("n_frames") or 0)
-        self.status_label.setText(f"'{name}': {n} {'energy' if n == 1 else 'energies'} (one {' / '.join(meta.get('channel_tags') or ['?'])} "
+        tags = meta.get("channel_tags") or sorted(set(meta.get("pol") or [])) or ["?"]
+        self.status_label.setText(f"'{name}': {n} {'energy' if n == 1 else 'energies'} (one {' / '.join(tags)} "
                                   f"image each)" + ("; a single photon energy: no spectrum to fit (see Spectra)" if n == 1 else ""))
         self._draw_image()
         self._show_spectra()
@@ -302,25 +303,31 @@ class PeemSumRulePanel(QWidget):
         ax = self.spec_ax
         ax.clear()
         e = sp["energy"]
-        ta, tb = sp["channels"]
+        ta, tb = (sp["channels"] + [None])[:2]  # one polarization only: tb None, no dichroism
         mk = "o" if len(e) < 30 else None  # few energies (or one): show the points
-        ax.plot(e, sp[ta], label=ta, color="#60a5fa", marker=mk)
-        ax.plot(e, sp[tb], label=tb, color="#f87171", marker=mk)
+        colour = {"CP": "#60a5fa", "LH": "#60a5fa", "CM": "#f87171", "LV": "#f87171"}
+        ax.plot(e, sp[ta], label=ta, color=colour.get(ta, "#60a5fa"), marker=mk)
+        if tb:
+            ax.plot(e, sp[tb], label=tb, color="#f87171", marker=mk)
         ax2 = ax.twinx() if not hasattr(self, "_spec_ax2") else self._spec_ax2
         self._spec_ax2 = ax2
         ax2.clear()
-        ax2.plot(e, sp["dichroism"], label=f"{tb} − {ta}", color="#a78bfa", marker=mk)
-        ax2.yaxis.tick_right()
-        ax2.yaxis.set_label_position("right")
-        ax2.set_ylabel(f"{tb} − {ta}")
+        ax2.set_visible(bool(tb))
+        if tb:
+            ax2.plot(e, sp["dichroism"], label=f"{tb} − {ta}", color="#a78bfa", marker=mk)
+            ax2.yaxis.tick_right()
+            ax2.yaxis.set_label_position("right")
+            ax2.set_ylabel(f"{tb} − {ta}")
+            ax2.legend(fontsize=7, loc="upper right")
         ax.set_xlabel("pair index" if sp["energy_source"] == "index" else "Energy")
         ax.set_ylabel("Intensity")
         ax.legend(fontsize=7, loc="upper left")
-        ax2.legend(fontsize=7, loc="upper right")
         ax.set_title(f"{'region' if self._roi else 'whole image'}: {sp['n_pixels']} px")
         if sp.get("note"):
             self.status_label.setText(sp["note"])
-        if len(e) == 1:  # one photon energy: values, not a spectrum
+        if len(e) == 1 and not tb:
+            ax.set_title(f"one photon energy ({float(e[0]):.2f} eV): {ta} {float(sp[ta][0]):.4g}", fontsize=9)
+        elif len(e) == 1:  # one photon energy: values, not a spectrum
             ax.set_title(f"one photon energy ({float(e[0]):.2f} eV): {ta} {float(sp[ta][0]):.4g}, {tb} {float(sp[tb][0]):.4g}, "
                          f"{tb} − {ta} {float(sp['dichroism'][0]):+.4g}", fontsize=9)
             self.status_label.setText("This acquisition is at a single photon energy: spectra, background and the sum "
