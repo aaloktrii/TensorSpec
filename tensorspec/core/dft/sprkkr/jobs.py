@@ -1,6 +1,6 @@
 """Launch SPR-KKR binaries: local (subprocess) or remote (paramiko ssh/sbatch).
 
-Zero Qt (sandy_rule.md layer 1). paramiko is imported lazily inside methods,
+Zero Qt (agent_rules.md layer 1). paramiko is imported lazily inside methods,
 never at module load, so this module imports fine on a machine without it.
 
 Binaries take the .inp file as an ARG, not stdin (design doc §0):
@@ -255,7 +255,7 @@ class RemoteLauncher:
     ``exec_command`` and ``open_sftp``) instead of a real paramiko
     connection. Default (None) connects for real via
     ``cluster_paths.ssh_connect`` -- paramiko is imported lazily here, not
-    at module load (sandy_rule.md).
+    at module load (agent_rules.md).
     """
 
     def __init__(self, cluster: Dict[str, Any], ssh_factory=None):

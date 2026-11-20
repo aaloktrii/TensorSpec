@@ -61,7 +61,7 @@ The Workspace Browser ribbon opens independent suites (Crystal, DFT, ARPES, PEEM
 * **GUI** (`tensorspec/gui/`): `main_browser.py`, suite wrappers, panels, `services/`, `ml/`
 * **Plotting** (`tensorspec/plotting/`): Matplotlib / PyVista backends
 
-Agent / modularity rules: `sandy_rule.md`. Checklist roadmap: `roadmap.md`.
+Agent / modularity rules: `agent_rules.md`. Checklist roadmap: `roadmap.md`.
 
 ## Privacy guard
 

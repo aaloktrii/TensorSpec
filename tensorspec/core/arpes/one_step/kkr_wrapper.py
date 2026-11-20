@@ -1,6 +1,6 @@
 """B3 engine wrapper: real Munich SPR-KKR one-step ARPES, via workflow.run_arpes.
 
-Zero Qt (sandy_rule.md layer 1). Router (arpes_engine.py) calls
+Zero Qt (agent_rules.md layer 1). Router (arpes_engine.py) calls
 ``KKRWrapper.run_simulation(crystal_data, experiment_kwargs)`` unchanged.
 
 ``experiment_kwargs`` unit convention for this engine (differs from B1

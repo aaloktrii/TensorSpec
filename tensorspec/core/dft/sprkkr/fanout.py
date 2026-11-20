@@ -1,6 +1,6 @@
 """Fan-out helpers: split one big ARPES job into many small ones.
 
-No Qt. No ase2sprkkr, no pymatgen imports (sandy_rule.md layer 1: core =
+No Qt. No ase2sprkkr, no pymatgen imports (agent_rules.md layer 1: core =
 math only). Pure dataclasses.replace() + numpy.
 
 Chunk math (energy fan-out)

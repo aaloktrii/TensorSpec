@@ -31,21 +31,21 @@ def test_reads_back_what_the_writer_wrote(tmp_path):
     assert back.metadata["matlab_variable"] == "data"
 
 
-def _sandy_struct():
+def _maestro_struct():
     return {"value": CUT, "x": K.reshape(1, -1), "y": E.reshape(1, -1),
             "info": {"Temperature": {"Sample": 13.06}, "Beamline": {"Eresolution": 0.005}},
             "para": {"k_step": 856.0, "latt_const": 3.14}}
 
 
-def test_sandy_struct_v7(tmp_path):
+def test_maestro_struct_v7(tmp_path):
     path = tmp_path / "cut.mat"
-    savemat(str(path), {"MAESTRO_00069_k_sp_cut": _sandy_struct(), "other_cut": _sandy_struct(),
+    savemat(str(path), {"MAESTRO_cut_k_sp_cut": _maestro_struct(), "other_cut": _maestro_struct(),
                         "note": "x"})
     with pytest.raises(ValueError):
         load_arpes_matlab(path)           # two structs: var is required
     with pytest.raises(KeyError):
         load_arpes_matlab(path, "missing")
-    back = load_arpes_matlab(path, "MAESTRO_00069_k_sp_cut")
+    back = load_arpes_matlab(path, "MAESTRO_cut_k_sp_cut")
     assert back.value.shape == (5, 7)
     assert back.labels == ["kx", "Energy"] and back.units == ["1/A", "eV"]
     np.testing.assert_allclose(back.axes[0], K)
@@ -54,21 +54,21 @@ def test_sandy_struct_v7(tmp_path):
     assert arpes_metadata_number(back.metadata, "info", "Beamline", "Eresolution") == 0.005
     assert arpes_metadata_number(back.metadata, "info", "Nope", default=-1) == -1
     # single struct in the file: var may be omitted
-    savemat(str(path), {"only": _sandy_struct()})
+    savemat(str(path), {"only": _maestro_struct()})
     assert load_arpes_matlab(path).value.shape == (5, 7)
 
 
 def test_angle_cut_is_labelled_as_slit_angle(tmp_path):
-    struct = _sandy_struct()
+    struct = _maestro_struct()
     struct["x"] = np.linspace(-15, 15, 5).reshape(1, -1)
     struct.pop("para")
     path = tmp_path / "angle.mat"
-    savemat(str(path), {"MAESTRO_00069": struct})
+    savemat(str(path), {"MAESTRO_cut": struct})
     back = load_arpes_matlab(path)
     assert back.labels[0] == "Slit Angle" and back.units[0] == "deg"
 
 
-def test_sandy_struct_v73(tmp_path):
+def test_maestro_struct_v73(tmp_path):
     h5py = pytest.importorskip("h5py")
     path = tmp_path / "cut73.mat"
     with h5py.File(path, "w", userblock_size=512) as f:

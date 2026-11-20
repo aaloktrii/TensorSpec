@@ -1,4 +1,4 @@
-"""Guards for the Raman suite layering (sandy_rule rule 5): core has no Qt and no plotting,
+"""Guards for the Raman suite layering (agent_rules rule 5): core has no Qt and no plotting,
 plotting has no Qt."""
 from __future__ import annotations
 

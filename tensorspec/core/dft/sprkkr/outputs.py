@@ -1,7 +1,7 @@
 """
 Parsers for real Munich SPR-KKR 9.7 output files (`.spc` ARPES data, SCF log).
 
-Pure numpy/xarray/re. Zero Qt (sandy_rule.md layer 1: core/ = math only).
+Pure numpy/xarray/re. Zero Qt (agent_rules.md layer 1: core/ = math only).
 
 Row-order fact (verified 2026-09-09 with a real NP=2 kkrspec9.7 run,
 `tests/sprkkr/fixtures/_Cu_NP2_ARPES_data.spc`):

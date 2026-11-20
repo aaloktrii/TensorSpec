@@ -1,4 +1,4 @@
-"""SPR-KKR core subpackage. Zero Qt (sandy_rule.md layer split).
+"""SPR-KKR core subpackage. Zero Qt (agent_rules.md layer split).
 
 Runs the real Munich SPR-KKR 9.7 binaries (kkrscf / kkrspec) from TensorSpec.
 Spec: docs/superpowers/specs/2026-09-08-sprkkr-in-gui-design.md

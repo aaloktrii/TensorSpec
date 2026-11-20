@@ -1,7 +1,7 @@
 """Orchestration: structure -> SCF -> converged pot -> ARPES -> tensor/tree.
 
 Pure glue over jobs.py / fanout.py / inputs.py / outputs.py / progress.py.
-Zero Qt (sandy_rule.md layer 1). No GUI imports here -- panels call into
+Zero Qt (agent_rules.md layer 1). No GUI imports here -- panels call into
 this module, never the reverse.
 
 `launcher` is either a `jobs.LocalLauncher` (has `.bin_dir`) or a
