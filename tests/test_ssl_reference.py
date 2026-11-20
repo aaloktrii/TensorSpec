@@ -38,7 +38,7 @@ def test_save_load_roundtrip(tmp_path: Path):
         coords={0: 0, 1: 0, 2: 3, 3: 2},
         halfwidths={0: 0, 1: 0, 2: 1, 3: 1},
         reduce_mode="sum",
-        source_id="synthetic_00737.h5",
+        source_id="synthetic_4d.h5",
         display_y_label="Y",
         display_x_label="X",
         saved_utc="2026-09-07T00:00:00Z",
@@ -50,7 +50,7 @@ def test_save_load_roundtrip(tmp_path: Path):
     )
     loaded = load_floor_reference(path)
     np.testing.assert_array_equal(loaded.map, m)
-    assert loaded.roi["source_id"] == "synthetic_00737.h5"
+    assert loaded.roi["source_id"] == "synthetic_4d.h5"
     assert loaded.roi["dims"][0]["label"] == "Energy" or any(
         d["label"] == "Energy" for d in loaded.roi["dims"]
     )

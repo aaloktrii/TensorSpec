@@ -33,14 +33,14 @@ def test_build_floor_reference_integrates_yx(qapp):
     ref = panel.build_floor_reference(
         y_label="Y",
         x_label="X",
-        source_id="synthetic_00737.h5",
+        source_id="synthetic_4d.h5",
         reduce_mode="sum",
     )
 
     expect = td.value[:, :, 2:5, 1:4].sum(axis=(2, 3))
     assert ref.map.shape == (4, 5)
     np.testing.assert_allclose(ref.map, expect, rtol=1e-5)
-    assert ref.roi["source_id"] == "synthetic_00737.h5"
+    assert ref.roi["source_id"] == "synthetic_4d.h5"
     assert ref.roi["reduce_mode"] == "sum"
     assert ref.roi["display_labels"] == ["Y", "X"]
     assert ref.y_axis is not None and ref.x_axis is not None
@@ -58,7 +58,7 @@ def test_build_floor_reference_keeps_slit_defl_axis(qapp):
         labels=["Y", "X", "Slit Defl.", "Energy", "Angle"],
         units=["mm", "mm", "deg", "eV", "deg"],
         data_type="ARPES",
-        metadata={"source_path": "/tmp/20260630_00742.h5"},
+        metadata={"source_path": "/tmp/synthetic_5d.h5"},
     )
     panel = DataViewerPanel()
     panel.tensor_data = td
@@ -68,7 +68,7 @@ def test_build_floor_reference_keeps_slit_defl_axis(qapp):
     ref = panel.build_floor_reference(
         y_label="Y",
         x_label="X",
-        source_id="20260630_00742.h5",
+        source_id="synthetic_5d.h5",
         reduce_mode="sum",
     )
     expect = td.value[:, :, 1:4, 3:4, 1:2].sum(axis=(2, 3, 4))

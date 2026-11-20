@@ -1,16 +1,20 @@
 """Optional live-mount smoke via ``TENSORSPEC_MAESTRO_SMOKE_DIR``.
 
-Set the env var to a directory containing Maestro H5 files. Tests discover
-files by basename glob (for example ``*_00742.h5``) and call
-:func:`open_maestro` for plan/kind metadata only — no full tensor load.
-Skipped when the env var is unset or no matching file is present.
+Set the env var to a directory containing Maestro H5 files plus a
+``smoke_cases.json`` listing what to check::
 
-Synthetic fixtures cover ``00567``-class two-motor line scans; live smoke
-only verifies lazy open when a matching file exists on the mount.
+    [{"glob": "*_01234.h5", "kind": "xy_fine_4d", "ndim": 4, "labels": ["Y", "X"]}]
+
+Each case is discovered by basename glob and opened with :func:`open_maestro`
+for plan/kind metadata only -- no full tensor load. Skipped when the env var
+is unset, the JSON is missing, or no matching file is present. Synthetic
+fixtures elsewhere cover the two-motor line-scan kinds; live smoke only
+verifies lazy open against the user's own mount.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -22,18 +26,28 @@ os.environ.setdefault("HDF5_USE_FILE_LOCKING", "FALSE")
 
 _SMOKE_DIR = os.environ.get("TENSORSPEC_MAESTRO_SMOKE_DIR")
 
-# (basename glob, expected kind, ndim, leading labels)
-_SMOKE_CASES: list[tuple[str, str, int, list[str]]] = [
-    ("*_00742.h5", "focus_xy_fine_5d", 5, ["Y", "X"]),
-    ("*_00736.h5", "xy_fine_4d", 4, ["Y", "X"]),
-    ("*_00737.h5", "xy_fine_4d", 4, ["Y", "X"]),
-    ("*_00562.h5", "xy_fine_4d", 4, ["Y", "X"]),
-    ("*_00563.h5", "xy_fine_4d", 4, ["Y", "X"]),
-    ("*_00567.h5", "defl_x_line_4d", 4, ["X", "Slit Defl."]),
-]
+def _load_smoke_cases() -> list[tuple[str, str, int, list[str]]]:
+    """(basename glob, expected kind, ndim, leading labels) from smoke_cases.json."""
+    if not _SMOKE_DIR:
+        return []
+    spec = Path(_SMOKE_DIR) / "smoke_cases.json"
+    if not spec.is_file():
+        return []
+    try:
+        cases = json.loads(spec.read_text())
+    except (OSError, ValueError):
+        return []
+    return [
+        (str(c["glob"]), str(c["kind"]), int(c["ndim"]), list(c["labels"]))
+        for c in cases
+    ]
+
+
+_SMOKE_CASES = _load_smoke_cases() or [("*.h5", "", 0, [])]
 
 _SKIP_REASON = (
     "Set TENSORSPEC_MAESTRO_SMOKE_DIR to a folder with Maestro H5 files"
+    " and a smoke_cases.json"
 )
 
 
@@ -56,7 +70,7 @@ pytestmark = pytest.mark.integration
     ids=[pat.replace("*", "").replace(".h5", "") for pat, *_ in _SMOKE_CASES],
 )
 def test_live_open_maestro_smoke(pattern, expected_kind, ndim, label_prefix):
-    path = _find_smoke_file(pattern)
+    path = _find_smoke_file(pattern) if expected_kind else None
     if path is None:
         pytest.skip(_SKIP_REASON)
 

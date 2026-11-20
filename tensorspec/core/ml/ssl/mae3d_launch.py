@@ -8,7 +8,7 @@ from tensorspec.core.ml.ssl.mae3d import train_mae3d
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the 00742 3D MAE")
+    parser = argparse.ArgumentParser(description="Train the 3D MAE")
     parser.add_argument("--data", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--init", required=True)
